@@ -140,7 +140,7 @@ async def get_expiries(symbol: str):
 
     try:
 
-        registry = instrument_registry
+        registry = get_instrument_registry()
 
         if not registry:
             return []
