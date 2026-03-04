@@ -112,10 +112,20 @@ AI-powered options market intelligence platform for Indian markets (NIFTY & BANK
 - **Testing**: Full test coverage for critical components
 - **Documentation**: Updated architecture and deployment guides
 
-### Upstox Integration Roadmap
-- **Current**: Basic REST API with OAuth 2.0
-- **In Progress**: V3 protobuf WebSocket feed integration
-- **Planned**: Binary data parsing and streaming upgrades for real-time market data
+### Market Status System
+- **Real-time Market Status**: API-driven market status based on actual WebSocket activity
+- **Single Source of Truth**: Backend API `/api/v1/market/status` determines market state
+- **No Manual Time Logic**: Eliminated hardcoded market hour calculations
+- **Automatic Updates**: Frontend polls every 30 seconds for live status
+- **WebSocket Activity**: Status derived from real market tick reception
+
+### Upstox V3 WebSocket Integration
+- **Binary Protobuf Feed**: Real-time market data via Upstox V3 WebSocket
+- **Instrument Subscriptions**: NIFTY 50, NIFTY BANK, and high-frequency equity (INFY)
+- **Comprehensive Logging**: Full observability at every WebSocket stage
+- **Control Frame Detection**: JSON control message handling and logging
+- **Packet Processing**: Size-agnostic protobuf decoding for all market data
+- **Async Queue Management**: Proper asyncio.Queue implementation for real-time processing
 
 ## Architecture
 
@@ -285,9 +295,11 @@ StrikeIQ requires authentication with Upstox to access live market data.
    Open http://localhost:3000 in your browser to view the market data dashboard.
 
 ### Market Status
-- **Live Data**: Available during trading hours (9:15 AM - 3:30 PM IST, Monday-Friday)
-- **Market Closed**: Shows appropriate banner when market is closed
-- **Data Unavailable**: Shows error message if API fails during market hours
+- **API-Driven Status**: Market status determined by WebSocket activity, not hardcoded times
+- **Real-time Updates**: Frontend polls `/api/v1/market/status` every 30 seconds
+- **Activity-Based**: Status = "OPEN" when receiving market ticks, "CLOSED" when no activity
+- **Navbar Display**: Shows "Market Live" or "Market Closed" based on actual market data
+- **Debug Logging**: Console logs show API responses and backend request tracking
 
 ## Quick Start
 
@@ -393,7 +405,9 @@ npm run test:coverage           # Run with coverage
 3. **Live Data Not Working**
    - Verify Upstox API credentials are correct
    - Check if access token is expired (re-authenticate if needed)
-   - Ensure market is open (9:15 AM - 3:30 PM IST)
+   - Verify WebSocket connection logs for subscription acceptance
+   - Check instrument keys: "NSE_INDEX|NIFTY 50", "NSE_INDEX|NIFTY BANK", "NSE_EQ|INE009A01021"
+   - Look for market data packets (size > 200 bytes) vs heartbeat packets (size < 200 bytes)
 
 4. **Frontend Build Errors**
    - Check TypeScript types in `types/market.ts`
@@ -410,8 +424,9 @@ npm run test:coverage           # Run with coverage
 ### Performance Analysis
 - **Frontend**: Uses React 18 features, optimization patterns implemented
 - **Backend**: Mixed asyncio/threading patterns, potential blocking calls identified
-- **WebSockets**: Basic implementation, being upgraded to Upstox V3 protobuf
+- **WebSockets**: Upstox V3 protobuf integration with comprehensive logging and async queue management
 - **Database**: PostgreSQL with SQLAlchemy ORM, connection pooling enabled
+- **Market Status**: Real-time API-driven status based on WebSocket activity, no hardcoded time logic
 
 ### Security Status
 - **OAuth 2.0**: Production-grade implementation with A+ security score (98/100)
@@ -462,8 +477,9 @@ This starts:
 - `GET /api/dashboard/{symbol}` - Get market data for symbol
 - `GET /api/v1/auth/upstox` - OAuth login URL
 - `GET /api/v1/auth/upstox/callback` - OAuth callback
+- `GET /api/v1/market/status` - Real-time market status (WebSocket activity-based)
 
-### System Monitoring Endpoints (NEW)
+### System Monitoring Endpoints
 - `GET /system/ws-status` - WebSocket connection status and health metrics
 - `GET /system/ai-status` - AI scheduler status and market state
 - `GET /health` - Application health check

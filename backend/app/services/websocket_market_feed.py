@@ -173,7 +173,8 @@ class WebSocketMarketFeed:
         self.is_connected = True
         
         logger.info("🟢 UPSTOX WS CONNECTED")
-        logger.info("WS STATE → CONNECTED")
+        logger.info("WS HANDSHAKE COMPLETE — STABILIZING CONNECTION")
+        await asyncio.sleep(1)
         logger.info("READY TO SEND SUBSCRIPTION")
         
         await self.subscribe_indices()
@@ -265,7 +266,7 @@ class WebSocketMarketFeed:
             await self.websocket.send(json.dumps(payload))
 
             # STEP 1: Confirm subscription sent
-            logger.info("SUBSCRIPTION MESSAGE SENT TO UPSTOX")
+            logger.info("SUBSCRIPTION MESSAGE SENT TO UPSTOX — WAITING FOR DATA")
 
             logger.info("📡 MINIMAL INDICES SUBSCRIPTION SENT")
 
@@ -342,7 +343,12 @@ class WebSocketMarketFeed:
                     continue
 
                 packet_size = len(raw)
-                logger.info(f"RAW PACKET SIZE = {packet_size}")
+                
+                # STEP 3: Improve packet diagnostics based on size
+                if packet_size < 200:
+                    logger.debug(f"HEARTBEAT PACKET SIZE={packet_size}")
+                else:
+                    logger.info(f"MARKET DATA PACKET SIZE={packet_size}")
 
                 # STEP 3: Always attempt protobuf decode
                 logger.info("DECODING PROTOBUF MESSAGE")
