@@ -254,6 +254,24 @@ async def log_requests(request: Request, call_next):
     return response
 
 
+# ================= MARKET STATUS =================
+
+@app.get("/api/v1/market/status")
+async def market_status():
+    """
+    Return current market status.
+    For now derive from last market tick activity.
+    """
+    from app.services.websocket_market_feed import ws_feed_manager
+    
+    logger.info("MARKET STATUS REQUESTED")
+    
+    if ws_feed_manager.feed and hasattr(ws_feed_manager.feed, 'last_tick_timestamp') and ws_feed_manager.feed.last_tick_timestamp:
+        return {"status": "OPEN"}
+    
+    return {"status": "CLOSED"}
+
+
 # ================= HEALTH =================
 
 @app.get("/health")

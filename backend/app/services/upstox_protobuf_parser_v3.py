@@ -106,7 +106,7 @@ def decode_protobuf_message(message):
 
         # Detect heartbeat packets (STEP 6)
         if (hasattr(decoded, 'type') and decoded.type == 2) or (len(decoded.feeds) == 0 and len(message) < 200):
-            logger.info(" HEARTBEAT PACKET DETECTED - SKIPPING")
+            logger.debug("Heartbeat packet")
             return []
 
         ticks = []
@@ -186,6 +186,7 @@ def decode_protobuf_message(message):
 
             # Only add if valid LTP
             if tick["ltp"] > 0:
+                logger.info(f"TICK RECEIVED → {instrument_key} : {tick['ltp']}")
                 ticks.append(tick)
                 logger.info(f"🎯 VALID TICK ADDED: {instrument_key} = {tick['ltp']}")
             else:

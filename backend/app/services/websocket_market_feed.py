@@ -87,6 +87,7 @@ class WebSocketMarketFeed:
         self._subscription_sent = False
 
         self._message_queue = asyncio.Queue()
+        self.last_tick_timestamp = None
 
         self._recv_task: Optional[asyncio.Task] = None
         self._process_task: Optional[asyncio.Task] = None
@@ -251,11 +252,20 @@ class WebSocketMarketFeed:
             logger.info(json.dumps(payload, indent=2))
             logger.info(f"UPSTOX SUBSCRIPTION PAYLOAD={len(instrument_keys)} instruments")
 
+            # STEP 1: Confirm subscription details
+            logger.info(f"SUBSCRIBE MODE: {payload['data']['mode']}")
+            logger.info(f"INSTRUMENT COUNT: {len(payload['data']['instrumentKeys'])}")
+            for key in payload["data"]["instrumentKeys"]:
+                logger.info(f"SUBSCRIBING → {key}")
+
             if self.websocket is None:
                 logger.error("WebSocket not initialized")
                 return
 
             await self.websocket.send(json.dumps(payload))
+
+            # STEP 1: Confirm subscription sent
+            logger.info("SUBSCRIPTION MESSAGE SENT TO UPSTOX")
 
             logger.info("📡 MINIMAL INDICES SUBSCRIPTION SENT")
 
@@ -301,12 +311,14 @@ class WebSocketMarketFeed:
                     continue
 
                 raw = await self.websocket.recv()
+                
+                # STEP 3: Improve WebSocket frame diagnostics
                 logger.info("WS FRAME RECEIVED")
 
                 if not raw:
                     continue
 
-                # STEP 2: Add control message detection
+                # STEP 4: Detect JSON control frames
                 if isinstance(raw, str):
                     logger.info(f"WS CONTROL MESSAGE: {raw}")
                     try:
@@ -316,8 +328,8 @@ class WebSocketMarketFeed:
                         if "type" in msg:
                             logger.info(f"WS CONTROL TYPE: {msg['type']}")
 
-                        if "market_status" in msg:
-                            logger.info(f"MARKET STATUS: {msg['market_status']}")
+                        if "data" in msg:
+                            logger.info(f"CONTROL DATA: {msg['data']}")
 
                     except Exception as e:
                         logger.warning(f"CONTROL MESSAGE PARSE ERROR: {e}")
@@ -332,25 +344,17 @@ class WebSocketMarketFeed:
                 packet_size = len(raw)
                 logger.info(f"RAW PACKET SIZE = {packet_size}")
 
-                # STEP 4: Keep packet logging
-                if packet_size < 200:
-                    logger.info(f"HEARTBEAT PACKET SIZE={packet_size}")
-                    continue
-
-                # STEP 8: Market Packet Detection
-                logger.info(f"MARKET DATA PACKET SIZE={packet_size}")
-
+                # STEP 3: Always attempt protobuf decode
+                logger.info("DECODING PROTOBUF MESSAGE")
                 ticks = decode_protobuf_message(raw)
+
+                if not ticks:
+                    logger.debug("No ticks in packet")
 
                 if ticks:
                     logger.info(f"PUSHING {len(ticks)} TICKS INTO QUEUE")
+                    self.last_tick_timestamp = datetime.now()
                     await self._message_queue.put(ticks)
-
-                else:
-                    try:
-                        data = json.loads(raw)
-                    except Exception:
-                        logger.debug("Non protobuf message ignored")
 
             except Exception as e:
 

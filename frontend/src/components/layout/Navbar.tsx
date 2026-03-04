@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Wifi, WifiOff, Heart, BarChart2, Link2, Activity, Bell } from "lucide-react";
 import { useMarketStore } from "@/stores/marketStore";
 import { uiLogger, traceManager } from "../../utils/logger";
@@ -43,22 +43,52 @@ function scrollToSection(sectionId: string) {
 
 export default function Navbar() {
   const connected = useMarketStore((s) => s.connected);
-  const marketOpen = useMarketStore((s) => s.marketOpen);
 
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
+  const [marketStatus, setMarketStatus] = useState<"OPEN" | "CLOSED" | "UNKNOWN">("UNKNOWN");
+
+  // Fetch market status on component mount
+  useEffect(() => {
+    const fetchMarketStatus = async () => {
+      try {
+        console.log("Fetching market status...");
+        const response = await fetch("http://localhost:8000/api/v1/market/status");
+        const data = await response.json();
+        console.log("Market status response:", data);
+        
+        if (data.status === "OPEN") {
+          setMarketStatus("OPEN");
+        } else if (data.status === "CLOSED") {
+          setMarketStatus("CLOSED");
+        } else {
+          setMarketStatus("UNKNOWN");
+        }
+      } catch (error) {
+        console.error("Failed to fetch market status:", error);
+        setMarketStatus("UNKNOWN");
+      }
+    };
+
+    fetchMarketStatus();
+    
+    // Refresh market status every 30 seconds
+    const interval = setInterval(fetchMarketStatus, 30000);
+    
+    return () => clearInterval(interval);
+  }, []);
 
   // Log when component reads store state
   const traceId = traceManager.getTraceId();
-  uiLogger.info("UI MARKET STATUS RENDER", { traceId, connected, marketOpen });
+  uiLogger.info("UI MARKET STATUS RENDER", { traceId, connected, marketStatus });
 
-  // Market status display logic - NO API calls, only store state
+  // Market status display logic - using API data
   let marketStatusText = "Checking Market...";
   let marketColor = "bg-gray-500";
 
-  if (marketOpen === true) {
-    marketStatusText = "Market Open";
+  if (marketStatus === "OPEN") {
+    marketStatusText = "Market Live";
     marketColor = "bg-green-500";
-  } else if (marketOpen === false) {
+  } else if (marketStatus === "CLOSED") {
     marketStatusText = "Market Closed";
     marketColor = "bg-red-500";
   }
@@ -123,34 +153,34 @@ export default function Navbar() {
             {/* Status */}
             <div className="flex items-center gap-3">
 
-              {/* Market - NO API calls, only store state */}
+              {/* Market - using API data */}
               <div 
                 className="px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1"
                 style={{
-                  background: marketOpen === true 
+                  background: marketStatus === "OPEN" 
                     ? 'rgba(34,197,94,0.12)' 
-                    : marketOpen === false
+                    : marketStatus === "CLOSED"
                     ? 'rgba(255,70,70,0.12)'
                     : 'rgba(156,163,175,0.12)',
-                  color: marketOpen === true 
+                  color: marketStatus === "OPEN" 
                     ? '#4ade80' 
-                    : marketOpen === false
+                    : marketStatus === "CLOSED"
                     ? '#ff6b6b'
                     : '#9ca3af',
-                  border: marketOpen === true 
+                  border: marketStatus === "OPEN" 
                     ? '1px solid rgba(34,197,94,0.35)' 
-                    : marketOpen === false
+                    : marketStatus === "CLOSED"
                     ? '1px solid rgba(255,70,70,0.35)'
                     : '1px solid rgba(156,163,175,0.35)',
                   borderRadius: '8px',
                   padding: '4px 10px'
                 }}
               >
-                {marketOpen === true ? (
+                {marketStatus === "OPEN" ? (
                   <>
                     <Wifi size={12} /> OPEN
                   </>
-                ) : marketOpen === false ? (
+                ) : marketStatus === "CLOSED" ? (
                   <>
                     <WifiOff size={12} /> CLOSED
                   </>
