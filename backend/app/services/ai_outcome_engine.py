@@ -8,12 +8,18 @@ Responsibilities:
 - Update prediction_log with outcome
 """
 import logging
+import asyncio
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from ai.ai_db import ai_db
 from ai.prediction_service import prediction_service
 
 logger = logging.getLogger(__name__)
+
+prediction_lock = asyncio.Lock()
+resolved_predictions = set()
+last_ai_run = 0
 
 class AIOutcomeEngine:
     def __init__(self):
@@ -33,6 +39,7 @@ class AIOutcomeEngine:
                 AND p.prediction_time <= NOW() - INTERVAL %s
                 AND p.signal IN ('BUY', 'SELL')
                 ORDER BY p.prediction_time ASC
+                LIMIT 100
             """
             
             params = (f"{self.outcome_threshold_minutes} minutes",)
@@ -163,7 +170,7 @@ class AIOutcomeEngine:
                 outcome = self.determine_outcome_from_pnl(prediction['pnl'])
                 method = "PAPER_TRADE_PNL"
                 confidence = 0.9  # High confidence with actual trade results
-                logger.info(f"Outcome determined by PnL: {outcome} (PnL: {prediction['pnl']:.2f})")
+                logger.debug(f"Outcome determined by PnL: {outcome} (PnL: {prediction['pnl']:.2f})")
                 return outcome, confidence, method
             
             # Method 2: Use market price movement
@@ -176,7 +183,7 @@ class AIOutcomeEngine:
             method = "PRICE_MOVEMENT"
             confidence = 0.7  # Lower confidence without actual trades
             
-            logger.info(f"Outcome determined by price movement: {outcome} (movement: {price_movement:.2f}%)")
+            logger.debug(f"Outcome determined by price movement: {outcome} (movement: {price_movement:.2f}%)")
             return outcome, confidence, method
             
         except Exception as e:
@@ -219,57 +226,74 @@ class AIOutcomeEngine:
             logger.error(f"Error storing outcome: {e}")
             return False
     
-    def update_prediction_outcome(self, prediction_id: int, outcome: str) -> bool:
-        """
-        Update prediction_log with outcome information
-        
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            success = self.prediction_service.mark_prediction_checked(prediction_id, outcome)
-            
-            if success:
-                logger.info(f"Prediction {prediction_id} updated with outcome: {outcome}")
-                return True
-            else:
-                logger.error(f"Failed to update prediction {prediction_id} with outcome")
-                return False
+    async def update_prediction_outcome(self, prediction_id: int, outcome: str):
+
+        async with prediction_lock:
+
+            try:
+
+                query = """
+                    UPDATE prediction_log 
+                    SET outcome = %s, outcome_time = NOW(), outcome_checked = TRUE
+                    WHERE id = %s AND outcome IS NULL
+                """
                 
-        except Exception as e:
-            logger.error(f"Error updating prediction outcome: {e}")
-            return False
+                result = self.db.execute_query(query, (outcome, prediction_id))
+                
+                if result:
+                    logger.info(f"Outcome stored: Prediction {prediction_id} → {outcome}")
+                else:
+                    logger.warning(f"Prediction {prediction_id} already resolved or not found")
+
+            except Exception as e:
+
+                logger.error(
+                    f"Failed to update prediction {prediction_id}: {e}"
+                )
     
-    def evaluate_pending_outcomes(self) -> int:
+    async def evaluate_pending_outcomes(self) -> int:
         """
         Evaluate all pending prediction outcomes
         
         Returns:
             Number of outcomes evaluated
         """
+        global last_ai_run
+        
+        now = time.time()
+        
+        if now - last_ai_run < 5:
+            return 0
+            
+        last_ai_run = now
+        
         try:
             predictions = self.get_pending_outcome_predictions()
             outcomes_evaluated = 0
             
             for prediction in predictions:
+                prediction_id = prediction['id']
+                
+                if prediction_id in resolved_predictions:
+                    continue
+                
                 # Evaluate outcome
                 outcome, confidence, method = self.evaluate_prediction_outcome(prediction)
                 
                 # Store outcome
                 if self.store_outcome(prediction, outcome, confidence, method):
                     # Update prediction
-                    if self.update_prediction_outcome(prediction['id'], outcome):
-                        outcomes_evaluated += 1
-                        
-                        # Log AI event
-                        self.log_ai_event(
-                            event_type="OUTCOME_EVALUATED",
-                            description=f"Prediction {prediction['id']} outcome: {outcome} (method: {method}, confidence: {confidence:.2f})"
-                        )
-                    else:
-                        logger.error(f"Failed to update prediction {prediction['id']} with outcome")
+                    await self.update_prediction_outcome(prediction_id, outcome)
+                    outcomes_evaluated += 1
+                    resolved_predictions.add(prediction_id)
+                    
+                    # Log AI event
+                    self.log_ai_event(
+                        event_type="OUTCOME_EVALUATED",
+                        description=f"Prediction {prediction_id} outcome: {outcome} (method: {method}, confidence: {confidence:.2f})"
+                    )
                 else:
-                    logger.error(f"Failed to store outcome for prediction {prediction['id']}")
+                    logger.error(f"Failed to update prediction {prediction_id} with outcome")
             
             logger.info(f"Outcome evaluation completed. Evaluated {outcomes_evaluated} outcomes")
             return outcomes_evaluated

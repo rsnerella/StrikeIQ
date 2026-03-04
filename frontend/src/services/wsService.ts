@@ -14,6 +14,15 @@ const WS_URL = "ws://localhost:8000/ws/market"
 export function connectMarketWS() {
 
   if (
+    socket &&
+    (socket.readyState === WebSocket.OPEN ||
+     socket.readyState === WebSocket.CONNECTING)
+  ) {
+    console.log("🔒 WebSocket already active")
+    return socket
+  }
+
+  if (
     (window as any).__strikeiq_ws &&
     (window as any).__strikeiq_ws.readyState === WebSocket.OPEN
   ) {
@@ -94,27 +103,50 @@ export function connectMarketWS() {
 
   socket.onmessage = (event) => {
 
-  let data
+let data
 
-  try {
-    data = JSON.parse(event.data)
-  } catch {
-    return
-  }
+try {
 
-  const store = useWSStore.getState()
+  data =
+    typeof event.data === "string"
+      ? JSON.parse(event.data)
+      : event.data
 
-  if (data.type === "market_status") {
-    const marketStore = useMarketStore.getState()
-    
-    marketStore.updateMarketData({
-        connected: true,
-        marketOpen: data.market_open,
-        lastUpdate: new Date().toISOString()
-    })
-    
-    return
-  }
+} catch (e) {
+
+  console.error("Invalid WS message", e)
+
+  return
+}
+
+if (!data || !data.type) return
+
+const store = useWSStore.getState()
+
+// FIX 4: Add frontend spot handler
+if (data.type === "spot_tick") {
+
+const store = useWSStore.getState()
+
+store.setMarketData({
+symbol: data.symbol,
+spot: data.spot
+})
+
+console.log("📈 NIFTY SPOT UPDATE:", data.spot)
+
+return
+}
+
+if (data.type === "market_status") {
+
+   const status = data.status ?? "closed"
+
+   store.setConnected(true)
+   store.setMarketOpen(status === "open")
+
+   return
+ }
 
   if (data.type === "market_data") {
     console.log("📡 WS MARKET DATA RECEIVED")

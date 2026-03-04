@@ -1,6 +1,7 @@
 import logging
 import asyncio
 import os
+from dotenv import load_dotenv
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -17,6 +18,9 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+# Load environment variables from .env file
+load_dotenv()
 
 # ================= AI + SCHEDULER LOGGING CONFIG =================
 
@@ -78,6 +82,17 @@ from app.api.v1.ws.live_options import router as ui_ws_router
 
 _ws_start_lock = asyncio.Lock()
 
+async def start_market_feed():
+    """Start Upstox Market Feed with current token"""
+    try:
+        feed = await ws_feed_manager.start_feed()
+        if feed and feed.is_connected:
+            logger.info("🟢 Upstox Market Feed Started")
+        else:
+            logger.info("📡 Market feed supervisor started")
+    except Exception as e:
+        logger.error(f"Market feed startup failed: {e}")
+
 
 # ================= LIFESPAN =================
 
@@ -110,28 +125,18 @@ async def lifespan(app: FastAPI):
         from app.services.token_manager import token_manager
         
         # Check if we have a token first
-        token = await token_manager.get_token()
-        
+        token = await token_manager.ensure_token()
+
         if token:
-            # Verify token with Upstox API
-            valid = await token_manager.verify_token(token)
-            
-            if not valid:
-                logger.warning("❌ UPSTOX TOKEN INVALID")
-                await token_manager.delete_token()
-                token = None
-            else:
-                logger.info("✅ Valid Upstox token available")
-                
-                # Start market feed with valid token
-                feed = await ws_feed_manager.start_feed()
-                if feed and feed.is_connected:
-                    logger.info("🟢 Upstox Market Feed Started")
-                else:
-                    logger.info("📡 Market feed supervisor started")
+
+            logger.info("Starting Upstox market feed")
+
+            await start_market_feed()
+
         else:
-            logger.info("⚠️ No Upstox token found")
-            
+
+            logger.warning("Market feed disabled because token missing")
+                
     except Exception as token_error:
         logger.warning(f"⚠️ Upstox token validation error: {token_error}")
         logger.info("Market feed running in REST-only mode")

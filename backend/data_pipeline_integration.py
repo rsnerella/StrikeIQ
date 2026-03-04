@@ -11,6 +11,7 @@ from protobuf_decoder import decode_protobuf_data
 from market_aggregator import process_market_data
 from websocket_manager import manager
 from market_status_service import market_status_service
+import os
 
 class DataPipeline:
     def __init__(self):
@@ -26,6 +27,13 @@ class DataPipeline:
         
         # Start market status monitoring
         asyncio.create_task(market_status_service.start_monitoring())
+        
+        # Check for Upstox token
+        access_token = os.getenv("UPSTOX_ACCESS_TOKEN")
+        
+        if not access_token:
+            print("❌ UPSTOX_ACCESS_TOKEN missing — market data disabled")
+            return
         
         # Start Upstox WebSocket client
         upstox_client = await get_upstox_client()

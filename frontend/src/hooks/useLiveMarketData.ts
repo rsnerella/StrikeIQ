@@ -42,11 +42,12 @@ export function useLiveMarketData(symbol: string, expiry: string | null) {
   // Throttled update function
   const throttledSetData = useRef(
     throttle((transformedData: LiveMarketData) => {
+      const safeSpot = Number(transformedData.spot) || 0
+      console.log("📊 UI RENDER: spot=", safeSpot, "symbol=", transformedData.symbol)
       setData(transformedData)
       setMode("live")
       setLoading(false)
       setError(null)
-      console.log("📊 UI RENDER: spot=", transformedData.spot, "symbol=", transformedData.symbol)
     }, 100)
   ).current
 

@@ -1,118 +1,78 @@
 from fastapi import WebSocket
-from typing import Dict, Set
+from starlette.websockets import WebSocketDisconnect
 import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
 
+# Global broadcast lock
+broadcast_lock = asyncio.Lock()
 
-class WSConnectionManager:
+class WSManager:
 
     def __init__(self):
 
-        # channel → websocket connections
-        self.active_connections: Dict[str, Set[WebSocket]] = {}
+        # Use set to prevent duplicates and allow O(1) operations
+        self.connections: set[WebSocket] = set()
 
-        # prevent race conditions
+        # Lock prevents race conditions during connect/disconnect
         self._lock = asyncio.Lock()
-
-    # ================= CONNECT =================
-
-    async def connect(self, key: str, websocket: WebSocket):
-
-        async with self._lock:
-
-            if key not in self.active_connections:
-                self.active_connections[key] = set()
-
-            self.active_connections[key].add(websocket)
-
-            logger.info(
-                f"🟢 WebSocket client connected → {key} → {len(self.active_connections[key])} clients"
-            )
-
-    # ================= DISCONNECT =================
-
-    async def disconnect(self, key: str, websocket: WebSocket):
-
-        async with self._lock:
-
-            if key not in self.active_connections:
-                return
-
-            self.active_connections[key].discard(websocket)
-
-            remaining = len(self.active_connections.get(key, []))
-            if not self.active_connections[key]:
-                del self.active_connections[key]
-
-            logger.info(
-                f"🔴 WebSocket client disconnected → {key} → remaining={remaining}"
-            )
-
-    # ================= BROADCAST =================
-
-    async def broadcast_json(self, key: str, message: dict):
-
-        logger.info(f"WS BROADCAST SENT - channel={key} message_type={message.get('type', 'unknown')}")
-
-        async with self._lock:
-
-            if key not in self.active_connections:
-                logger.warning(f"⚠️ No active connections for channel: {key}")
-                return
-
-            connections = list(self.active_connections[key])
-
-        dead = []
         
-        for conn in connections:
-            try:
-                await conn.send_json(message)
-            except Exception as e:
-                dead.append(conn)
-                logger.warning(f"❌ WS DEAD CLIENT REMOVED: {e}")
+        # Instance broadcast lock
+        self.broadcast_lock = asyncio.Lock()
 
-        # Remove dead connections
-        if dead:
-            async with self._lock:
-                for d in dead:
-                    if key in self.active_connections:
-                        self.active_connections[key].discard(d)
-                        if not self.active_connections[key]:
-                            del self.active_connections[key]
 
-        logger.info(
-            f"WS BROADCAST COMPLETE - channel={key} sent={len(connections)-len(dead)} dead={len(dead)} total={len(connections)}"
-        )
+    async def connect(self, websocket: WebSocket):
 
-    async def _send_to_client(self, ws: WebSocket, message: dict):
-        """Helper method to send message to a single client"""
-        try:
-            await ws.send_json(message)
-            return True
-        except Exception as e:
-            # Handle WebSocket disconnect gracefully
-            logger.debug(f"Failed to send to client (connection closed): {e}")
-            return e
-    
-    async def send_heartbeat(self, key: str):
-        """Send heartbeat ping to all clients in a channel"""
-        # Disabled - do not send heartbeat messages to frontend
-        # Frontend should only receive real market data
-        logger.debug(f"Heartbeat disabled for channel {key}")
-        pass
-    
-    async def start_heartbeat(self, key: str, interval: int = 10):
-        """Start periodic heartbeat for a channel"""
-        while True:
-            try:
-                await self.send_heartbeat(key)
-                await asyncio.sleep(interval)
-            except Exception as e:
-                logger.error(f"Heartbeat error for channel {key}: {e}")
-                await asyncio.sleep(interval)
+        async with self._lock:
+
+            # Prevent duplicate connection BEFORE accepting
+            if websocket in self.connections:
+
+                logger.warning(
+                    "⚠️ Duplicate websocket connection ignored"
+                )
+                return
+
+            await websocket.accept()
+
+            self.connections.add(websocket)
+
+            logger.info(f"🟢 WebSocket client connected | clients={len(self.connections)}")
+
+
+    async def disconnect(self, websocket: WebSocket):
+
+        async with self._lock:
+
+            if websocket in self.connections:
+
+                self.connections.remove(websocket)
+
+                logger.info(
+                    f"🔴 WebSocket client disconnected | clients={len(self.connections)}"
+                )
+
+
+    async def broadcast(self, message):
+
+        async with self.broadcast_lock:
+
+            dead_connections = []
+
+            for connection in list(self.connections):
+
+                try:
+                    await connection.send_json(message)
+
+                except Exception:
+
+                    dead_connections.append(connection)
+
+            for conn in dead_connections:
+                if conn in self.connections:
+                    self.connections.remove(conn)
 
 
 # singleton instance
-manager = WSConnectionManager()
+manager = WSManager()

@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 from app.services.token_manager import token_manager
 from app.services.market_session_manager import get_market_session_manager
-from app.services.upstox_protobuf_parser import parse_upstox_feed, extract_index_price
+from app.services.upstox_protobuf_parser import decode_protobuf_message, extract_index_price
 from app.core.live_market_state import MarketStateManager
 from app.services.live_chain_manager import chain_manager
 from app.core.ws_manager import manager
@@ -20,6 +20,8 @@ from app.services.live_structural_engine import LiveStructuralEngine
 from app.core.live_market_state import get_market_state_manager
 
 logger = logging.getLogger(__name__)
+
+last_market_status = None
 
 
 def resolve_symbol_from_instrument(instrument_key: str):
@@ -156,53 +158,98 @@ class WebSocketMarketFeed:
         """Public connection method - deprecated, use ensure_connection"""
         token = await token_manager.get_valid_token()
         await self._connect(token)
+    
+    async def ensure_connection(self):
+        """
+        Ensure websocket connection exists.
+        Used by main startup.
+        """
+
+        try:
+
+            if self.is_connected:
+                return True
+
+            token = await token_manager.get_valid_token()
+
+            if not token:
+                logger.warning("⚠️ No Upstox token available")
+                return False
+
+            await self._connect(token)
+
+            return True
+
+        except Exception as e:
+
+            logger.error(f"WS connection failed: {e}")
+            self.is_connected = False
+
+            return False
 
     async def subscribe_indices(self):
-        """Subscribe to Nifty indices and all option contracts"""
-        instrument_registry = get_instrument_registry()
-        await instrument_registry.wait_until_ready()
-        
-        payload = {
-            "guid": "strikeiq",
-            "method": "sub",
-            "data": {
-                "mode": "full",
-                "instrumentKeys": [
-                    "NSE_INDEX|Nifty 50",
-                    "NSE_INDEX|Nifty Bank"
-                ] + instrument_registry.get_option_instruments("NIFTY")
-            }
-        }
-        
-        logger.info(f"UPSTOX SUBSCRIPTION PAYLOAD={payload}")
-        await self.websocket.send(json.dumps(payload))
-        
-        logger.info("📡 INDICES AND OPTIONS SUBSCRIBED")
+        """
+        Subscribe to NIFTY/BANKNIFTY indices + limited option contracts.
+        """
 
-    async def ensure_connection(self):
-        """Ensure WebSocket connection with controlled retries"""
-        if self._reconnecting:
-            logger.debug("Reconnect already in progress")
-            return False
-            
-        if self.is_connected:
-            return True
-            
-        self._reconnecting = True
         try:
-            token = await token_manager.get_valid_token()
-            await self._connect(token)
-            return True
-        except HTTPException:
-            logger.warning("⚠️ Upstox token invalid → running REST-only mode")
-            return False
+
+            instrument_registry = get_instrument_registry()
+            await instrument_registry.wait_until_ready()
+
+            # ------------------------------------------------
+            # Get NIFTY option instruments
+            # ------------------------------------------------
+
+            all_options = instrument_registry.get_option_instruments("NIFTY")
+
+            if not all_options:
+                logger.warning("⚠️ No option instruments found in registry")
+                return
+
+            # Prevent subscription overload
+            limited_options = all_options[:40]
+
+            # ------------------------------------------------
+            # Build instrument list
+            # ------------------------------------------------
+
+            instrument_keys = [
+                "NSE_INDEX|Nifty 50",
+                "NSE_INDEX|Nifty Bank"
+            ]
+
+            instrument_keys.extend(limited_options)
+
+            # Remove duplicates just in case
+            instrument_keys = list(set(instrument_keys))
+
+            # ------------------------------------------------
+            # Subscription payload
+            # ------------------------------------------------
+
+            payload = {
+                "guid": "strikeiq-feed",
+                "method": "sub",
+                "data": {
+                    "mode": "full",   # REQUIRED for options + index feeds
+                    "instrumentKeys": instrument_keys
+                }
+            }
+
+            logger.info(f"UPSTOX SUBSCRIPTION PAYLOAD={len(instrument_keys)} instruments")
+
+            if self.websocket is None:
+                logger.error("WebSocket not initialized")
+                return
+
+            await self.websocket.send(json.dumps(payload))
+
+            logger.info("📡 INDICES + OPTIONS SUBSCRIBED")
+
         except Exception as e:
-            logger.warning(f"WS reconnect failed: {e}")
-            self.is_connected = False
-            await asyncio.sleep(10)  # 10-second reconnect delay
-            return False
-        finally:
-            self._reconnecting = False
+
+            logger.error(f"Subscription failed: {e}")
 
     async def maintain_connection(self):
         """Maintain WebSocket connection with reconnect loop"""
@@ -247,6 +294,8 @@ class WebSocketMarketFeed:
                 
                 async for message in self.websocket:
                     try:
+                        logger.info(f"UPSTOX RAW MESSAGE TYPE={type(message)} SIZE={len(message)}")
+                        
                         if isinstance(message, bytes):
                             logger.info("UPSTOX RAW MESSAGE RECEIVED")
                             logger.info(f"UPSTOX RAW BYTES SIZE={len(message)}")
@@ -255,6 +304,10 @@ class WebSocketMarketFeed:
                             self._message_queue.append(message)
                             
                         else:
+                            # Ensure message is bytes
+                            if isinstance(message, str):
+                                message = message.encode()
+                                
                             # Handle any JSON messages (unlikely with V3)
                             try:
                                 data = json.loads(message)
@@ -264,7 +317,7 @@ class WebSocketMarketFeed:
                                     continue
                                 
                                 # Broadcast market data directly for JSON
-                                await manager.broadcast_json("market_data", data)
+                                await manager.broadcast(data)
                                 logger.info("WS BROADCAST SENT (JSON)")
                                 
                             except json.JSONDecodeError:
@@ -292,148 +345,46 @@ class WebSocketMarketFeed:
                     continue
 
                 # Decode protobuf in thread to avoid blocking event loop
-                ticks = await asyncio.to_thread(parse_upstox_feed, raw)
+                ticks = await asyncio.to_thread(decode_protobuf_message, raw)
 
-                logger.info("PROTOBUF DECODE SUCCESS")
-
-                # Route ticks after protobuf parse
-                for tick in ticks:
-                    instrument = tick.get("instrument_key", "")
-                    
-                    # INDEX DETECTION - More reliable check
-                    if "NSE_INDEX" in instrument:
-                        symbol = resolve_symbol_from_instrument(instrument)
-                        if symbol:
-                            spot = tick.get("ltp")
-                            if spot:
-                                MarketStateManager.update_spot(symbol, spot)
-                                await manager.broadcast_json(
-                                    "market_data",
-                                    {
-                                        "type": "market_data",
-                                        "spot": spot
-                                    }
-                                )
-                                logger.info(f"INDEX PRICE = {spot}")
-                                
-                                # Update greeks when spot changes
-                                await chain_manager.update_spot_and_compute_greeks(spot)
-                                
-                                # Always broadcast spot update
-                                await manager.broadcast_json(
-                                    "market_data",
-                                    {"spot": spot}
-                                )
-                                
-                                # Send data to AI engine with deep copy and throttling
-                                import copy
-                                import time
-                                
-                                now = time.time()
-                                if not hasattr(self, "_last_ai_update"):
-                                    self._last_ai_update = 0
-                                
-                                if now - self._last_ai_update > 1:
-                                    chain_copy = copy.deepcopy(chain_manager.chain)
-                                    
-                                    # Prevent AI engine crash with empty chain
-                                    if chain_copy:
-                                        await self.ai_engine.update_market_state({
-                                            "spot": spot,
-                                            "chain": chain_copy
-                                        })
-                                    else:
-                                        logger.warning("AI ENGINE SKIPPED: empty option chain")
-                                    
-                                    self._last_ai_update = now
-
-                    # OPTION DETECTION - Use CE/PE pattern for reliability
-                    elif instrument and ("CE" in instrument or "PE" in instrument):
-                        await chain_manager.update_tick(tick)
-                        logger.info(f"OPTION TICK RECEIVED: {instrument}")
-
-                # Extract and broadcast index price from decoded message
-                try:
-                    # Convert raw bytes to decoded dict for index price extraction
-                    from app.proto import MarketDataFeed_pb2
-                    response = MarketDataFeed_pb2.FeedResponse()
-                    response.ParseFromString(raw)
-                    
-                    # Convert to dict format for extract_index_price
-                    decoded_dict = {}
-                    if hasattr(response, 'feeds') and response.feeds:
-                        decoded_dict["feeds"] = {}
-                        for key, feed in response.feeds.items():
-                            if hasattr(feed, 'ff') and feed.ff:
-                                feed_dict = {}
-                                if hasattr(feed.ff, 'indexFF') and feed.ff.indexFF:
-                                    index_ff = feed.ff.indexFF
-                                    index_dict = {}
-                                    if hasattr(index_ff, 'ltpc') and index_ff.ltpc:
-                                        index_dict["ltpc"] = {"ltp": index_ff.ltpc.ltp}
-                                    feed_dict["indexFF"] = index_dict
-                                decoded_dict["feeds"][key] = feed_dict
-                    
-                    spot = extract_index_price(decoded_dict)
-                    if spot:
-                        logger.info(f"INDEX PRICE = {spot}")
-                        await manager.broadcast_json(
-                            "market_data",
-                            {
-                                "type": "market_data",
-                                "spot": spot
-                            }
-                        )
-                        logger.info("BROADCAST market_data")
-                except Exception as e:
-                    logger.error(f"Index price extraction failed: {e}")
+                logger.info(f"PROTOBUF MESSAGE RECEIVED | TICKS={len(ticks)}")
 
                 if not ticks:
-                    # Heartbeat/empty message — do NOT broadcast to frontend
-                    logger.debug("UPSTOX HEARTBEAT (no ticks)")
                     continue
 
                 for tick in ticks:
 
-                    instrument_key = tick.get("instrument_key")
-                    ltp = tick.get("ltp")
+                    if tick.get("type") == "market_status":
 
-                    if not instrument_key or ltp is None:
+                        status = tick.get("status")
+
+                        global last_market_status
+
+                        if status != last_market_status:
+
+                            last_market_status = status
+
+                            logger.warning(f"🚫 MARKET {status.upper()}")
+
+                            await manager.broadcast(tick)
+
                         continue
 
-                    symbol = resolve_symbol_from_instrument(instrument_key)
+                    # FIX 3: Broadcast NIFTY spot price
+                    if "NSE_INDEX|Nifty 50" in tick.get("instrument", ""):
 
-                    if not symbol:
-                        continue
-
-                    logger.info(f"MARKET DATA EXTRACTED: {instrument_key} LTP={ltp}")
-
-                    # Broadcast to /ws/market clients
-                    await manager.broadcast_json(
-                        "market_data",
-                        {
-                            "type": "market_data",
-                            "instrument": instrument_key,
-                            "ltp": ltp,
-                            "timestamp": tick.get(
-                                "timestamp",
-                                int(datetime.now().timestamp() * 1000)
-                            )
+                        spot_tick = {
+                            "type": "spot_tick",
+                            "symbol": "NIFTY",
+                            "spot": tick.get("ltp", 0)
                         }
-                    )
+                        await manager.broadcast(spot_tick)
+                        logger.info(f"📡 BROADCAST → spot_tick NIFTY={tick.get('ltp', 0)}")
 
-                    logger.info(f"WS BROADCAST SENT: {instrument_key} LTP={ltp}")
+                    logger.info(f"📡 BROADCAST → {tick.get('type')} {tick.get('instrument')} LTP={tick.get('ltp')}")
 
-                    tick_data = {
-                        "instrument_key": instrument_key,
-                        "ltp": ltp,
-                        "timestamp": tick.get(
-                            "timestamp",
-                            int(datetime.now().timestamp() * 1000)
-                        )
-                    }
-
-                    await self._route_tick_to_builders(symbol, instrument_key, tick_data)
+                    # FIX 2: Ensure ticks broadcast to frontend
+                    await manager.broadcast(tick)
 
             except Exception as e:
 

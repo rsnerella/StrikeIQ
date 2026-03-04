@@ -168,6 +168,27 @@ class TokenManager:
         self._access_token = None
         logger.info(" TOKEN CLEARED FROM MEMORY")
 
+    async def ensure_token(self):
+        """
+        Ensure Upstox token is available from Redis or environment
+        """
+        token = await self.get_token()
+
+        if token:
+            return token
+
+        import os
+
+        token = os.getenv("UPSTOX_ACCESS_TOKEN")
+
+        if token:
+            await self.save_token(token)
+            logger.info("Upstox token loaded from environment and saved to Redis")
+            return token
+
+        logger.warning("No Upstox token available")
+        return None
+
 
 # Global singleton instance
 token_manager = TokenManager()

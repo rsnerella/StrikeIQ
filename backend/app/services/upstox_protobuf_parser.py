@@ -1,135 +1,89 @@
 import logging
-import time
-from typing import List, Dict, Optional
+from typing import List, Dict
 from app.proto import MarketDataFeed_pb2
 
 logger = logging.getLogger(__name__)
 
 
-def extract_index_price(decoded: Dict) -> Optional[float]:
-    """Extract index price from decoded protobuf message"""
-    try:
-        feeds = decoded.get("feeds", {})
-        for key, value in feeds.items():
-            if "indexFF" in value:
-                index_data = value["indexFF"]
-                if "ltpc" in index_data:
-                    return index_data["ltpc"]["ltp"]
-    except Exception as e:
-        print("INDEX PARSE ERROR:", e)
-    return None
-
-
-def parse_upstox_feed(data_bytes: bytes) -> List[Dict]:
-
-    logger.info("PROTOBUF DECODE START")
-
-    response = MarketDataFeed_pb2.FeedResponse()
+def decode_protobuf_message(message):
 
     try:
-        response.ParseFromString(data_bytes)
+
+        decoded = MarketDataFeed_pb2.FeedResponse()
+        decoded.ParseFromString(message)
+
+        ticks = []
+
+        if not decoded.feeds:
+            logger.debug("UPSTOX HEARTBEAT RECEIVED")
+            return []
+
+        logger.info(f"PROTOBUF FEEDS RECEIVED = {len(decoded.feeds)}")
+
+        for instrument_key, feed in decoded.feeds.items():
+
+            logger.info(f"FEED KEY = {instrument_key}")
+
+            tick = {
+                "type": "option_tick",
+                "instrument": instrument_key,
+                "ltp": 0,
+                "oi": 0,
+                "volume": 0
+            }
+
+            # DEBUG: Log the feed structure
+            logger.info(f"FEED STRUCTURE: {type(feed)}")
+            logger.info(f"FEED HAS FF: {hasattr(feed, 'ff')}")
+            if hasattr(feed, 'ff') and feed.ff:
+                logger.info(f"FF STRUCTURE: {type(feed.ff)}")
+                logger.info(f"FF HAS INDEXFF: {hasattr(feed.ff, 'indexFF')}")
+                if hasattr(feed.ff, 'indexFF') and feed.ff.indexFF:
+                    logger.info(f"INDEXFF STRUCTURE: {type(feed.ff.indexFF)}")
+                    logger.info(f"INDEXFF HAS LTPC: {hasattr(feed.ff.indexFF, 'ltpc')}")
+                    if hasattr(feed.ff.indexFF, 'ltpc') and feed.ff.indexFF.ltpc:
+                        logger.info(f"LTPC STRUCTURE: {type(feed.ff.indexFF.ltpc)}")
+                        logger.info(f"LTPC HAS LTP: {hasattr(feed.ff.indexFF.ltpc, 'ltp')}")
+                        logger.info(f"LTPC LTP VALUE: {feed.ff.indexFF.ltpc.ltp}")
+
+            # V2 format: Feed -> ff -> indexFF -> ltpc
+            if hasattr(feed, "ff") and feed.ff and hasattr(feed.ff, "indexFF") and feed.ff.indexFF:
+                index = feed.ff.indexFF
+                if hasattr(index, "ltpc") and index.ltpc:
+                    tick["ltp"] = float(index.ltpc.ltp)
+
+            # Only add if valid LTP
+            if tick["ltp"] > 0:
+                logger.info(f"VALID TICK: {instrument_key} LTP={tick['ltp']}")
+                ticks.append(tick)
+            else:
+                logger.warning(f"INVALID TICK: {instrument_key} LTP={tick['ltp']}")
+
+        logger.info(f"TICKS EXTRACTED = {len(ticks)}")
+
+        return ticks
+
     except Exception as e:
-        logger.error("PROTOBUF PARSE ERROR: %s", str(e))
+
+        logger.error(f"PROTOBUF DECODE ERROR: {e}")
+        import traceback
+        logger.error(f"TRACEBACK: {traceback.format_exc()}")
         return []
 
-    ticks: List[Dict] = []
 
-    # Debug message type
-    logger.info(
-        "PROTOBUF MESSAGE TYPE=%s | FEEDS=%s",
-        getattr(response, "type", "unknown"),
-        len(response.feeds)
-    )
-
-    # Heartbeat / empty packets
-    if len(response.feeds) == 0:
-        logger.warning("PROTOBUF EMPTY MESSAGE (heartbeat or market closed)")
-        return []
-
-    logger.info("PROTOBUF FEEDS FOUND: %s", len(response.feeds))
-
-    for instrument_key, feed in response.feeds.items():
-
-        try:
-
-            if not feed.HasField("ff"):
-                continue
-
-            ff = feed.ff
-
-            ltp = None
-
-            # INDEX
-            if ff.HasField("indexFF"):
-
-                index_ff = ff.indexFF
-
-                if index_ff.HasField("ltpc"):
-
-                    ltpc = index_ff.ltpc
-                    ltp = ltpc.ltp
-
-                    logger.info(
-                        "INDEX TICK | %s | LTP=%s",
-                        instrument_key,
-                        ltp
-                    )
-
-            # EQUITY / DERIVATIVES
-            elif ff.HasField("marketFF"):
-
-                market_ff = ff.marketFF
-
-                if market_ff.HasField("ltpc"):
-
-                    ltpc = market_ff.ltpc
-                    ltp = ltpc.ltp
-
-                    logger.info(
-                        "MARKET TICK | %s | LTP=%s",
-                        instrument_key,
-                        ltp
-                    )
-
-            if ltp is None:
-                continue
-
-            ticks.append({
-                "instrument_key": instrument_key,
-                "symbol": instrument_key.split("|")[-1],
-                "ltp": ltp,
-                "timestamp": int(time.time() * 1000)
-            })
-
-        except Exception as e:
-
-            logger.error(
-                "PROTOBUF PARSE ERROR | %s | %s",
-                instrument_key,
-                str(e)
-            )
-
-    logger.info("PROTOBUF DECODE SUCCESS: %s ticks", len(ticks))
-
-    return ticks
-
-
-def extract_index_price(feed) -> float | None:
-    """
-    Extract index LTP from Upstox protobuf feed.
-    """
+def extract_index_price(feed):
 
     try:
 
-        # Upstox index feed format
         if hasattr(feed, "ltpc") and feed.ltpc:
+            return float(feed.ltpc.ltp)
 
-            if hasattr(feed.ltpc, "ltp"):
+        if hasattr(feed, "ff") and feed.ff and hasattr(feed.ff, "indexFF") and feed.ff.indexFF:
+            index = feed.ff.indexFF
+            if hasattr(index, "ltpc") and index.ltpc:
+                return float(index.ltpc.ltp)
 
-                return float(feed.ltpc.ltp)
-
-    except Exception as e:
-
-        print("INDEX PARSE ERROR:", e)
+    except Exception:
+        pass
 
     return None
