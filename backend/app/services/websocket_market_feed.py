@@ -105,8 +105,6 @@ class WebSocketMarketFeed:
         self._subscription_sent = False
 
         self._message_queue = asyncio.Queue()
-        self.last_tick_timestamp = None
-
         self._recv_task: Optional[asyncio.Task] = None
         self._process_task: Optional[asyncio.Task] = None
         self._heartbeat_task: Optional[asyncio.Task] = None
@@ -297,7 +295,7 @@ class WebSocketMarketFeed:
                 "guid": "strikeiq-feed",
                 "method": "sub",
                 "data": {
-                    "mode": "ltpc",  # TASK 5: CHANGED FROM "full" TO "ltpc"
+                    "mode": "full",
                     "instrumentKeys": instrument_keys
                 }
             }
@@ -524,7 +522,7 @@ class WebSocketMarketFeed:
                 
                 # STEP 4: DECODE PROTOBUF
                 ticks = decode_protobuf_message(raw)
-                
+                logger.info(f"PARSER OUTPUT → {len(ticks)} ticks")
                 if TICK_DEBUG:
                     logger.debug(f"TICKS PARSED = {len(ticks)}")
                 
@@ -537,7 +535,6 @@ class WebSocketMarketFeed:
                     # STEP 2: TICK PIPELINE TRACE - DEBUG ONLY
                     if TICK_DEBUG:
                         logger.debug("PUSHING TICKS INTO ANALYTICS QUEUE")
-                    self.last_tick_timestamp = datetime.now()
                     await self._message_queue.put(ticks)
 
             except Exception as e:
@@ -562,6 +559,8 @@ class WebSocketMarketFeed:
                 
                 # Process each tick through message router
                 for tick in ticks:
+                    instrument = tick.get("instrument_key")
+                    logger.info(f"PROCESSING → {instrument}")
                     # Route tick to appropriate processor
                     message = message_router.route_tick(tick)
                     
@@ -609,7 +608,17 @@ class WebSocketMarketFeed:
                         logger.info(f"EXPIRY → {self.current_expiry}")
                         logger.info(f"TOTAL OPTIONS → {len(option_keys)}")
                         
-                        await self.subscribe_options(option_keys)
+                        payload = {
+                            "guid": "strikeiq-options",
+                            "method": "sub",
+                            "data": {
+                                "mode": "full",
+                                "instrumentKeys": option_keys
+                            }
+                        }
+                        
+                        await self.websocket.send(json.dumps(payload))
+                        logger.info(f"OPTIONS SUBSCRIBED → {len(option_keys)} instruments")
                 
                 # Broadcast index tick immediately
                 await manager.broadcast(message)
@@ -681,17 +690,14 @@ class WebSocketMarketFeed:
 
     async def _failsafe_no_data_check(self):
         """
-        STEP7: FAILSAFE - Log warning if no market data received after 10 seconds
+        STEP7: FAILSAFE - Log warning after 10 seconds
         """
         logger.info("⏱️ STARTING 10-SECOND FAILSAFE TIMER...")
         await asyncio.sleep(10)
         
-        if self.last_tick_timestamp is None:
-            logger.warning("⚠️ NO MARKET DATA RECEIVED AFTER SUBSCRIPTION")
-            logger.warning("   Check instrument keys and subscription mode")
-            logger.warning("   Verify Upstox V3 WebSocket feed is active")
-        else:
-            logger.info("✅ MARKET DATA RECEIVED WITHIN 10 SECONDS")
+        logger.warning("⚠️ FAILSAFE TIMER EXPIRED")
+        logger.warning("   Check instrument keys and subscription mode")
+        logger.warning("   Verify Upstox V3 WebSocket feed is active")
 
     async def _route_tick_to_builders(self, symbol, instrument_key, tick_data):
 
@@ -789,16 +795,45 @@ def get_atm_strike(price: float, step: int = 50) -> int:
 
 
 def build_option_keys(symbol: str, atm: int, expiry: str):
-    """Generate option keys around ATM strike"""
+
     keys = []
-    
-    for i in range(-10, 11):
-        strike = atm + (i * 50)
-        
-        ce = f"NSE_FO|{symbol}{expiry}{strike}CE"
-        pe = f"NSE_FO|{symbol}{expiry}{strike}PE"
-        
-        keys.append(ce)
-        keys.append(pe)
-    
+
+    try:
+
+        registry = get_instrument_registry()
+
+        options = registry.get_options(symbol, expiry)
+
+        logger.info(f"TOTAL OPTIONS FROM REGISTRY → {len(options)}")
+
+        # registry returns dict: {strike:{CE:key,PE:key}}
+        if isinstance(options, dict):
+
+            for strike_str, strikes in options.items():
+
+                try:
+
+                    strike = int(strike_str)
+
+                    if atm - 600 <= strike <= atm + 600:
+
+                        ce = strikes.get("CE")
+                        pe = strikes.get("PE")
+
+                        if ce:
+                            keys.append(ce)
+
+                        if pe:
+                            keys.append(pe)
+
+                except Exception as e:
+                    logger.debug(f"OPTION PARSE ERROR → {e}")
+                    continue
+
+        logger.info(f"OPTION KEYS GENERATED → {len(keys)}")
+
+    except Exception as e:
+
+        logger.error(f"OPTION KEY BUILD FAILED: {e}")
+
     return keys

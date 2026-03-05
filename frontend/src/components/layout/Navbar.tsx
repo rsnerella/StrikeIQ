@@ -45,26 +45,20 @@ export default function Navbar() {
   const connected = useMarketStore((s) => s.connected);
 
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
-  const [marketStatus, setMarketStatus] = useState<"OPEN" | "CLOSED" | "UNKNOWN">("UNKNOWN");
+  const [marketStatus, setMarketStatus] = useState<"OPEN" | "PREOPEN" | "CLOSED" | "UNKNOWN">("UNKNOWN");
+  const [backendConnected, setBackendConnected] = useState(true);
 
   // Fetch market status on component mount
   useEffect(() => {
     const fetchMarketStatus = async () => {
       try {
-        console.log("Fetching market status...");
         const response = await fetch("http://localhost:8000/api/v1/market/status");
+        if (!response.ok) throw new Error();
         const data = await response.json();
-        console.log("Market status response:", data);
-        
-        if (data.status === "OPEN") {
-          setMarketStatus("OPEN");
-        } else if (data.status === "CLOSED") {
-          setMarketStatus("CLOSED");
-        } else {
-          setMarketStatus("UNKNOWN");
-        }
-      } catch (error) {
-        console.error("Failed to fetch market status:", error);
+        setMarketStatus(data.status as "OPEN" | "PREOPEN" | "CLOSED" | "UNKNOWN");
+        setBackendConnected(true);
+      } catch {
+        setBackendConnected(false);
         setMarketStatus("UNKNOWN");
       }
     };
@@ -88,6 +82,9 @@ export default function Navbar() {
   if (marketStatus === "OPEN") {
     marketStatusText = "Market Live";
     marketColor = "bg-green-500";
+  } else if (marketStatus === "PREOPEN") {
+    marketStatusText = "Pre-Open";
+    marketColor = "bg-yellow-500";
   } else if (marketStatus === "CLOSED") {
     marketStatusText = "Market Closed";
     marketColor = "bg-red-500";
@@ -159,16 +156,22 @@ export default function Navbar() {
                 style={{
                   background: marketStatus === "OPEN" 
                     ? 'rgba(34,197,94,0.12)' 
+                    : marketStatus === "PREOPEN"
+                    ? 'rgba(251,191,36,0.12)'
                     : marketStatus === "CLOSED"
                     ? 'rgba(255,70,70,0.12)'
                     : 'rgba(156,163,175,0.12)',
                   color: marketStatus === "OPEN" 
                     ? '#4ade80' 
+                    : marketStatus === "PREOPEN"
+                    ? '#facc15'
                     : marketStatus === "CLOSED"
                     ? '#ff6b6b'
                     : '#9ca3af',
                   border: marketStatus === "OPEN" 
                     ? '1px solid rgba(34,197,94,0.35)' 
+                    : marketStatus === "PREOPEN"
+                    ? '1px solid rgba(251,191,36,0.35)'
                     : marketStatus === "CLOSED"
                     ? '1px solid rgba(255,70,70,0.35)'
                     : '1px solid rgba(156,163,175,0.35)',
@@ -179,6 +182,10 @@ export default function Navbar() {
                 {marketStatus === "OPEN" ? (
                   <>
                     <Wifi size={12} /> OPEN
+                  </>
+                ) : marketStatus === "PREOPEN" ? (
+                  <>
+                    <Wifi size={12} /> PREOPEN
                   </>
                 ) : marketStatus === "CLOSED" ? (
                   <>

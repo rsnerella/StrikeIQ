@@ -3,49 +3,26 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def decode_protobuf_message_v3(message: bytes):
-
-    decoded = FeedResponse()
-    decoded.ParseFromString(message)
-
-    feeds = decoded.feeds
-
-    logger.info(f"FEEDS COUNT = {len(feeds)}")
-
-    ticks = []
-
-    for entry in feeds:
-
-        instrument_key = entry.key
-        feed = entry.value
-
-        if feed.HasField("ltpc"):
-
-            ltp = feed.ltpc.ltp
-
-            logger.info(f"TICK → {instrument_key}")
-            logger.info(f"LTP → {ltp}")
-
-            ticks.append({
-                "instrument": instrument_key,
-                "ltp": float(ltp)
-            })
-
-    return ticks
-
 
 def decode_protobuf_message(message: bytes):
     """
     Decode Upstox V3 Market Data Feed protobuf messages.
-    FeedResponse -> feeds (list of FeedsEntry) -> Feed -> ltpc -> ltp
+
+    Handles:
+    - Index ticks
+    - Option ticks
+    - Futures ticks
+
+    Output format:
+    {
+        "instrument_key": "...",
+        "ltp": float
+    }
     """
-    
+
     ticks = []
-    
+
     try:
-        # STEP 1: ENSURE CORRECT IMPORT
-        from app.proto.MarketDataFeedV3_pb2 import FeedResponse
-        
         response = FeedResponse()
         response.ParseFromString(message)
 
@@ -53,23 +30,46 @@ def decode_protobuf_message(message: bytes):
 
         logger.info(f"FEEDS COUNT = {len(feeds)}")
 
-        # STEP 3: REPLACE WITH CORRECT ITERATION
         for entry in feeds:
+
             instrument_key = entry.key
             feed = entry.value
 
-            if feed.HasField("ltpc"):
-                ltp = feed.ltpc.ltp
+            # Safety checks
+            if not feed.HasField("ff"):
+                continue
 
-                tick = {
-                    "instrument_key": instrument_key,
-                    "ltp": ltp
-                }
+            if not feed.ff.HasField("marketFF"):
+                continue
 
-                ticks.append(tick)
+            market = feed.ff.marketFF
 
-                logger.info(f"TICK → {instrument_key}")
-                logger.info(f"LTP → {ltp}")
+            ltp = None
+
+            # INDEX / BASIC LTPC
+            if market.HasField("ltpc"):
+                ltp = market.ltpc.ltp
+
+            # OPTIONS / FUTURES (FULL MODE)
+            elif market.HasField("fullFeed"):
+
+                full = market.fullFeed
+
+                if full.HasField("ltpc"):
+                    ltp = full.ltpc.ltp
+
+            if ltp is None:
+                continue
+
+            tick = {
+                "instrument_key": instrument_key,
+                "ltp": float(ltp)
+            }
+
+            ticks.append(tick)
+
+            logger.info(f"TICK → {instrument_key}")
+            logger.info(f"LTP → {ltp}")
 
         return ticks
 
@@ -79,16 +79,26 @@ def decode_protobuf_message(message: bytes):
 
 
 def extract_index_price(feed):
+    """
+    Extract index price safely from feed.
+    Used for ATM detection.
+    """
 
     try:
 
+        # Direct LTPC
         if hasattr(feed, "ltpc") and feed.ltpc:
             return float(feed.ltpc.ltp)
 
-        if hasattr(feed, "ff") and feed.ff and hasattr(feed.ff, "indexFF") and feed.ff.indexFF:
-            index = feed.ff.indexFF
-            if hasattr(index, "ltpc") and index.ltpc:
-                return float(index.ltpc.ltp)
+        # Index feed format
+        if hasattr(feed, "ff") and feed.ff:
+
+            if hasattr(feed.ff, "indexFF") and feed.ff.indexFF:
+
+                index = feed.ff.indexFF
+
+                if hasattr(index, "ltpc") and index.ltpc:
+                    return float(index.ltpc.ltp)
 
     except Exception:
         pass

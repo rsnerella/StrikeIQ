@@ -12,7 +12,7 @@ const SpotPriceWidget: React.FC<SpotPriceWidgetProps> = ({ symbol }) => {
     <div className="bg-gray-900 text-white p-4 rounded-lg">
       <h3 className="text-lg font-bold mb-2">{symbol} Spot Price</h3>
       <div className="text-2xl font-mono">
-        {spot > 0 ? `₹${spot.toFixed(2)}` : 'Loading...'}
+        {spot > 0 ? `₹${spot.toFixed(2)}` : 'Waiting for data'}
       </div>
       <div className="text-sm mt-2">
         Status: {connected ? '🟢 Connected' : '🔴 Disconnected'}

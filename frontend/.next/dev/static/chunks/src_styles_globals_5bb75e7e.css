@@ -1369,6 +1369,10 @@ body {
   border-color: rgb(161 98 7 / var(--tw-border-opacity, 1));
 }
 
+.border-yellow-800\/50 {
+  border-color: #854d0e80;
+}
+
 .border-l-\[\#00FF9F\] {
   --tw-border-opacity: 1;
   border-left-color: rgb(0 255 159 / var(--tw-border-opacity, 1));
@@ -1639,6 +1643,10 @@ body {
 .bg-gray-900 {
   --tw-bg-opacity: 1;
   background-color: rgb(17 24 39 / var(--tw-bg-opacity, 1));
+}
+
+.bg-gray-900\/20 {
+  background-color: #11182733;
 }
 
 .bg-gray-900\/50 {

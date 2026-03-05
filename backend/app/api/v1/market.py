@@ -2,13 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import Dict, Any
 from ...services.market_data.market_dashboard_service import MarketDashboardService
-from ...models.database import get_db
-from ...core.config import settings
-from ...services.instrument_registry import get_instrument_registry
+from ...services.market_status_service import get_market_status
+from app.models.database import get_db
 import logging
 from datetime import datetime
 
-router = APIRouter(prefix="/api/v1/market", tags=["market"])
+router = APIRouter()
 logger = logging.getLogger(__name__)
 
 def get_market_service():
@@ -48,33 +47,21 @@ async def get_ltp(
         logger.error(f"Error in LTP API: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/status", response_model=Dict[str, Any])
-async def get_market_status(
-    service: MarketDashboardService = Depends(get_market_service),
-    db: Session = Depends(get_db)
-):
-    """Get overall market status"""
+@router.get("/status")
+async def market_status():
+    """Get current market status"""
     try:
         logger.info("API request: Market status")
-        
-        # Get market status using the service's internal method
-        from ...services.market_data.market_dashboard_service import MarketStatus
-        
-        # Check current market status
-        status = service._get_market_status()
-        
+
+        status = await get_market_status()
+
         return {
-            "status": "success",
-            "data": {
-                "market_status": status.value,
-                "timestamp": datetime.now().isoformat(),
-                "description": "Market is currently " + status.value.lower()
-            }
+            "status": status
         }
-        
+
     except Exception as e:
         logger.error(f"Error in market status API: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to get market status")
 
 @router.get("/dashboard", response_model=Dict[str, Any])
 async def get_market_dashboard(

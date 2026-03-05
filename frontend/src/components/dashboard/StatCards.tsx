@@ -71,7 +71,7 @@ export function StatCardsRow({ data, isAnalyticsEnabled }: StatCardsRowProps) {
             />
             <StatCard
                 label="Put-Call Ratio"
-                value={data?.analytics?.pcr?.toFixed(2) ?? '0.00'}
+                value={data?.analytics?.pcr?.toFixed(2) ?? '—'}
                 sub={pcr > 1 ? '▲ Bullish Bias' : pcr < 1 ? '▼ Bearish Bias' : '— Neutral'}
                 accent={pcr > 1 ? '#4ade80' : pcr < 1 ? '#f87171' : '#94a3b8'}
             />

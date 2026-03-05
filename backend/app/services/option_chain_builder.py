@@ -211,6 +211,8 @@ class OptionChainBuilder:
     def update_option_tick(self, symbol: str, strike: float, right: str, ltp: float, oi: int = 0, volume: int = 0):
         """Update option data from tick"""
         try:
+            logger.info(f"OPTION TICK → {symbol}_{strike}{right} | LTP={ltp} | OI={oi} | Volume={volume}")
+            
             if symbol not in self.chains:
                 self.chains[symbol] = {}
             
