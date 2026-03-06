@@ -6,7 +6,7 @@ from ...services.upstox_auth_service import get_upstox_auth_service
 from ...models.database import get_db
 import logging
 
-router = APIRouter(prefix="/api/v1/debug", tags=["debug"])
+router = APIRouter(tags=["debug"])
 logger = logging.getLogger(__name__)
 
 @router.get("/auth-session", response_model=Dict[str, Any])

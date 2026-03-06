@@ -1,104 +1,210 @@
-from app.proto.MarketDataFeedV3_pb2 import FeedResponse
+"""
+Upstox V3 Protobuf Parser for StrikeIQ
+Parses websocket binary frames into normalized tick dictionaries
+"""
+
 import logging
+import time
+from typing import List, Dict, Optional
+
+from app.proto.MarketDataFeedV3_pb2 import FeedResponse
 
 logger = logging.getLogger(__name__)
 
 
-def decode_protobuf_message(message: bytes):
-    """
-    Decode Upstox V3 Market Data Feed protobuf messages.
+# ---------------------------------------------------------
+# MAIN DECODER
+# ---------------------------------------------------------
 
-    Handles:
-    - Index ticks
-    - Option ticks
-    - Futures ticks
+async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]:
 
-    Output format:
-    {
-        "instrument_key": "...",
-        "ltp": float
-    }
-    """
-
-    ticks = []
+    ticks: List[Dict] = []
 
     try:
+
         response = FeedResponse()
         response.ParseFromString(message)
 
+        if not response.feeds:
+            logger.warning("PROTOBUF MESSAGE HAS NO FEEDS - IGNORING FRAME")
+            return []
+
         feeds = response.feeds
 
-        logger.info(f"FEEDS COUNT = {len(feeds)}")
+        logger.info(f"VALID FEED FRAME RECEIVED count={len(feeds)}")
 
         for entry in feeds:
 
             instrument_key = entry.key
             feed = entry.value
 
-            # Safety checks
-            if not feed.HasField("ff"):
+            if not instrument_key:
                 continue
 
-            if not feed.ff.HasField("marketFF"):
+            segment = instrument_key.split("|")[0]
+
+            ltp: Optional[float] = None
+            oi: Optional[int] = None
+            volume: Optional[int] = None
+
+            # =================================================
+            # OPTION / FUTURES PARSING
+            # =================================================
+
+            if segment == "NSE_FO":
+
+                ff = getattr(feed, "ff", None)
+
+                if ff:
+
+                    market_ff = getattr(ff, "marketFF", None)
+
+                    if market_ff:
+
+                        # ---- fullFeed ----
+                        full = getattr(market_ff, "fullFeed", None)
+
+                        if full:
+
+                            ltpc = getattr(full, "ltpc", None)
+
+                            if ltpc:
+                                ltp = getattr(ltpc, "ltp", None)
+
+                            e_details = getattr(full, "eFeedDetails", None)
+
+                            if e_details:
+                                oi = getattr(e_details, "oi", None)
+                                volume = getattr(e_details, "volume", None)
+
+                        # ---- fallback ltpc ----
+                        if ltp is None:
+
+                            ltpc = getattr(market_ff, "ltpc", None)
+
+                            if ltpc:
+                                ltp = getattr(ltpc, "ltp", None)
+
+                # ---- feed fallback ----
+                if ltp is None:
+
+                    ltpc = getattr(feed, "ltpc", None)
+
+                    if ltpc:
+                        ltp = getattr(ltpc, "ltp", None)
+
+                if ltp is None:
+                    continue
+
+                tick = {
+                    "instrument_key": instrument_key,
+                    "ltp": float(ltp),
+                    "oi": int(oi) if oi is not None else 0,
+                    "volume": int(volume) if volume is not None else 0,
+                    "timestamp": time.time()
+                }
+
+                ticks.append(tick)
+
+                logger.debug(
+                    f"OPTION TICK → {instrument_key} LTP={ltp} OI={oi} VOL={volume}"
+                )
+
+                if tick_queue:
+                    try:
+                        await tick_queue.put(tick)
+                    except Exception as e:
+                        logger.warning(f"Queue push failed: {e}")
+
                 continue
 
-            market = feed.ff.marketFF
+            # =================================================
+            # INDEX PARSING
+            # =================================================
 
-            ltp = None
+            ff = getattr(feed, "ff", None)
 
-            # INDEX / BASIC LTPC
-            if market.HasField("ltpc"):
-                ltp = market.ltpc.ltp
+            if not ff:
+                continue
 
-            # OPTIONS / FUTURES (FULL MODE)
-            elif market.HasField("fullFeed"):
+            # ---- PRIMARY: indexFF ----
+            index_ff = getattr(ff, "indexFF", None)
 
-                full = market.fullFeed
+            if index_ff:
 
-                if full.HasField("ltpc"):
-                    ltp = full.ltpc.ltp
+                ltpc = getattr(index_ff, "ltpc", None)
+
+                if ltpc:
+                    ltp = getattr(ltpc, "ltp", None)
+
+            # ---- SECONDARY: marketFF ----
+            if ltp is None:
+
+                market_ff = getattr(ff, "marketFF", None)
+
+                if market_ff:
+
+                    ltpc = getattr(market_ff, "ltpc", None)
+
+                    if ltpc:
+                        ltp = getattr(ltpc, "ltp", None)
+
+                    else:
+
+                        full = getattr(market_ff, "fullFeed", None)
+
+                        if full:
+
+                            ltpc = getattr(full, "ltpc", None)
+
+                            if ltpc:
+                                ltp = getattr(ltpc, "ltp", None)
 
             if ltp is None:
                 continue
 
             tick = {
                 "instrument_key": instrument_key,
-                "ltp": float(ltp)
+                "ltp": float(ltp),
+                "timestamp": time.time()
             }
 
             ticks.append(tick)
 
-            logger.info(f"TICK → {instrument_key}")
-            logger.info(f"LTP → {ltp}")
+            logger.debug(f"INDEX TICK → {instrument_key} LTP={ltp}")
 
         return ticks
 
     except Exception as e:
-        logger.error(f"PROTOBUF DECODE ERROR: {e}")
+
+        logger.error(f"PROTOBUF DECODE ERROR: {e}", exc_info=True)
+
         return []
 
 
-def extract_index_price(feed):
-    """
-    Extract index price safely from feed.
-    Used for ATM detection.
-    """
+# ---------------------------------------------------------
+# INDEX PRICE EXTRACTOR
+# ---------------------------------------------------------
+
+def extract_index_price(feed) -> Optional[float]:
 
     try:
 
-        # Direct LTPC
         if hasattr(feed, "ltpc") and feed.ltpc:
             return float(feed.ltpc.ltp)
 
-        # Index feed format
-        if hasattr(feed, "ff") and feed.ff:
+        ff = getattr(feed, "ff", None)
 
-            if hasattr(feed.ff, "indexFF") and feed.ff.indexFF:
+        if ff:
 
-                index = feed.ff.indexFF
+            index_ff = getattr(ff, "indexFF", None)
 
-                if hasattr(index, "ltpc") and index.ltpc:
-                    return float(index.ltpc.ltp)
+            if index_ff:
+
+                ltpc = getattr(index_ff, "ltpc", None)
+
+                if ltpc:
+                    return float(ltpc.ltp)
 
     except Exception:
         pass

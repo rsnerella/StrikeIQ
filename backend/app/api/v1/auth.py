@@ -8,7 +8,7 @@ from core.logger import auth_logger, start_trace, get_trace_id, clear_trace
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
+router = APIRouter(tags=["authentication"])
 
 
 class RefreshTokenRequest(BaseModel):
@@ -127,25 +127,12 @@ async def callback(code: str = Query(None), request: Request = None):
         
         # Auto-start market feed after successful login
         try:
-            from app.services.websocket_market_feed import ws_feed_manager
-            feed = await ws_feed_manager.start_feed()
-            if feed and feed.is_connected:
-                logger.info("🟢 Market feed auto-started after login")
-                auth_logger.info(f"OAUTH MARKET FEED AUTO-START", { 
-                    "trace_id": trace_id,
-                    "feed_connected": True
-                })
-            else:
-                auth_logger.warning(f"OAUTH MARKET FEED AUTO-START FAILED", { 
-                    "trace_id": trace_id,
-                    "feed_connected": False
-                })
-        except Exception as feed_error:
-            logger.warning(f"Market feed auto-start failed: {feed_error}")
-            auth_logger.error(f"OAUTH MARKET FEED AUTO-START ERROR", { 
-                "trace_id": trace_id,
-                "error": str(feed_error)
-            })
+            from app.services.websocket_market_feed import websocket_market_feed
+            logger.info("OAUTH STARTING MARKET FEED")
+            await websocket_market_feed.start()
+            logger.info("OAUTH MARKET FEED STARTED")
+        except Exception as e:
+            logger.warning(f"OAUTH MARKET FEED AUTO-START FAILED: {e}")
         
         # Log redirect to frontend
         redirect_url = "http://localhost:3000/auth/success?broker=upstox"

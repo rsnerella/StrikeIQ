@@ -6,7 +6,7 @@ from ...core.config import settings
 import logging
 from datetime import datetime
 
-router = APIRouter(prefix="/api/v1/predictions", tags=["predictions"])
+router = APIRouter(tags=["predictions"])
 logger = logging.getLogger(__name__)
 
 @router.get("/{symbol}", response_model=Dict[str, Any])

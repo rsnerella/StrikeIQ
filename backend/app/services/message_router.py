@@ -9,115 +9,184 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+
 class MessageRouter:
     """Routes market data ticks to appropriate processors"""
-    
+
     def __init__(self):
-        self.last_index_prices = {}  # Track last prices for change calculation
-    
+        # Track last prices for index change calculation
+        self.last_index_prices: Dict[str, float] = {}
+
+    # ---------------------------------------------------------
+    # MAIN ROUTER
+    # ---------------------------------------------------------
+
     def route_tick(self, tick: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Route a single tick to appropriate message type
-        
-        Args:
-            tick: Parsed tick from protobuf parser
-            Format: {"instrument_key": "NSE_INDEX|NIFTY 50", "ltp": 24555.30}
-        
-        Returns:
-            Structured message object or None if routing fails
         """
+
         try:
-            instrument_key = tick.get("instrument_key", "")
-            ltp = tick.get("ltp", 0)
-            
-            if not instrument_key or ltp <= 0:
-                logger.warning(f"Invalid tick data: {tick}")
+
+            instrument_key = tick.get("instrument_key")
+
+            if not instrument_key:
+                logger.warning(f"Tick missing instrument_key: {tick}")
                 return None
-            
-            # Parse instrument key to extract symbol and type
+
+            # -------------------------------------------------
+            # SAFE NUMERIC CONVERSION
+            # -------------------------------------------------
+
+            raw_ltp = tick.get("ltp")
+            raw_oi = tick.get("oi")
+            raw_volume = tick.get("volume")
+
+            if raw_ltp is None:
+                logger.warning(f"Invalid tick data (missing LTP): {tick}")
+                return None
+
+            try:
+                ltp = float(raw_ltp)
+            except Exception:
+                logger.warning(f"Invalid LTP value: {tick}")
+                return None
+
+            try:
+                oi = int(raw_oi or 0)
+            except Exception:
+                oi = 0
+
+            try:
+                volume = int(raw_volume or 0)
+            except Exception:
+                volume = 0
+
+            # Update normalized values
+            tick["ltp"] = ltp
+            tick["oi"] = oi
+            tick["volume"] = volume
+
+            logger.info(
+                f"ROUTING TICK → {instrument_key} LTP={ltp} OI={oi} VOL={volume}"
+            )
+
+            # -------------------------------------------------
+            # PARSE INSTRUMENT KEY
+            # -------------------------------------------------
+
             parsed = self._parse_instrument_key(instrument_key)
+
             if not parsed:
                 logger.warning(f"Could not parse instrument key: {instrument_key}")
                 return None
-            
+
             symbol = parsed["symbol"]
             instrument_type = parsed["type"]
-            
-            timestamp = int(datetime.now().timestamp())
-            
-            # Route based on instrument type
+
+            timestamp = int(datetime.utcnow().timestamp())
+
+            # -------------------------------------------------
+            # ROUTE BASED ON TYPE
+            # -------------------------------------------------
+
             if instrument_type == "INDEX":
                 return self._create_index_tick(symbol, ltp, timestamp)
+
             elif instrument_type == "OPTION":
-                return self._create_option_tick(symbol, parsed, ltp, timestamp)
+                return self._create_option_tick(
+                    symbol,
+                    parsed,
+                    ltp,
+                    oi,
+                    volume,
+                    timestamp
+                )
+
             else:
                 logger.warning(f"Unknown instrument type: {instrument_type}")
                 return None
-                
+
         except Exception as e:
-            logger.error(f"Error routing tick: {e}")
+            logger.error(f"Error routing tick: {e}", exc_info=True)
             return None
-    
+
+    # ---------------------------------------------------------
+    # INSTRUMENT KEY PARSER
+    # ---------------------------------------------------------
+
     def _parse_instrument_key(self, instrument_key: str) -> Optional[Dict[str, Any]]:
         """Parse instrument key to extract symbol and type"""
+
         try:
-            parts = instrument_key.split("|")
-            if len(parts) < 2:
+
+            if "|" not in instrument_key:
                 return None
-            
-            segment = parts[0]
-            symbol_part = parts[1]
-            
-            # Handle index instruments
+
+            segment, token = instrument_key.split("|", 1)
+
+            # -------------------------------------------------
+            # INDEX INSTRUMENTS
+            # -------------------------------------------------
+
             if segment == "NSE_INDEX":
-                if "Nifty 50" in symbol_part:
+
+                if "Nifty 50" in token:
                     return {"symbol": "NIFTY", "type": "INDEX"}
-                elif "Nifty Bank" in symbol_part:
+
+                elif "Nifty Bank" in token:
                     return {"symbol": "BANKNIFTY", "type": "INDEX"}
+
                 else:
-                    logger.debug(f"Unknown index symbol: {symbol_part}")
+                    logger.debug(f"Unknown index symbol: {token}")
                     return None
-            
-            # Handle option instruments
-            elif segment == "NSE_FO":
-                # Extract symbol from option key
-                if "NIFTY" in symbol_part:
-                    base_symbol = "NIFTY"
-                elif "BANKNIFTY" in symbol_part:
-                    base_symbol = "BANKNIFTY"
-                else:
+
+            # -------------------------------------------------
+            # OPTION / FUTURE TOKENS
+            # -------------------------------------------------
+
+            if segment == "NSE_FO":
+
+                # Upstox V3 sends numeric instrument token
+                try:
+                    instrument_id = int(token)
+                except ValueError:
+                    logger.warning(f"Invalid option token: {token}")
                     return None
-                
-                # Parse strike and right from symbol
-                option_parts = symbol_part.split()
-                if len(option_parts) >= 3:
-                    try:
-                        strike = float(option_parts[-2])
-                        right = option_parts[-1]  # CE or PE
-                        return {
-                            "symbol": base_symbol,
-                            "type": "OPTION",
-                            "strike": strike,
-                            "right": right
-                        }
-                    except (ValueError, IndexError):
-                        return None
-            
+
+                # Symbol resolved later by option chain builder
+                return {
+                    "symbol": "UNKNOWN",
+                    "type": "OPTION",
+                    "instrument_id": instrument_id
+                }
+
             return None
-            
+
         except Exception as e:
             logger.error(f"Error parsing instrument key {instrument_key}: {e}")
             return None
-    
-    def _create_index_tick(self, symbol: str, ltp: float, timestamp: int) -> Dict[str, Any]:
-        """Create index tick message with change calculation"""
+
+    # ---------------------------------------------------------
+    # INDEX TICK CREATION
+    # ---------------------------------------------------------
+
+    def _create_index_tick(
+        self,
+        symbol: str,
+        ltp: float,
+        timestamp: int
+    ) -> Dict[str, Any]:
+
         last_price = self.last_index_prices.get(symbol, ltp)
+
         change = ltp - last_price
+
         change_percent = (change / last_price * 100) if last_price > 0 else 0
-        
+
         # Update last price
         self.last_index_prices[symbol] = ltp
-        
+
         return {
             "type": "index_tick",
             "symbol": symbol,
@@ -128,21 +197,36 @@ class MessageRouter:
                 "change_percent": round(change_percent, 2)
             }
         }
-    
-    def _create_option_tick(self, symbol: str, parsed: Dict[str, Any], ltp: float, timestamp: int) -> Dict[str, Any]:
-        """Create option tick message"""
+
+    # ---------------------------------------------------------
+    # OPTION TICK CREATION
+    # ---------------------------------------------------------
+
+    def _create_option_tick(
+        self,
+        symbol: str,
+        parsed: Dict[str, Any],
+        ltp: float,
+        oi: int,
+        volume: int,
+        timestamp: int
+    ) -> Dict[str, Any]:
+
         return {
             "type": "option_tick",
             "symbol": symbol,
             "timestamp": timestamp,
             "data": {
-                "strike": parsed["strike"],
-                "right": parsed["right"],
+                "instrument_id": parsed.get("instrument_id"),
                 "ltp": ltp,
-                "oi": 0,  # Will be populated by option chain builder
-                "volume": 0  # Will be populated by option chain builder
+                "oi": oi,
+                "volume": volume
             }
         }
 
-# Global instance
+
+# ---------------------------------------------------------
+# GLOBAL ROUTER INSTANCE
+# ---------------------------------------------------------
+
 message_router = MessageRouter()

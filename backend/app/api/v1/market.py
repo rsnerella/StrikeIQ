@@ -1,13 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import Dict, Any
-from ...services.market_data.market_dashboard_service import MarketDashboardService
-from ...services.market_status_service import get_market_status
+from app.services.market_data.market_dashboard_service import MarketDashboardService
+from app.services.market_status_service import get_market_status
 from app.models.database import get_db
+from app.services.instrument_registry import get_instrument_registry
 import logging
 from datetime import datetime
 
-router = APIRouter()
+router = APIRouter(tags=["market"])
 logger = logging.getLogger(__name__)
 
 def get_market_service():

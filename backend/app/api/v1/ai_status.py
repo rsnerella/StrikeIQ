@@ -19,7 +19,7 @@ from ai.scheduler import ai_scheduler
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(tags=["ai"])
 
 @router.get("/status", summary="Get AI system status")
 async def get_ai_status():
