@@ -10,7 +10,7 @@ import logging
 
 from app.services.market_session_manager import check_market_time, IST
 
-router = APIRouter(prefix="/api/v1/market", tags=["market-session"])
+router = APIRouter(tags=["market-session"])
 logger = logging.getLogger(__name__)
 
 

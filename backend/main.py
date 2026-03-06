@@ -385,18 +385,18 @@ async def get_ai_status():
 
 # ================= ROUTERS =================
 
-app.include_router(auth_router)
+app.include_router(auth_router, prefix="/api/v1/auth")
 app.include_router(market_router, prefix="/api/v1/market")
-app.include_router(options_router)
-app.include_router(system_router)
-app.include_router(predictions_router)
-app.include_router(debug_router)
-app.include_router(intelligence_router)
-app.include_router(market_session_router)
+app.include_router(options_router, prefix="/api/v1/options")
+app.include_router(system_router, prefix="/api/v1")
+app.include_router(predictions_router, prefix="/api/v1/predictions")
+app.include_router(debug_router, prefix="/api/v1/debug")
+app.include_router(intelligence_router, prefix="/api/v1/intelligence")
+app.include_router(market_session_router, prefix="/api/v1/market")
 
-app.include_router(live_ws_router)
+app.include_router(live_ws_router, prefix="/ws")
 app.include_router(ws_router)
-app.include_router(ai_status_router)
+app.include_router(ai_status_router, prefix="/api/v1/ai")
 app.include_router(ui_ws_router)
 
 

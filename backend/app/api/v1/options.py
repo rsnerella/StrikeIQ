@@ -13,7 +13,7 @@ from datetime import datetime
 import time
 import os
 
-router = APIRouter(prefix="/api/v1/options", tags=["options"])
+router = APIRouter(tags=["options"])
 logger = logging.getLogger(__name__)
 
 # Cache for auth status (1 minute TTL)

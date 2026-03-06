@@ -1,8 +1,10 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 import logging
+import asyncio
 from .outcome_checker import outcome_checker
 from app.services.market_session_manager import get_market_session_manager
+from app.services.ai_outcome_engine import AIOutcomeEngine
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +49,11 @@ class AIScheduler:
             
             # Outcome checker → every 1 minute
             self.scheduler.add_job(
-                func=self.outcome_checker_job,
-                trigger=IntervalTrigger(minutes=1),
-                id='outcome_checker',
-                name='Check prediction outcomes',
-                replace_existing=True,
-                max_instances=1  # Prevent overlapping
+                lambda: asyncio.create_task(
+                    AIOutcomeEngine.evaluate_pending_outcomes()
+                ),
+                "interval",
+                minutes=1
             )
             
             # Learning updater → every 1 minute

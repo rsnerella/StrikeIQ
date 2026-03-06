@@ -10,7 +10,6 @@ from .types import (
 )
 from .upstox_client import UpstoxClient
 from .instrument_service import InstrumentService
-from .market_status_service import MarketStatusService
 from .dashboard_formatter import DashboardFormatter
 from .market_dashboard_service import MarketDashboardService
 
@@ -25,7 +24,6 @@ __all__ = [
     "MarketClosedError",
     "UpstoxClient",
     "InstrumentService",
-    "MarketStatusService",
     "DashboardFormatter",
     "MarketDashboardService"
 ]

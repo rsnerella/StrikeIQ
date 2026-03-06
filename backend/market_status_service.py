@@ -61,31 +61,23 @@ class MarketStatusService:
             market_logger.error(f"MARKET STATUS CHECK ERROR trace={get_trace_id()} error={str(e)}")
     
     async def _get_market_status_from_api(self) -> bool:
-        """Get market status from API endpoint"""
+        """Get market status from canonical service"""
         try:
-            market_logger.debug(f"MARKET STATUS API CALL trace={get_trace_id()}")
+            market_logger.debug(f"MARKET STATUS CANONICAL CALL trace={get_trace_id()}")
             
-            # Mock API call - replace with actual market status API
-            import requests
-            response = requests.get("http://localhost:8000/api/v1/market/session", timeout=5)
+            from app.services.market_status_service import get_market_status
+            status = await get_market_status()
             
-            if response.status_code == 200:
-                data = response.json()
-                market_status = data.get("market_status")
-                
-                market_logger.debug(f"MARKET STATUS API RESPONSE trace={get_trace_id()} status={market_status}")
-                
-                # Backend returns { "market_status": "OPEN" }
-                is_open = market_status == "OPEN"
-                market_logger.debug(f"MARKET STATUS PARSED trace={get_trace_id()} is_open={is_open}")
-                
-                return is_open
-            else:
-                market_logger.warning(f"MARKET STATUS API ERROR trace={get_trace_id()} status_code={response.status_code}")
-                return self.current_status or False
+            market_logger.debug(f"MARKET STATUS CANONICAL RESPONSE trace={get_trace_id()} status={status}")
+            
+            # Map to bool
+            is_open = status == "OPEN"
+            market_logger.debug(f"MARKET STATUS PARSED trace={get_trace_id()} is_open={is_open}")
+            
+            return is_open
                 
         except Exception as e:
-            market_logger.error(f"MARKET STATUS API FAILURE trace={get_trace_id()} error={str(e)}")
+            market_logger.error(f"MARKET STATUS CANONICAL FAILURE trace={get_trace_id()} error={str(e)}")
             return self.current_status or False
     
     async def force_status_update(self, market_open: bool):

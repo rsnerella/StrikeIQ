@@ -5,7 +5,7 @@ from datetime import datetime
 
 from ...services.ai_interpreter_service import ai_interpreter_service
 
-router = APIRouter(prefix="/api/v1/intelligence", tags=["intelligence"])
+router = APIRouter(tags=["intelligence"])
 logger = logging.getLogger(__name__)
 
 @router.post("/interpret")
