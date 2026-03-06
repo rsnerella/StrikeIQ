@@ -67,7 +67,11 @@ export default function SymbolSelector() {
           <button
             key={s}
             onClick={() => setCurrentSymbol(s)}
-            className={s === currentSymbol ? "chip-active" : "chip"}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+              s === currentSymbol
+                ? "bg-teal-500/10 text-teal-400 border border-teal-500/40 shadow-[0_0_10px_rgba(20,184,166,0.3)]"
+                : "text-gray-400 hover:text-white hover:bg-gray-800/50"
+            }`}
           >
             {s}
           </button>

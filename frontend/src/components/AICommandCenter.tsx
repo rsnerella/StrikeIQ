@@ -70,23 +70,10 @@ interface AICommandCenterProps {
 }
 
 function AICommandCenter({ intelligence }: AICommandCenterProps) {
-  if (!intelligence) {
-    return (
-      <div className="trading-panel">
-        <div className="flex items-center gap-3 mb-6">
-          <Brain className="w-6 h-6 text-[#4F8CFF]" />
-          <h2 className="text-xl font-bold text-white">AI Command Center</h2>
-        </div>
-        <div className="text-center text-gray-500 py-12">
-          <Activity className="w-6 h-6 mx-auto mb-2 opacity-50" />
-          <p className="text-sm">AI intelligence loading</p>
-        </div>
-      </div>
-    );
-  }
+  const safeIntelligence = intelligence || {} as NonNullable<AICommandCenterProps['intelligence']>;
 
-  const biasData: FrontendBiasData = intelligence?.bias 
-    ? safeMapBiasData(intelligence.bias)
+  const biasData: FrontendBiasData = safeIntelligence?.bias 
+    ? safeMapBiasData(safeIntelligence.bias)
     : {
         score: 0,
         label: 'NEUTRAL',
@@ -130,9 +117,9 @@ function AICommandCenter({ intelligence }: AICommandCenterProps) {
           <Brain className="w-6 h-6 text-[#4F8CFF]" />
           <h2 className="text-xl font-bold text-white">AI Command Center</h2>
         </div>
-        <div className={`flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-medium ${getRegimeColor(intelligence?.regime?.market_regime)}`}>
-          {getSignalIcon(intelligence?.regime?.market_regime)}
-          <span className="capitalize">{intelligence?.regime?.market_regime || 'NEUTRAL'}</span>
+        <div className={`flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-medium ${getRegimeColor(safeIntelligence?.regime?.market_regime)}`}>
+          {getSignalIcon(safeIntelligence?.regime?.market_regime)}
+          <span className="capitalize">{safeIntelligence?.regime?.market_regime || 'NEUTRAL'}</span>
         </div>
       </div>
 

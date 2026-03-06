@@ -3,7 +3,7 @@ import React, { memo } from 'react';
 import { Minus } from 'lucide-react';
 import { CARD, CARD_HOVER_BORDER } from './DashboardTypes';
 import { SectionLabel } from './StatCards';
-import SmartMoneyPanel from '../intelligence/SmartMoneyPanel';
+import { SmartMoneyPanel } from '../intelligence/SmartMoneyPanel';
 import type { LiveMarketData } from '../../hooks/useLiveMarketData';
 
 const MemoizedSmartMoney = memo(SmartMoneyPanel);
@@ -21,7 +21,7 @@ export function SmartMoneyAndLiquidity({ data, isLiveMode, isSnapshotMode, mode 
 
             {/* Smart Money */}
             <div
-                className="rounded-2xl p-4 sm:p-5 transition-all duration-300"
+                className="w-full rounded-2xl p-4 sm:p-5 transition-all duration-300"
                 style={CARD}
                 onMouseEnter={(e) => (e.currentTarget.style.borderColor = CARD_HOVER_BORDER)}
                 onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)')}
@@ -37,21 +37,12 @@ export function SmartMoneyAndLiquidity({ data, isLiveMode, isSnapshotMode, mode 
                         </span>
                     )}
                 </div>
-                {isLiveMode ? (
-                    <MemoizedSmartMoney smartMoneyData={(data as any)?.smart_money_activity ?? null} />
-                ) : (
-                    <div className="flex flex-col items-center justify-center h-16 gap-2">
-                        <Minus className="w-5 h-5" style={{ color: 'rgba(148,163,184,0.3)' }} />
-                        <span className="text-[11px] text-center font-mono" style={{ color: 'rgba(148,163,184,0.5)' }}>
-                            Disabled in {mode.toUpperCase()} mode
-                        </span>
-                    </div>
-                )}
+                <MemoizedSmartMoney smartMoneyData={(data as any)?.smart_money_activity ?? null} />
             </div>
 
             {/* Liquidity */}
             <div
-                className="rounded-2xl p-4 sm:p-5 transition-all duration-300"
+                className="w-full rounded-2xl p-4 sm:p-5 transition-all duration-300"
                 style={CARD}
                 onMouseEnter={(e) => (e.currentTarget.style.borderColor = CARD_HOVER_BORDER)}
                 onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)')}
