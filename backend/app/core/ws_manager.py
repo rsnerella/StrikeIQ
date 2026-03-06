@@ -8,87 +8,73 @@ logger = logging.getLogger(__name__)
 # Global broadcast lock
 broadcast_lock = asyncio.Lock()
 
+
 class WSManager:
 
     def __init__(self):
 
-        # Use set to prevent duplicates and allow O(1) operations
-        self.connections: set[WebSocket] = set()
+        # Active connections
+        self.active_connections: list[WebSocket] = []
 
-        # Lock prevents race conditions during connect/disconnect
+        # Prevent race conditions
         self._lock = asyncio.Lock()
-        
+
         # Instance broadcast lock
         self.broadcast_lock = asyncio.Lock()
-
 
     async def connect(self, websocket: WebSocket):
 
         async with self._lock:
 
-            # Prevent duplicate connection BEFORE accepting
-            if websocket in self.connections:
+            if websocket not in self.active_connections:
+                self.active_connections.append(websocket)
 
-                logger.warning(
-                    "⚠️ Duplicate websocket connection ignored"
-                )
-                return
-
-            await websocket.accept()
-
-            self.connections.add(websocket)
-
-            logger.info(f"🟢 WebSocket client connected | clients={len(self.connections)}")
-
+            logger.info(f"🟢 WS CLIENT CONNECTED | clients={len(self.active_connections)}")
 
     async def disconnect(self, websocket: WebSocket):
 
         async with self._lock:
 
-            if websocket in self.connections:
-
-                self.connections.remove(websocket)
+            if websocket in self.active_connections:
+                self.active_connections.remove(websocket)
 
                 logger.info(
-                    f"🔴 WebSocket client disconnected | clients={len(self.connections)}"
+                    f"🔴 WebSocket client disconnected | clients={len(self.active_connections)}"
                 )
 
+    async def register_subscription(self, websocket: WebSocket, symbol: str, expiry: str):
+        """Register a subscription for a client"""
+        logger.info(f"📡 Subscription registered → {symbol} {expiry}")
+        # Future enhancement: track subscriptions per client
+        pass
 
     async def broadcast(self, message):
         """Broadcast message to all connected clients concurrently"""
+
         async with self.broadcast_lock:
-            if not self.connections:
-                return  # No connections to broadcast to
 
-            # Create list of send tasks
-            send_tasks = []
-            dead_connections = []
+            logger.info(f"BROADCAST CALLED → clients={len(self.active_connections)}")
 
-            for connection in self.connections:
-                send_tasks.append(
-                    self._send_with_error_handling(connection, message, dead_connections)
-                )
+            if not self.active_connections:
+                return
 
-            # Execute all sends concurrently
-            if send_tasks:
-                await asyncio.gather(*send_tasks, return_exceptions=True)
+            connections = self.active_connections.copy()
+
+            tasks = []
+
+            for connection in connections:
+                tasks.append(connection.send_json(message))
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
 
             # Remove dead connections
-            for conn in dead_connections:
-                if conn in self.connections:
-                    self.connections.remove(conn)
+            for conn, result in zip(connections, results):
 
-            if dead_connections:
-                logger.info(f"Removed {len(dead_connections)} dead connections")
+                if isinstance(result, Exception):
+                    logger.warning("⚠️ Removing dead WS connection")
 
-    async def _send_with_error_handling(self, connection, message, dead_connections):
-        """Send message to a single connection with error handling"""
-        try:
-            await connection.send_json(message)
-        except Exception as e:
-            dead_connections.append(connection)
-            logger.debug(f"Failed to send to connection: {e}")
+                    await self.disconnect(conn)
 
 
-# singleton instance
+# Singleton instance
 manager = WSManager()

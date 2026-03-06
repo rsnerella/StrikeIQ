@@ -7,6 +7,11 @@ import { useConnectionGuard } from '../utils/connectionGuard';
 export function ConnectionStatusIndicator() {
   const { isConnected, isReconnecting, reconnectAttempts, lastError } = useConnectionGuard();
 
+  console.log("WS TRACE → UI RENDER", {
+    isConnected,
+    wsGlobal: (window as any).__WS_CONNECTED__
+  });
+
   if (isConnected) {
     return (
       <div className="flex items-center gap-2 text-green-500">

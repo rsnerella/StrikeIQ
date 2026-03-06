@@ -22,12 +22,29 @@ export function useConnectionGuard() {
       setLastError("Browser offline")
     }
 
+    const connectHandler = () => {
+      console.log("WS TRACE → EVENT RECEIVED ws-connected")
+      setIsConnected(true)
+      setIsReconnecting(false)
+      setLastError(null)
+    }
+
+    const disconnectHandler = () => {
+      console.log("WS TRACE → EVENT RECEIVED ws-disconnected")
+      setIsConnected(false)
+      setLastError("WebSocket disconnected")
+    }
+
     window.addEventListener("online", handleOnline)
     window.addEventListener("offline", handleOffline)
+    window.addEventListener("ws-connected", connectHandler)
+    window.addEventListener("ws-disconnected", disconnectHandler)
 
     return () => {
       window.removeEventListener("online", handleOnline)
       window.removeEventListener("offline", handleOffline)
+      window.removeEventListener("ws-connected", connectHandler)
+      window.removeEventListener("ws-disconnected", disconnectHandler)
     }
 
   }, [])

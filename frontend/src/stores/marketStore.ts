@@ -126,6 +126,7 @@ export const useMarketStore = create<MarketStore>()(
     
     // Actions with logging
     setConnected: (connected) => {
+      console.log("WS TRACE → STATE SOURCE", { store: "marketStore", field: "connected", value: connected });
       const traceId = getTraceId();
       uiLog("STORE UPDATE", { traceId, store: "marketStore", field: "connected", value: connected });
       set({ connected });

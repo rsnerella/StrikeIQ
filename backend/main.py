@@ -70,7 +70,6 @@ from app.api.v1 import (
     debug_router,
     intelligence_router,
     market_session_router,
-    live_ws_router,
     ws_router,
     ai_status_router,
 )
@@ -394,7 +393,6 @@ app.include_router(debug_router, prefix="/api/v1/debug")
 app.include_router(intelligence_router, prefix="/api/v1/intelligence")
 app.include_router(market_session_router, prefix="/api/v1/market")
 
-app.include_router(live_ws_router, prefix="/ws")
 app.include_router(ws_router)
 app.include_router(ai_status_router, prefix="/api/v1/ai")
 app.include_router(ui_ws_router)

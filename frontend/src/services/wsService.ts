@@ -9,24 +9,34 @@ let visibilityListenerAdded = false
 let reconnectTimer: any = null
 
 const MAX_RECONNECTS = 10
+declare global {
+  interface Window {
+    __WS_CONNECTED__?: boolean;
+  }
+}
+
 const WS_URL = "ws://localhost:8000/ws/market"
 
 export function connectMarketWS() {
+  if (socket &&
+    (socket.readyState === WebSocket.OPEN ||
+     socket.readyState === WebSocket.CONNECTING)) {
+    console.log("🔒 WebSocket already connecting")
+    return
+  }
+  
+  console.log("WS CONNECTING")
+  console.log("⚡ CONNECT() EXECUTED", {
+    reconnectAttempts,
+    time: Date.now()
+  })
+  
   wsLog("WS CONNECTING", { url: WS_URL, reconnectAttempts })
 
   if (reconnectAttempts > MAX_RECONNECTS) {
     wsError("WS RECONNECT LIMIT REACHED", { reconnectAttempts, maxReconnects: MAX_RECONNECTS })
     console.error("❌ Max reconnect attempts reached")
     return null
-  }
-
-  if (
-    socket &&
-    (socket.readyState === WebSocket.OPEN ||
-     socket.readyState === WebSocket.CONNECTING)
-  ) {
-    console.log("🔒 WebSocket already active")
-    return socket
   }
 
   if (
@@ -58,44 +68,73 @@ export function connectMarketWS() {
   // Close any existing WebSocket connection before creating a new one
   if ((window as any).__strikeiq_ws) {
     try {
+      console.warn("⚠️ MANUAL WS CLOSE TRIGGERED", (new Error()).stack || "No stack trace available");
       (window as any).__strikeiq_ws.close()
-    } catch {}
+    } catch (error) {
+      // Ignore errors when closing existing WebSocket
+    }
   }
+
+  console.log("🧠 WS CONNECT CALLED", {
+    time: new Date().toISOString(),
+    stack: new Error().stack || "No stack trace available"
+  })
 
   socket = new WebSocket(WS_URL)
 
   ;(window as any).__strikeiq_ws = socket
 
   socket.onopen = () => {
-    wsLog("WS CONNECTED", { url: WS_URL, reconnectAttempts })
-    wsCritical("WS CONNECTED")
-
-    const marketStore = useMarketStore.getState()
-
-    marketStore.updateMarketData({
-        connected: true,
-        lastUpdate: Date.now()
+    console.log("WS OPEN")
+    console.log("WS TRACE → SOCKET OPEN", {
+      readyState: socket.readyState,
+      time: new Date().toISOString()
     })
 
-    reconnectAttempts = 0
-    isConnecting = false
+    window.__WS_CONNECTED__ = true
+
+    if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("ws-connected"))
+        console.log("WS TRACE → EVENT DISPATCHED ws-connected")
+    }
+
+    // Update marketStore with connection state
+    const marketStore = useMarketStore.getState()
+    marketStore.updateMarketData({
+      connected: true,
+      lastUpdate: Date.now()
+    })
+
+    const storedExpiry = localStorage.getItem("selectedExpiry")
+
+    const expiry = storedExpiry && storedExpiry.length > 5
+      ? storedExpiry
+      : "2026-03-10"
+
+    socket.send(JSON.stringify({
+      type: "subscribe",
+      symbol: "NIFTY",
+      expiry
+    }))
+
+    console.log("📤 SUBSCRIBE SENT", { symbol: "NIFTY", expiry })
 
     if (!visibilityListenerAdded) {
 
       visibilityListenerAdded = true
 
       document.addEventListener("visibilitychange", () => {
+        console.log("VISIBILITY CHANGE", { hidden: document.hidden })
 
         if (document.hidden) {
-
-          console.log("📴 Browser tab inactive")
-
-        } else {
-
-          console.log("📡 Browser tab active")
-
+          console.log("TAB HIDDEN – keeping WS alive")
+          return
         }
 
+        if (!socket || socket.readyState !== WebSocket.OPEN) {
+          console.log("TAB ACTIVE – reconnecting WS")
+          connectMarketWS()
+        }
       })
 
     }
@@ -106,137 +145,36 @@ export function connectMarketWS() {
   }
 
   socket.onmessage = (event) => {
-    wsLog("WS MESSAGE RECEIVED", { 
-      messageType: typeof event.data,
-      dataSize: event.data.length 
-    })
-
-    let data
-
-    try {
-      data =
-        typeof event.data === "string"
-          ? JSON.parse(event.data)
-          : event.data
-
-    } catch (e) {
-      wsError("WS INVALID MESSAGE", { error: e, data: event.data })
-      console.error("Invalid WS message", e)
-      return
-    }
-
-    if (!data || !data.type) return
-
-    const marketStore = useMarketStore.getState()
-
-    // Handle different message types from backend
-    switch (data.type) {
-      case "index_tick":
-        console.log("📈 INDEX TICK RECEIVED:", data)
-        marketStore.updateIndex({
-          symbol: data.symbol,
-          ltp: data.data.ltp,
-          change: data.data.change,
-          change_percent: data.data.change_percent,
-          timestamp: data.timestamp
-        })
-        break
-
-      case "option_chain_update":
-        console.log("📊 OPTION CHAIN UPDATE RECEIVED:", data)
-        marketStore.updateOptionChain({
-          symbol: data.data.symbol,
-          spot: data.data.spot,
-          atm_strike: data.data.atm_strike,
-          expiry: data.data.expiry,
-          strikes: data.data.strikes,
-          timestamp: data.timestamp
-        })
-        break
-
-      case "heatmap_update":
-        console.log("🔥 HEATMAP UPDATE RECEIVED:", data)
-        marketStore.updateHeatmap({
-          symbol: data.data.symbol,
-          spot: data.data.spot,
-          atm_strike: data.data.atm_strike,
-          pcr: data.data.pcr,
-          total_call_oi: data.data.total_call_oi,
-          total_put_oi: data.data.total_put_oi,
-          heatmap: data.data.heatmap,
-          timestamp: data.timestamp
-        })
-        break
-
-      case "analytics_update":
-        console.log("📈 ANALYTICS UPDATE RECEIVED:", data)
-        marketStore.updateAnalytics({
-          ...data.data,
-          timestamp: data.timestamp
-        })
-        break
-
-      case "market_status":
-        console.log("🏪 MARKET STATUS RECEIVED:", data)
-        marketStore.setMarketOpen(data.data.market_open)
-        break
-
-      // Legacy message types for backward compatibility
-      case "spot_tick":
-        console.log("📍 LEGACY SPOT TICK RECEIVED:", data)
-        marketStore.setSpot(data.spot)
-        break
-
-      case "market_data":
-        console.log("📊 LEGACY MARKET DATA RECEIVED:", data)
-        if (data.spot !== undefined) {
-          marketStore.setSpot(data.spot)
-        }
-        break
-
-      case "option_chain":
-        console.log("📊 LEGACY OPTION CHAIN RECEIVED:", data)
-        marketStore.updateOptionChain({
-          symbol: data.chain.symbol,
-          spot: data.chain.spot,
-          atm_strike: data.chain.atm_strike,
-          expiry: data.chain.expiry,
-          strikes: data.chain.strikes,
-          timestamp: Date.now()
-        })
-        break
-
-      case "ai_signal":
-        console.log("🤖 LEGACY AI SIGNAL RECEIVED:", data)
-        marketStore.setAISignals(data.signals || [])
-        break
-
-      default:
-        console.warn("🤔 UNKNOWN MESSAGE TYPE:", data.type, data)
-        break
-    }
+  try {
+    const data = JSON.parse(event.data)
+    console.log("WS DATA", data)
+  } catch (e) {
+    console.warn("Invalid WS message", event.data)
   }
+}
 
-  socket.onclose = (event) => {
-    wsLog("WS CLOSED", { 
-      code: event.code,
-      reason: event.reason,
-      reconnectAttempts 
-    })
-    wsCritical("WS DISCONNECTED")
-
-    const marketStore = useMarketStore.getState()
-
-    marketStore.updateMarketData({
-        connected: false,
-        marketOpen: false,
-        lastUpdate: Date.now()
+  socket.onclose = () => {
+    console.log("WS CLOSED")
+    console.log("WS TRACE → SOCKET CLOSED", {
+      readyState: socket.readyState
     })
 
-    scheduleReconnect()
+    window.__WS_CONNECTED__ = false
+
+    if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("ws-disconnected"))
+        console.log("WS TRACE → EVENT DISPATCHED ws-disconnected")
+    }
+
+    setTimeout(() => {
+      connectMarketWS()
+    }, 3000)
   }
 
   socket.onerror = (err) => {
+    console.error("🔥 WS ERROR", err)
+    console.log("WS TRACE → SOCKET ERROR", err)
+    
     wsError("WS ERROR", { 
       error: err,
       readyState: socket?.readyState,
@@ -247,6 +185,14 @@ export function connectMarketWS() {
 
     if (socket) {
       console.error("Socket readyState:", socket.readyState)
+    }
+    
+    // Safe reconnect: only attempt if socket is not in OPEN state
+    if (socket?.readyState !== WebSocket.OPEN) {
+      console.log("🔄 Socket not open, will attempt reconnect")
+      scheduleReconnect()
+    } else {
+      console.log("📡 Socket still open, no reconnect needed")
     }
   }
 
@@ -262,21 +208,27 @@ function scheduleReconnect() {
 
   reconnectAttempts++
   const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000) // Exponential backoff, max 30s
+  
+  // Ensure minimum 3-second delay when backend is down
+  const safeDelay = Math.max(delay, 3000)
 
   wsLog("WS SCHEDULING RECONNECT", { 
     attempt: reconnectAttempts, 
-    delay,
+    delay: safeDelay,
     maxDelay: 30000 
   })
+
+  console.log(`🔄 Reconnecting in ${safeDelay/1000}s... Attempt ${reconnectAttempts}/${MAX_RECONNECTS}`)
 
   reconnectTimer = setTimeout(() => {
     console.log(`🔄 Reconnecting... Attempt ${reconnectAttempts}/${MAX_RECONNECTS}`)
     connectMarketWS()
-  }, delay)
+  }, safeDelay)
 }
 
 export function disconnectMarketWS() {
   if (socket) {
+    console.warn("⚠️ MANUAL WS CLOSE TRIGGERED", (new Error()).stack || "No stack trace available");
     socket.close()
     socket = null
   }

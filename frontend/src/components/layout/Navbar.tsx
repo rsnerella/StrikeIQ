@@ -48,6 +48,13 @@ export default function Navbar() {
   const [marketStatus, setMarketStatus] = useState<"OPEN" | "PREOPEN" | "CLOSED" | "UNKNOWN">("UNKNOWN");
   const [backendConnected, setBackendConnected] = useState(true);
 
+  // Add trace log for WebSocket indicator state
+  console.log("WS INDICATOR STATE", {
+    connected,
+    wsGlobal: (window as any).__WS_CONNECTED__,
+    marketStatus
+  });
+
   // Fetch market status on component mount
   useEffect(() => {
     const fetchMarketStatus = async () => {

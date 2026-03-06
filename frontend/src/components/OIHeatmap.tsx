@@ -163,30 +163,7 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
 
   // Remove render-time logging to prevent memory growth
 
-  if (loading && oiData.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <div className="loading-dots">
-          <span></span>
-          <span></span>
-          <span></span>
-        </div>
-      </div>
-    );
-  }
-
-  if (error && oiData.length === 0) {
-    return (
-      <div className="metric-card">
-        <div className="flex items-center justify-center h-96">
-          <div className="text-center">
-            <h3 className="text-xl font-semibold text-danger-500">Error</h3>
-            <p className="text-muted-foreground">{error}</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // Always render the UI, show loading/error states inline instead of blocking
 
   return (
     <div className="heatmap-container" style={{
@@ -204,6 +181,27 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
               <div className="w-4 h-4 border-2 border-[#4F8CFF] border-t-transparent rounded-full animate-spin"></div>
             )}
           </div>
+          
+          {/* Loading/Error inline messages */}
+          {loading && oiData.length === 0 && (
+            <div className="flex items-center gap-2 px-3 py-1 bg-blue-900/50 rounded-lg">
+              <div className="w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin"></div>
+              <span className="text-blue-300 text-sm">Loading OI data...</span>
+            </div>
+          )}
+          
+          {error && oiData.length === 0 && (
+            <div className="px-3 py-1 bg-red-900/50 rounded-lg">
+              <span className="text-red-300 text-sm">Error: {error}</span>
+            </div>
+          )}
+          
+          {/* No data message */}
+          {!loading && !error && oiData.length === 0 && (
+            <div className="px-3 py-1 bg-gray-700 rounded-lg">
+              <span className="text-gray-400 text-sm">No OI data available</span>
+            </div>
+          )}
           
           {/* Controls section */}
           <div className="flex flex-wrap items-center gap-4">

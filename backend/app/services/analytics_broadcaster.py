@@ -95,9 +95,9 @@ class AnalyticsBroadcaster:
                     bias = bias_engine.compute(engine_data)
 
                     analytics_results["market_bias"] = {
-                        "pcr": bias.pcr,
-                        "bias": bias.bias,
-                        "bias_strength": bias.bias_strength,
+                        "pcr": getattr(bias, "pcr", None),
+                        "bias": getattr(bias, "bias", None),
+                        "bias_strength": getattr(bias, "bias_strength", None),
                     }
 
                 except Exception as e:
@@ -118,8 +118,8 @@ class AnalyticsBroadcaster:
                     move = move_engine.compute(engine_data)
 
                     analytics_results["expected_move"] = {
-                        "range": move.range,
-                        "probability": move.probability,
+                        "range": getattr(move, "range", None),
+                        "probability": getattr(move, "probability", None),
                     }
 
                 except Exception as e:
@@ -137,13 +137,16 @@ class AnalyticsBroadcaster:
 
                     logger.info(f"COMPUTING STRUCTURAL ANALYSIS FOR {symbol}")
 
-                    structural = structural_engine.compute(engine_data)
+                    if hasattr(self._structural_engine, "compute"):
+                        structural = self._structural_engine.compute(engine_data)
+                    else:
+                        structural = {}
 
                     analytics_results["structural"] = {
-                        "gamma": structural.gamma,
-                        "vega": structural.vega,
-                        "theta": structural.theta,
-                        "delta": structural.delta,
+                        "gamma": getattr(structural, "gamma", None),
+                        "vega": getattr(structural, "vega", None),
+                        "theta": getattr(structural, "theta", None),
+                        "delta": getattr(structural, "delta", None),
                     }
 
                 except Exception as e:
@@ -177,6 +180,7 @@ class AnalyticsBroadcaster:
 
             from app.core.ws_manager import manager
 
+            logger.info("ANALYTICS GENERATED — SENDING TO BROADCAST")
             logger.info(
                 f"BROADCASTING ANALYTICS UPDATE → {analytics_data.get('symbol','UNKNOWN')}"
             )
@@ -312,6 +316,13 @@ class AnalyticsBroadcaster:
             except ImportError as e:
 
                 logger.error(f"Could not import LiveStructuralEngine: {e}")
+                
+                # Try alternative import without market_state_mgr
+                try:
+                    from app.services.live_structural_engine import LiveStructuralEngine
+                    self._structural_engine = LiveStructuralEngine(None)
+                except ImportError as e2:
+                    logger.error(f"Could not import LiveStructuralEngine at all: {e2}")
 
         return self._structural_engine
 

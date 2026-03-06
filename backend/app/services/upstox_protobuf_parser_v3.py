@@ -85,12 +85,13 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
 
                         # volume and OI extraction from eFeedDetails
                         try:
-                            if hasattr(market_ff, "eFeedDetails"):
+                            if market_ff.HasField("eFeedDetails"):
+
                                 details = market_ff.eFeedDetails
-                                
+
                                 if hasattr(details, "vtt"):
                                     volume = int(details.vtt)
-                                
+
                                 if hasattr(details, "oi"):
                                     oi = int(details.oi)
                         except Exception:

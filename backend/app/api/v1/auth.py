@@ -127,9 +127,9 @@ async def callback(code: str = Query(None), request: Request = None):
         
         # Auto-start market feed after successful login
         try:
-            from app.services.websocket_market_feed import websocket_market_feed
-            logger.info("OAUTH STARTING MARKET FEED")
-            await websocket_market_feed.start()
+            from app.services.websocket_market_feed import start_market_feed
+            logger.info("STARTING UPSTOX MARKET FEED AFTER OAUTH")
+            await start_market_feed()
             logger.info("OAUTH MARKET FEED STARTED")
         except Exception as e:
             logger.warning(f"OAUTH MARKET FEED AUTO-START FAILED: {e}")

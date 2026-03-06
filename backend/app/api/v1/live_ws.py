@@ -74,10 +74,9 @@ async def websocket_market(websocket: WebSocket):
 
         token = websocket.query_params.get("token")
 
+        # DEV MODE: allow websocket without token
         if not token:
-            logger.warning("WS CLIENT CONNECT WITHOUT TOKEN")
-            await websocket.close(code=1008)
-            return
+            logger.warning("DEV MODE: WS CLIENT CONNECT WITHOUT TOKEN — allowing connection")
 
         registry = get_instrument_registry()
         await registry.wait_until_ready()
@@ -228,10 +227,9 @@ async def websocket_symbol(websocket: WebSocket, symbol: str):
 
         token = websocket.query_params.get("token")
 
+        # DEV MODE: allow websocket without token
         if not token:
-            logger.warning("WS CLIENT CONNECT WITHOUT TOKEN")
-            await websocket.close(code=1008)
-            return
+            logger.warning("DEV MODE: WS CLIENT CONNECT WITHOUT TOKEN — allowing connection")
 
         registry = get_instrument_registry()
         await registry.wait_until_ready()
