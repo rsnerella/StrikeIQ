@@ -30,7 +30,6 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
             return []
 
         feeds = response.feeds
-
         logger.info(f"VALID FEED FRAME RECEIVED count={len(feeds)}")
 
         for entry in feeds:
@@ -44,141 +43,117 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
             segment = instrument_key.split("|")[0]
 
             ltp: Optional[float] = None
-            oi: Optional[int] = None
-            volume: Optional[int] = None
+            oi: int = 0
+            volume: int = 0
 
             # =================================================
-            # OPTION / FUTURES PARSING
+            # PRIMARY LTP EXTRACTION
             # =================================================
 
-            if segment == "NSE_FO":
+            try:
+                if feed.HasField("ltpc"):
+                    ltp = float(feed.ltpc.ltp)
+            except Exception:
+                pass
 
+            # =================================================
+            # FALLBACK EXTRACTION FROM ff
+            # =================================================
+
+            try:
                 ff = getattr(feed, "ff", None)
 
                 if ff:
 
+                    # index feed
+                    index_ff = getattr(ff, "indexFF", None)
+                    if index_ff and index_ff.HasField("ltpc"):
+                        ltp = float(index_ff.ltpc.ltp)
+
+                    # market feed
                     market_ff = getattr(ff, "marketFF", None)
 
                     if market_ff:
 
-                        # ---- fullFeed ----
+                        if market_ff.HasField("ltpc"):
+                            ltp = float(market_ff.ltpc.ltp)
+
+                        # nested fullFeed structure
                         full = getattr(market_ff, "fullFeed", None)
+                        if full and full.HasField("ltpc"):
+                            ltp = float(full.ltpc.ltp)
 
-                        if full:
+                        # volume and OI extraction from eFeedDetails
+                        try:
+                            if hasattr(market_ff, "eFeedDetails"):
+                                details = market_ff.eFeedDetails
+                                
+                                if hasattr(details, "vtt"):
+                                    volume = int(details.vtt)
+                                
+                                if hasattr(details, "oi"):
+                                    oi = int(details.oi)
+                        except Exception:
+                            pass
 
-                            ltpc = getattr(full, "ltpc", None)
-
-                            if ltpc:
-                                ltp = getattr(ltpc, "ltp", None)
-
-                            e_details = getattr(full, "eFeedDetails", None)
-
-                            if e_details:
-                                oi = getattr(e_details, "oi", None)
-                                volume = getattr(e_details, "volume", None)
-
-                        # ---- fallback ltpc ----
-                        if ltp is None:
-
-                            ltpc = getattr(market_ff, "ltpc", None)
-
-                            if ltpc:
-                                ltp = getattr(ltpc, "ltp", None)
-
-                # ---- feed fallback ----
-                if ltp is None:
-
-                    ltpc = getattr(feed, "ltpc", None)
-
-                    if ltpc:
-                        ltp = getattr(ltpc, "ltp", None)
-
-                if ltp is None:
-                    continue
-
-                tick = {
-                    "instrument_key": instrument_key,
-                    "ltp": float(ltp),
-                    "oi": int(oi) if oi is not None else 0,
-                    "volume": int(volume) if volume is not None else 0,
-                    "timestamp": time.time()
-                }
-
-                ticks.append(tick)
-
-                logger.debug(
-                    f"OPTION TICK → {instrument_key} LTP={ltp} OI={oi} VOL={volume}"
-                )
-
-                if tick_queue:
-                    try:
-                        await tick_queue.put(tick)
-                    except Exception as e:
-                        logger.warning(f"Queue push failed: {e}")
-
-                continue
+            except Exception:
+                pass
 
             # =================================================
-            # INDEX PARSING
+            # OI EXTRACTION
             # =================================================
 
-            ff = getattr(feed, "ff", None)
+            try:
+                if feed.HasField("optionGreeks"):
+                    oi = int(feed.optionGreeks.oi)
+            except Exception:
+                pass
 
-            if not ff:
-                continue
+            # =================================================
+            # DROP INVALID TICKS
+            # =================================================
 
-            # ---- PRIMARY: indexFF ----
-            index_ff = getattr(ff, "indexFF", None)
-
-            if index_ff:
-
-                ltpc = getattr(index_ff, "ltpc", None)
-
-                if ltpc:
-                    ltp = getattr(ltpc, "ltp", None)
-
-            # ---- SECONDARY: marketFF ----
-            if ltp is None:
-
-                market_ff = getattr(ff, "marketFF", None)
-
-                if market_ff:
-
-                    ltpc = getattr(market_ff, "ltpc", None)
-
-                    if ltpc:
-                        ltp = getattr(ltpc, "ltp", None)
-
-                    else:
-
-                        full = getattr(market_ff, "fullFeed", None)
-
-                        if full:
-
-                            ltpc = getattr(full, "ltpc", None)
-
-                            if ltpc:
-                                ltp = getattr(ltpc, "ltp", None)
-
-            if ltp is None:
+            if ltp is None or ltp <= 0:
                 continue
 
             tick = {
                 "instrument_key": instrument_key,
                 "ltp": float(ltp),
+                "oi": oi,
+                "volume": volume,
                 "timestamp": time.time()
             }
 
             ticks.append(tick)
 
-            logger.debug(f"INDEX TICK → {instrument_key} LTP={ltp}")
+            # -------------------------------------------------
+            # LOGGING
+            # -------------------------------------------------
+
+            if segment == "NSE_FO":
+                logger.debug(
+                    f"OPTION TICK → {instrument_key} LTP={ltp} OI={oi} VOL={volume}"
+                )
+            else:
+                logger.debug(
+                    f"INDEX TICK → {instrument_key} LTP={ltp}"
+                )
+
+            # -------------------------------------------------
+            # QUEUE PUSH
+            # -------------------------------------------------
+
+            if tick_queue:
+                try:
+                    await tick_queue.put(tick)
+                except Exception as e:
+                    logger.warning(f"Queue push failed: {e}")
 
         return ticks
 
     except Exception as e:
 
         logger.error(f"PROTOBUF DECODE ERROR: {e}", exc_info=True)
-
         return []
 
 
@@ -190,7 +165,7 @@ def extract_index_price(feed) -> Optional[float]:
 
     try:
 
-        if hasattr(feed, "ltpc") and feed.ltpc:
+        if feed.HasField("ltpc"):
             return float(feed.ltpc.ltp)
 
         ff = getattr(feed, "ff", None)
@@ -198,13 +173,12 @@ def extract_index_price(feed) -> Optional[float]:
         if ff:
 
             index_ff = getattr(ff, "indexFF", None)
+            if index_ff and index_ff.HasField("ltpc"):
+                return float(index_ff.ltpc.ltp)
 
-            if index_ff:
-
-                ltpc = getattr(index_ff, "ltpc", None)
-
-                if ltpc:
-                    return float(ltpc.ltp)
+            market_ff = getattr(ff, "marketFF", None)
+            if market_ff and market_ff.HasField("ltpc"):
+                return float(market_ff.ltpc.ltp)
 
     except Exception:
         pass

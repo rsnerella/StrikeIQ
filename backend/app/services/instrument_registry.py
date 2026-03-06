@@ -4,10 +4,13 @@ import asyncio
 import aiohttp
 import gzip
 import json
+import logging
 from datetime import datetime, date
 from typing import Optional, Dict
 
 from app.core.redis_client import redis_client
+
+logger = logging.getLogger(__name__)
 
 UPSTOX_CDN = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz"
 
@@ -46,6 +49,10 @@ class InstrumentRegistry:
         # FUTURES
         # {symbol:{expiry:instrument_key}}
         self.futidx: Dict[str, Dict[str, str]] = {}
+
+        # REVERSE LOOKUP
+        # {instrument_key:{symbol,expiry,strike,type}}
+        self.instrument_map: Dict[str, Dict[str, Any]] = {}
 
     # --------------------------------------------------
     # PUBLIC LOAD
@@ -115,6 +122,35 @@ class InstrumentRegistry:
 
                     print("🟢 Instrument Registry Loaded Successfully")
                     print(f"Available Symbols: {list(self.options.keys())}")
+
+                    # ---- PATCH 2: CREATE REVERSE LOOKUP MAP ----
+                    self.instrument_map = {}
+                    
+                    for symbol, expiries in self.options.items():
+                        for expiry, strikes in expiries.items():
+                            for strike, opt in strikes.items():
+                                
+                                ce = opt.get("CE")
+                                pe = opt.get("PE")
+                                
+                                if ce:
+                                    self.instrument_map[ce] = {
+                                        "symbol": symbol,
+                                        "expiry": expiry,
+                                        "strike": strike,
+                                        "option_type": "CE"
+                                    }
+                                
+                                if pe:
+                                    self.instrument_map[pe] = {
+                                        "symbol": symbol,
+                                        "expiry": expiry,
+                                        "strike": strike,
+                                        "option_type": "PE"
+                                    }
+                    
+                    # ---- PATCH 3: DEBUG LOG ----
+                    logger.info(f"Instrument reverse map built → {len(self.instrument_map)} entries")
 
                     self._ready_event.set()
 
@@ -187,6 +223,34 @@ class InstrumentRegistry:
         print(" Instrument Registry Loaded from Local Cache")
         print(f"Available Symbols: {list(self.options.keys())}")
         
+        # ---- PATCH 2: CREATE REVERSE LOOKUP MAP ----
+        self.instrument_map = {}
+        
+        for symbol, expiries in self.options.items():
+            for expiry, strikes in expiries.items():
+                for strike, opt in strikes.items():
+                    ce = opt.get("CE")
+                    pe = opt.get("PE")
+                    
+                    if ce:
+                        self.instrument_map[ce] = {
+                            "symbol": symbol,
+                            "expiry": expiry,
+                            "strike": strike,
+                            "option_type": "CE"
+                        }
+                    
+                    if pe:
+                        self.instrument_map[pe] = {
+                            "symbol": symbol,
+                            "expiry": expiry,
+                            "strike": strike,
+                            "option_type": "PE"
+                        }
+        
+        # ---- PATCH 3: DEBUG LOG ----
+        logger.info(f"Instrument reverse map built → {len(self.instrument_map)} entries")
+        
         self._ready_event.set()
 
     # --------------------------------------------------
@@ -237,6 +301,11 @@ class InstrumentRegistry:
                         instruments.append(instrument_key)
         
         return instruments
+
+    # ---- PATCH 3: SAFE GETTER METHOD ----
+    def get_option_meta(self, instrument_key):
+        """Get option metadata by instrument_key"""
+        return self.instrument_map.get(instrument_key)
 
 
 # --------------------------------------------------

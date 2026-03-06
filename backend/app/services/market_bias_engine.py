@@ -141,6 +141,7 @@ class MarketBiasEngine:
             self.historical_oi[symbol].append({
                 "timestamp": time.time(),
                 "oi": current_total_oi
+            })
             
         except Exception as e:
             logger.error(f"Error calculating OI velocity: {e}")

@@ -238,7 +238,47 @@ class OptionChainBuilder:
             logger.debug(f"Updated {symbol} {strike} {right}: LTP={ltp}, OI={oi}")
             
         except Exception as e:
-            logger.error(f"Error updating option tick: {e}")
+            logger.error(f"Option tick update failed: {e}")
+    
+    async def process_option_tick(self, tick: dict):
+        """
+        Receives normalized option ticks from message_router
+        and updates the option chain state.
+        """
+
+        try:
+
+            instrument_key = tick["instrument_key"]
+            ltp = tick.get("ltp")
+            oi = tick.get("oi", 0)
+            volume = tick.get("volume", 0)
+
+            from app.services.instrument_registry import get_instrument_registry
+
+            registry = get_instrument_registry()
+
+            meta = registry.get_option_meta(instrument_key)
+
+            if not meta:
+                return
+
+            symbol = meta["symbol"]
+            expiry = meta["expiry"]
+            strike = meta["strike"]
+            option_type = meta["option_type"]
+
+            # call existing internal update function
+            self.update_option_tick(
+                symbol=symbol,
+                strike=strike,
+                right=option_type,
+                ltp=ltp,
+                oi=oi,
+                volume=volume
+            )
+
+        except Exception as e:
+            logger.error(f"Option chain update failed: {e}")
     
     def get_chain(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Get current chain data for a symbol"""

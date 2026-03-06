@@ -7,6 +7,8 @@ import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
 
+from app.services.instrument_registry import get_instrument_registry
+
 logger = logging.getLogger(__name__)
 
 
@@ -52,6 +54,11 @@ class MessageRouter:
                 logger.warning(f"Invalid LTP value: {tick}")
                 return None
 
+            # ---- PATCH 4: ADD LTP VALIDATION ----
+            if ltp is None or ltp <= 0:
+                logger.warning(f"Invalid LTP value (None or <= 0): {tick}")
+                return None
+
             try:
                 oi = int(raw_oi or 0)
             except Exception:
@@ -94,14 +101,46 @@ class MessageRouter:
                 return self._create_index_tick(symbol, ltp, timestamp)
 
             elif instrument_type == "OPTION":
-                return self._create_option_tick(
-                    symbol,
-                    parsed,
-                    ltp,
-                    oi,
-                    volume,
-                    timestamp
-                )
+                # ---- PATCH OPTION TICK ROUTING ----
+                instrument_key = tick["instrument_key"]
+                
+                meta = get_instrument_registry().get_option_meta(instrument_key)
+                
+                if not meta:
+                    logger.warning(f"OPTION META NOT FOUND → {instrument_key}")
+                    return None
+                
+                normalized_tick = {
+                    "symbol": meta["symbol"],
+                    "strike": meta["strike"],
+                    "option_type": meta["option_type"],
+                    "expiry": meta["expiry"],
+                    "instrument_key": instrument_key,
+                    "ltp": tick["ltp"],
+                    "oi": tick.get("oi", 0),
+                    "volume": tick.get("volume", 0),
+                    "timestamp": tick["timestamp"]
+                }
+                
+                from app.services.option_chain_builder import option_chain_builder
+                import asyncio
+                
+                # Forward to option chain builder
+                try:
+                    if hasattr(asyncio, 'create_task'):
+                        asyncio.create_task(option_chain_builder.process_option_tick(normalized_tick))
+                    else:
+                        loop = asyncio.get_event_loop()
+                        loop.create_task(option_chain_builder.process_option_tick(normalized_tick))
+                except Exception as e:
+                    logger.error(f"Failed to forward option tick: {e}")
+                
+                return {
+                    "type": "option_tick",
+                    "symbol": meta["symbol"],
+                    "timestamp": timestamp,
+                    "data": normalized_tick
+                }
 
             else:
                 logger.warning(f"Unknown instrument type: {instrument_type}")

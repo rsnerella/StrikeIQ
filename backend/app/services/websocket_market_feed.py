@@ -353,6 +353,23 @@ class WebSocketMarketFeed:
                 instrument_keys.append(index_key)
                 logger.info(f"INDEX INSTRUMENT: {index_key}")
             
+            # ADD OPTION INSTRUMENTS FOR BOTH NIFTY AND BANKNIFTY
+            if self.instrument_registry and self.current_expiry:
+                try:
+                    options_nifty = self.instrument_registry.get_option_instruments("NIFTY", self.current_expiry)
+                    options_banknifty = self.instrument_registry.get_option_instruments("BANKNIFTY", self.current_expiry)
+                    
+                    all_options = options_nifty + options_banknifty
+                    
+                    for option_key in all_options:
+                        instrument_keys.append(option_key)
+                        logger.info(f"OPTION INSTRUMENT: {option_key}")
+                    
+                    logger.info(f"ADDED {len(options_nifty)} NIFTY options + {len(options_banknifty)} BANKNIFTY options")
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to get option instruments: {e}")
+            
             # TASK 4: ADD DEFENSIVE CHECK
             if not instrument_keys:
                 logger.error("NO INSTRUMENT KEYS FOUND")
@@ -371,7 +388,7 @@ class WebSocketMarketFeed:
                 "guid": "strikeiq-feed",
                 "method": "sub",
                 "data": {
-                    "mode": "ltpc",
+                    "mode": "full",
                     "instrumentKeys": instrument_keys
                 }
             }
