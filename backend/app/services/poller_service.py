@@ -3,9 +3,9 @@ import logging
 import httpx
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from ..models.market_data import MarketSnapshot, OptionChainSnapshot
-from ..models.database import SessionLocal
+from ..models.database import AsyncSessionLocal
 from .upstox_auth_service import get_upstox_auth_service
 from app.utils.upstox_retry import retry_on_upstox_401
 
@@ -23,26 +23,24 @@ class PollerService:
     async def poll_market_data(self):
         """Main polling task run by scheduler"""
         logging.info("Starting market data poll...")
-        db = SessionLocal()
-        try:
-            token = await self.get_token()
-            if not token:
-                logging.warning("Poller: No access token available")
-                return
+        async with AsyncSessionLocal() as db:
+            try:
+                token = await self.get_token()
+                if not token:
+                    logging.warning("Poller: No access token available")
+                    return
 
-            symbols = ["NIFTY", "BANKNIFTY"]
-            for symbol in symbols:
-                await self._poll_symbol(symbol, token, db)
-                
-            db.commit()
-            logging.info("Market data poll completed successfully")
-        except Exception as e:
-            logging.error(f"Error during market data poll: {e}")
-            db.rollback()
-        finally:
-            db.close()
+                symbols = ["NIFTY", "BANKNIFTY"]
+                for symbol in symbols:
+                    await self._poll_symbol(symbol, token, db)
+                    
+                await db.commit()
+                logging.info("Market data poll completed successfully")
+            except Exception as e:
+                logging.error(f"Error during market data poll: {e}")
+                await db.rollback()
 
-    async def _poll_symbol(self, symbol: str, token: str, db: Session):
+    async def _poll_symbol(self, symbol: str, token: str, db: AsyncSession):
         """Poll specific symbol and its option chain"""
         # 1. Fetch Spot Price (v3)
         spot_price_data = await self._fetch_spot_price(symbol, token=token)
@@ -60,7 +58,7 @@ class PollerService:
             timestamp=datetime.now()
         )
         db.add(snapshot)
-        db.flush() # Get snapshot ID
+        await db.flush() # Get snapshot ID
 
         # 2. Fetch Option Chain (v2)
         # For simplicity, we'll try to get the nearest expiry first
@@ -94,7 +92,7 @@ class PollerService:
         return None
 
     @retry_on_upstox_401
-    async def _poll_option_chain(self, symbol: str, snapshot_id: int, token: str, db: Session):
+    async def _poll_option_chain(self, symbol: str, snapshot_id: int, token: str, db: AsyncSession):
         """Fetch option chain for the symbol"""
         mapping = {
             "NIFTY": "NSE_INDEX|Nifty 50",
@@ -143,16 +141,16 @@ class PollerService:
                             # Save Call
                             call = item.get('call_options')
                             if call:
-                                self._add_option_to_db(snapshot_id, strike, "CE", nearest_expiry, call, db)
+                                await self._add_option_to_db(snapshot_id, strike, "CE", nearest_expiry, call, db)
                                 
                             # Save Put
                             put = item.get('put_options')
                             if put:
-                                self._add_option_to_db(snapshot_id, strike, "PE", nearest_expiry, put, db)
+                                await self._add_option_to_db(snapshot_id, strike, "PE", nearest_expiry, put, db)
             except Exception as e:
                 logging.error(f"Error polling option chain for {symbol}: {e}")
 
-    def _add_option_to_db(self, snapshot_id: int, strike: float, option_type: str, expiry: str, data: Dict[str, Any], db: Session):
+    async def _add_option_to_db(self, snapshot_id: int, strike: float, option_type: str, expiry: str, data: Dict[str, Any], db: AsyncSession):
         opt = OptionChainSnapshot(
             market_snapshot_id=snapshot_id,
             strike=strike,

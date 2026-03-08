@@ -1,8 +1,8 @@
 from datetime import datetime
 from typing import Optional
 import logging
-from sqlalchemy.orm import Session
-from app.models.database import SessionLocal
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.models.database import AsyncSessionLocal
 from app.models.ai_signal_log import AiSignalLog
 
 logger = logging.getLogger(__name__)

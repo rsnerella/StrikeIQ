@@ -40,7 +40,3 @@ class MarketSnapshot(Base):
     
     def __repr__(self):
         return f"<MarketSnapshot(symbol={self.symbol}, spot_price={self.spot_price}, pcr={self.pcr})>"
-
-
-# Create tables if they don't exist
-Base.metadata.create_all(bind=engine)

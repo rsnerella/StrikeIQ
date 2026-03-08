@@ -1,10 +1,10 @@
 import logging
 from datetime import datetime
 from typing import Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import Column, Integer, String, Float, DateTime
 from sqlalchemy.sql import func
-from app.models.database import SessionLocal, Base
+from app.models.database import AsyncSessionLocal, Base
 
 logger = logging.getLogger(__name__)
 

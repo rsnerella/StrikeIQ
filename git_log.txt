@@ -1,5 +1,5 @@
-commit 32e11ce8676f69aa5865406e9a1aa04215e3c441
+commit 6778b821d5c1f10494bce24219da6a211d072cef
 Author: Uday Shastrakar <uday.shastrakar@gmail.com>
-Date:   Sun Mar 8 14:21:39 2026 +0530
+Date:   Sun Mar 8 16:49:15 2026 +0530
 
-    Complete AI Machine Learning pipeline: Feature builder, XGBoost ML training, and real-time Probability Engine
+    Fix mobile dashboard APIs and Next.js LAN routing

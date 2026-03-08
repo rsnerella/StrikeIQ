@@ -6,8 +6,8 @@ Replaces duplicate database infrastructure with standardized ORM approach
 import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
-from sqlalchemy.orm import Session
-from ..models.database import SessionLocal
+from sqlalchemy.ext.asyncio import AsyncSession
+from ..models.database import AsyncSessionLocal
 from ..models.ai_signal_log import AiSignalLog
 
 logger = logging.getLogger(__name__)

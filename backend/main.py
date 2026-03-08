@@ -57,6 +57,7 @@ from app.services.instrument_registry import get_instrument_registry
 from app.core.redis_client import test_redis_connection
 from app.market_data.market_data_service import get_latest_option_chain
 from ai.scheduler import ai_scheduler
+from db.init_schema import load_schema
 
 
 # ================= ROUTERS =================
@@ -99,6 +100,23 @@ async def start_market_feed():
 async def lifespan(app: FastAPI):
 
     logger.info("🚀 Starting StrikeIQ API...")
+
+    # -------- DATABASE --------
+    try:
+        from app.models.database import test_db_connection
+        
+        # Load database schema if needed
+        await load_schema()
+        
+        # Test database connection only
+        db_ok = await test_db_connection()
+        if db_ok:
+            logger.info("✅ Database connection established")
+        else:
+            logger.error("❌ Database connection failed")
+            
+    except Exception as e:
+        logger.error(f"Database check failed: {e}")
 
     # -------- REDIS --------
     try:
