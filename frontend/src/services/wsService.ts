@@ -16,8 +16,18 @@ declare global {
     __WS_CONNECTED__?: boolean;
   }
 }
+const getWsUrl = () => {
+  const envUrl = process.env.NEXT_PUBLIC_WS_URL;
+  if (envUrl && !envUrl.includes("localhost")) {
+    return envUrl;
+  }
+  if (typeof window !== "undefined") {
+    return `ws://${window.location.hostname}:8000/ws/market`;
+  }
+  return "ws://localhost:8000/ws/market";
+};
 
-const WS_URL = "ws://localhost:8000/ws/market"
+const WS_URL = getWsUrl();
 
 export function connectMarketWS() {
   if (socket &&
@@ -197,9 +207,7 @@ export function connectMarketWS() {
       return
     }
 
-    setTimeout(() => {
-      connectMarketWS()
-    }, 3000)
+    scheduleReconnect()
   }
 
   socket.onerror = (err) => {

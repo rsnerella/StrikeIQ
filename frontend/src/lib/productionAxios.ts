@@ -6,9 +6,20 @@
 import axios from "axios";
 import { useAuthStore } from '../stores/productionAuthStore';
 
+const getBaseURL = () => {
+  const envUrl = process.env.NEXT_PUBLIC_API_URL;
+  if (envUrl && !envUrl.includes("localhost")) {
+    return envUrl;
+  }
+  if (typeof window !== "undefined") {
+    return `http://${window.location.hostname}:8000`;
+  }
+  return "http://localhost:8000";
+}
+
 // Create axios instance with default config
 const api = axios.create({
-  baseURL: "http://localhost:8000",
+  baseURL: getBaseURL(),
   timeout: 5000,
   headers: {
     'Content-Type': 'application/json',
@@ -38,7 +49,7 @@ api.interceptors.response.use(
 
     // DISABLED: Auth checks are disabled per system memory
     // Do not redirect on 401 errors
-    
+
     // Handle server errors (5xx)
     if (error.response?.status >= 500) {
       console.warn("🚨 Server error:", error.response.status);

@@ -42,7 +42,9 @@ export default function AuthScreen({ authData }: AuthScreenProps) {
 
   // Use login_url from authData if available
   const loginUrl = authData?.login_url ||
-    "https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id=53c878a9-3f5d-44f9-aa2d-2528d34a24cd&redirect_uri=http://localhost:8000/api/v1/auth/upstox/callback";
+    (typeof window !== "undefined"
+      ? `https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id=53c878a9-3f5d-44f9-aa2d-2528d34a24cd&redirect_uri=http://${window.location.hostname}:8000/api/v1/auth/upstox/callback`
+      : "https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id=53c878a9-3f5d-44f9-aa2d-2528d34a24cd&redirect_uri=http://localhost:8000/api/v1/auth/upstox/callback");
 
   const displayMessage = authData?.message || 'Please authenticate to access StrikeIQ market intelligence';
 
@@ -50,13 +52,13 @@ export default function AuthScreen({ authData }: AuthScreenProps) {
     <div className="min-h-screen bg-[#0a0a0a]">
       {/* Header */}
       <Navbar />
-      
+
       {/* Main Content */}
       <div className="flex items-center justify-center min-h-[calc(100vh-60px)] px-4">
         <div className="max-w-md w-full">
           {/* Authentication Card */}
           <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-8 shadow-2xl">
-            
+
             {/* Lock Icon */}
             <div className="flex justify-center mb-6">
               <div className="w-16 h-16 bg-orange-500/20 rounded-full flex items-center justify-center">
@@ -68,7 +70,7 @@ export default function AuthScreen({ authData }: AuthScreenProps) {
             <h1 className="text-2xl font-bold text-white text-center mb-2">
               Authentication Required
             </h1>
-            
+
             {/* Subtitle */}
             <p className="text-gray-400 text-center mb-8">
               Authentication required to access market data

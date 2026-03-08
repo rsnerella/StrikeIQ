@@ -176,12 +176,15 @@ class ProductionWebSocketManager:
         try:
             # Send market status
             from app.services.market_session_manager import get_market_session_manager
+            from app.services.market_status_service import get_market_status
             market_manager = get_market_session_manager()
             market_open = await market_manager.is_market_open()
+            market_status = await get_market_status()
             
             await connection.websocket.send_json({
                 "type": "market_status",
                 "market_open": market_open,
+                "status": market_status,
                 "timestamp": datetime.utcnow().isoformat(),
                 "connection_id": connection.connection_id
             })

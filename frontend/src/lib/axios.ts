@@ -12,9 +12,20 @@ declare module "axios" {
   }
 }
 
+const getBaseURL = () => {
+  const envUrl = process.env.NEXT_PUBLIC_API_URL;
+  if (envUrl && !envUrl.includes("localhost")) {
+    return envUrl;
+  }
+  if (typeof window !== "undefined") {
+    return `http://${window.location.hostname}:8000`;
+  }
+  return "http://localhost:8000";
+}
+
 // Create axios instance with default config
 const api = axios.create({
-  baseURL: "http://localhost:8000",
+  baseURL: getBaseURL(),
   timeout: 5000
 })
 
@@ -23,14 +34,14 @@ api.interceptors.request.use(
   (config) => {
     const traceId = getTraceId()
     config.metadata = { traceId, startTime: performance.now() }
-    
+
     apiLog("API REQUEST START", {
       traceId,
       method: config.method?.toUpperCase(),
       url: config.url,
       baseURL: config.baseURL
     })
-    
+
     return config
   },
   (error) => {
@@ -44,13 +55,13 @@ api.interceptors.response.use(
   (response) => {
     const { traceId, startTime } = response.config.metadata || {}
     const latency = startTime ? performance.now() - startTime : 0
-    
+
     apiLog("API RESPONSE RECEIVED", {
       traceId,
       status: response.status,
       latency: `${latency.toFixed(2)}ms`
     })
-    
+
     return response
   },
   async (error) => {
@@ -71,8 +82,8 @@ api.interceptors.response.use(
     }
 
     if (error.response?.status >= 500) {
-      apiError("SERVER ERROR", { 
-        traceId, 
+      apiError("SERVER ERROR", {
+        traceId,
         status: error.response.status,
         latency: `${latency.toFixed(2)}ms`
       })
@@ -80,13 +91,13 @@ api.interceptors.response.use(
       return Promise.resolve({ data: { status: "error" } })
     }
 
-    apiError("API ERROR", { 
-      traceId, 
+    apiError("API ERROR", {
+      traceId,
       status: error.response?.status,
       message: error.message,
       latency: `${latency.toFixed(2)}ms`
     })
-    
+
     return Promise.reject(error)
   }
 )

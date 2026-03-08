@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { Wifi, WifiOff, Heart, BarChart2, Link2, Activity, Bell, Menu, X } from "lucide-react";
 import { useMarketStore } from "@/stores/marketStore";
+import { useWSStore } from "@/core/ws/wsStore";
 
 const HEARTBEAT_CSS = `
 @keyframes ws-heartbeat {
@@ -46,20 +47,32 @@ export default function Navbar() {
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  const [marketStatus, setMarketStatus] =
-    useState<"OPEN" | "PREOPEN" | "CLOSED" | "UNKNOWN">("UNKNOWN");
-
-  const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const marketStatus = useWSStore((s) => s.marketStatus);
+  const setMarketStatus = useWSStore((s) => s.setMarketStatus);
 
   useEffect(() => {
+    const getBaseURL = () => {
+      const envUrl = process.env.NEXT_PUBLIC_API_URL;
+      if (envUrl && !envUrl.includes("localhost")) {
+        return envUrl;
+      }
+      if (typeof window !== "undefined") {
+        return `http://${window.location.hostname}:8000`;
+      }
+      return "http://localhost:8000";
+    };
 
     const fetchMarketStatus = async () => {
       try {
+        const API = getBaseURL();
         const res = await fetch(`${API}/api/v1/market/status`);
         const data = await res.json();
-        setMarketStatus(data.status);
-      } catch {
-        setMarketStatus("UNKNOWN");
+
+        if (data && data.status) {
+          setMarketStatus(data.status);
+        }
+      } catch (err) {
+        console.warn("Failed to fetch market status", err);
       }
     };
 
@@ -67,8 +80,7 @@ export default function Navbar() {
     const interval = setInterval(fetchMarketStatus, 30000);
 
     return () => clearInterval(interval);
-
-  }, [API]);
+  }, [setMarketStatus]);
 
   return (
     <>

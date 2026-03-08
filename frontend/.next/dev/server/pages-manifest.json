@@ -1,8 +1,6 @@
 {
-  "/": "pages/index.js",
   "/_app": "pages/_app.js",
   "/_document": "pages/_document.js",
-  "/auth": "pages/auth.js",
-  "/auth/success": "pages/auth/success.js",
+  "/_error": "pages/_error.js",
   "/dashboard": "pages/dashboard.js"
 }

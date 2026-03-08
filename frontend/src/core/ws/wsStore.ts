@@ -11,6 +11,7 @@ import { uiLog } from "@/utils/uiLogger"
 interface WSStore {
   connected: boolean
   marketOpen: boolean | null
+  marketStatus: "OPEN" | "PREOPEN" | "CLOSED" | "UNKNOWN"
   lastMessage: any | null
   error: string | null
   spot: number
@@ -30,6 +31,7 @@ interface WSStore {
   handleAnalytics: (analyticsPayload: any) => void
   setConnected: (v: boolean) => void
   setMarketOpen: (v: boolean | null) => void
+  setMarketStatus: (v: "OPEN" | "PREOPEN" | "CLOSED" | "UNKNOWN") => void
   setLastMessage: (msg: any) => void
   setMarketData: (data: any) => void
   setError: (error: string | null) => void
@@ -39,6 +41,7 @@ export const useWSStore = create<WSStore>((set, get) => ({
 
   connected: false,
   marketOpen: null,
+  marketStatus: "UNKNOWN",
   lastMessage: null,
   error: null,
   spot: 0,
@@ -60,7 +63,11 @@ export const useWSStore = create<WSStore>((set, get) => ({
 
     // Market status update
     if (message.type === "market_status" && message.market_open !== undefined) {
-      set({ marketOpen: message.market_open, error: null })
+      set({
+        marketOpen: message.market_open,
+        marketStatus: message.status || (message.market_open ? "OPEN" : "CLOSED"),
+        error: null
+      })
       return
     }
 
@@ -319,7 +326,21 @@ export const useWSStore = create<WSStore>((set, get) => ({
       action: "setMarketOpen",
       marketOpen: v
     })
-    set({ marketOpen: v })
+    set({
+      marketOpen: v,
+      marketStatus: v === true ? "OPEN" : v === false ? "CLOSED" : "UNKNOWN"
+    })
+  },
+  setMarketStatus: (v) => {
+    uiLog("STORE UPDATE", {
+      store: "wsStore",
+      action: "setMarketStatus",
+      marketStatus: v
+    })
+    set({
+      marketStatus: v,
+      marketOpen: v === "OPEN"
+    })
   },
   setLastMessage: (msg) => {
     uiLog("STORE UPDATE", {

@@ -298,7 +298,7 @@ app.include_router(ui_ws_router)
 if __name__ == "__main__":
     uvicorn.run(
         "production_main:app",
-        host="127.0.0.1",
+        host="0.0.0.0",
         port=8000,
         reload=False,  # No reload in production
         log_level="info"
