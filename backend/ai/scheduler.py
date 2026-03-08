@@ -1,5 +1,6 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.cron import CronTrigger
 import logging
 import asyncio
 from .outcome_checker import outcome_checker
@@ -62,6 +63,16 @@ class AIScheduler:
                 trigger=IntervalTrigger(minutes=1),
                 id='learning_update',
                 name='Update AI learning',
+                replace_existing=True,
+                max_instances=1  # Prevent overlapping
+            )
+            
+            # ML Model Training → everyday at 16:00 IST
+            self.scheduler.add_job(
+                func=self.ml_training_job,
+                trigger=CronTrigger(hour=16, minute=0, timezone='Asia/Kolkata'),
+                id='ml_training',
+                name='ML Model Training',
                 replace_existing=True,
                 max_instances=1  # Prevent overlapping
             )
@@ -155,6 +166,21 @@ class AIScheduler:
                 logger.info(f"Learning update job: {formulas_updated} formulas updated")
         except Exception as e:
             logger.error(f"Error in learning update job: {e}")
+            
+    async def ml_training_job(self):
+        """Job for training ML model after market close"""
+        try:
+            logger.info("Starting scheduled ML training job (Daily 16:00 IST)")
+            from app.services.ml_training_engine import ml_training_engine
+            
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, ml_training_engine.train)
+            if result:
+                logger.info("ML model training completed successfully")
+            else:
+                logger.warning("ML model training did not complete (maybe no data yet)")
+        except Exception as e:
+            logger.error(f"Error in ML training job: {e}", exc_info=True)
     
     async def market_snapshot_job(self):
         """Job for collecting market snapshots"""

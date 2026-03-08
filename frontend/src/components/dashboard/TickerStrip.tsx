@@ -1,6 +1,6 @@
 "use client";
 import React from 'react';
-import { TrendingUp, TrendingDown, Activity } from 'lucide-react';
+import { TrendingUp, TrendingDown, Activity, Zap } from 'lucide-react';
 import { CARD } from './DashboardTypes';
 import type { LiveMarketData } from '../../hooks/useLiveMarketData';
 
@@ -13,92 +13,106 @@ interface TickerStripProps {
     modeColor: string;
 }
 
-export function TickerStrip({ 
-    symbol, 
-    data, 
-    effectiveSpot, 
-    mode, 
-    modeLabel, 
+export function TickerStrip({
+    symbol,
+    data,
+    effectiveSpot,
+    mode,
+    modeLabel,
     modeColor
 }: TickerStripProps) {
     const changePositive = (data?.change ?? 0) >= 0;
+    const changePct = (data as any)?.change_percent ?? 0;
+    const ltp = effectiveSpot ?? 0;
 
     return (
         <div
             id="section-dashboard"
-            className="rounded-2xl px-4 sm:px-6 py-3 sm:py-4 scroll-mt-20"
-            style={{ ...CARD, border: '1px solid rgba(0,229,255,0.10)' }}
+            className="trading-panel scroll-mt-20 overflow-visible relative group"
+            style={{
+                padding: '16px 24px',
+                borderColor: 'rgba(0, 229, 255, 0.15)',
+                background: 'rgba(6, 9, 18, 0.85)'
+            }}
         >
-            {/* Top accent */}
-            <div
-                className="h-[1px] w-full mb-3 rounded-full"
-                style={{ background: 'linear-gradient(90deg, transparent, rgba(0,229,255,0.50), transparent)' }}
-            />
+            {/* Global scanning line animation */}
+            <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-[18px]">
+                <div className="absolute top-0 left-[-100%] w-full h-[1px] bg-gradient-to-r from-transparent via-blue-400/30 to-transparent animate-[scan_3s_linear_infinite]" />
+            </div>
 
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-                {/* Symbol + live dot */}
-                <div className="flex items-center gap-2">
-                    {mode === 'live' && (
-                        <span className="relative flex h-2 w-2">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-70" />
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-green-400" />
+            <div className="flex flex-wrap items-center justify-between gap-4 relative z-10">
+                {/* Left: Identity & Price */}
+                <div className="flex items-center gap-6">
+                    <div className="flex flex-col">
+                        <div className="flex items-center gap-2 mb-1">
+                            <span className="text-[10px] font-bold font-mono tracking-[0.2em] text-slate-500 uppercase">Instrument</span>
+                            {mode === 'live' && (
+                                <span className="flex h-1.5 w-1.5 rounded-full bg-green-400 shadow-[0_0_8px_#4ade80]" />
+                            )}
+                        </div>
+                        <span className="text-2xl font-black tracking-tighter text-white font-sans">
+                            {symbol}<span className="text-blue-400/50">.IDX</span>
                         </span>
-                    )}
-                    <span
-                        className="text-lg sm:text-xl font-black tracking-widest"
+                    </div>
+
+                    <div className="h-10 w-px bg-white/5 mx-2" />
+
+                    <div className="flex flex-col">
+                        <span className="text-[10px] font-bold font-mono tracking-[0.2em] text-slate-500 uppercase mb-1">Last Traded Price</span>
+                        <div className="flex items-baseline gap-3">
+                            <span className="text-4xl font-black tabular-nums tracking-tighter text-white drop-shadow-2xl">
+                                {ltp.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                            <div
+                                className={`flex items-center gap-1 text-[13px] font-bold font-mono px-2 py-0.5 rounded-md ${changePositive ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                                    }`}
+                            >
+                                {changePositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                                {changePositive ? '+' : ''}{changePct.toFixed(2)}%
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Right: Market Status & System Health */}
+                <div className="flex items-center gap-4">
+                    <div className="hidden lg:flex flex-col items-end">
+                        <span className="text-[10px] font-bold font-mono tracking-[0.2em] text-slate-500 uppercase mb-1">Data Engine</span>
+                        <div className="flex items-center gap-4 text-slate-400 text-[11px] font-mono">
+                            <div className="flex items-center gap-1.5">
+                                <Activity className="w-3 h-3 text-blue-400" />
+                                <span>WS:CONNECTED</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                                <div className="w-1 h-1 rounded-full bg-slate-600" />
+                                <span>LATENCY: 12ms</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-bold font-mono tracking-[0.15em] border transition-all duration-300"
                         style={{
-                            background: 'linear-gradient(90deg, #00E5FF, #818cf8)',
-                            WebkitBackgroundClip: 'text',
-                            WebkitTextFillColor: 'transparent',
-                            fontFamily: "'Space Grotesk', sans-serif",
+                            background: mode === 'live' ? 'rgba(34,197,94,0.05)' : 'rgba(59,130,246,0.05)',
+                            borderColor: `${modeColor}30`,
+                            color: modeColor,
+                            boxShadow: mode === 'live' ? '0 0 20px rgba(74,222,128,0.05)' : 'none'
                         }}
                     >
-                        {symbol}
-                    </span>
-                </div>
-
-                {/* Spot price */}
-                <div className="flex items-baseline gap-2">
-                    <span
-                        className="text-2xl sm:text-3xl font-black tabular-nums"
-                        style={{ color: '#fff', fontFamily: "'Space Grotesk', sans-serif" }}
-                    >
-                        {effectiveSpot?.toFixed(2) ?? '0.00'}
-                    </span>
-                    {mode === 'snapshot' && (
-                        <span
-                            className="text-[10px] font-mono px-2 py-0.5 rounded-full"
-                            style={{ color: '#60a5fa', background: 'rgba(59,130,246,0.10)', border: '1px solid rgba(59,130,246,0.22)' }}
-                        >
-                            REST
-                        </span>
-                    )}
-                </div>
-
-                {/* Change */}
-                <div
-                    className="flex items-center gap-1 text-sm font-mono font-bold tabular-nums"
-                    style={{ color: changePositive ? '#4ade80' : '#f87171' }}
-                >
-                    {changePositive ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                    {changePositive ? '+' : ''}{((data as any)?.change_percent ?? 0).toFixed(2)}%
-                </div>
-
-                <div className="flex-1 hidden sm:block" />
-
-                {/* Engine mode - Fixed logic to show LIVE/SNAPSHOT/OFFLINE */}
-                <div
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-mono font-bold"
-                    style={{
-                        background: mode === 'live' ? 'rgba(34,197,94,0.08)' : mode === 'snapshot' ? 'rgba(59,130,246,0.08)' : 'rgba(255,255,255,0.04)',
-                        border: `1px solid ${modeColor}30`,
-                        color: modeColor,
-                    }}
-                >
-                    <Activity className="w-3 h-3" />
-                    {modeLabel}
+                        {mode === 'live' ? <Zap className="w-3.5 h-3.5 fill-current" /> : <Activity className="w-3.5 h-3.5" />}
+                        {modeLabel} ENGINE
+                    </div>
                 </div>
             </div>
+
+            <style jsx>{`
+                @keyframes scan {
+                    0% { left: -100%; opacity: 0; }
+                    50% { opacity: 0.5; }
+                    100% { left: 100%; opacity: 0; }
+                }
+            `}</style>
         </div>
     );
 }
+

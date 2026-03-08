@@ -1,10 +1,14 @@
 import React, { memo, useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { BarChart3, TrendingUp, TrendingDown, Calendar } from 'lucide-react';
+import { BarChart3, TrendingUp, TrendingDown } from 'lucide-react';
 import api from '../lib/api';
 import { useWSStore } from '../core/ws/wsStore';
 import { useOptionChainStore } from '../core/ws/optionChainStore';
 import { useDashboardData } from '../hooks/useDashboardData';
 import { useExpirySelector } from '../hooks/useExpirySelector';
+import { CARD } from './dashboard/DashboardTypes';
+import { SectionLabel } from './dashboard/StatCards';
+import { PremiumDropdown } from './ui/PremiumDropdown';
+import { Calendar } from 'lucide-react';
 
 interface OIData {
   strike: number;
@@ -24,8 +28,9 @@ interface OIHeatmapProps {
   symbol: string;
 }
 
+
 const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
-  
+
   // Use expiry selector hook
   const {
     expiryList,
@@ -43,25 +48,25 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
   const [loading, setLoading] = useState<boolean>(false);
   const [spotPrice, setSpotPrice] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  
+
   // Read from Zustand stores for fallback
   const { liveData: wsLiveData, optionChainSnapshot, spot } = useWSStore();
   const { optionChainData } = useOptionChainStore();
-  
+
   // Use structured data from global store, fallback to option chain store, then legacy data
-  const actualLiveData = calls.length > 0 || puts.length > 0 
+  const actualLiveData = calls.length > 0 || puts.length > 0
     ? { calls, puts, spot }
     : optionChainData || wsLiveData || optionChainSnapshot;
 
   // 🔥 PCR FALLBACK CALCULATION (FRONTEND-ONLY FIX)
   const calculatePCR = useCallback((data: any) => {
     if (!data || !data.calls || !data.puts) return 0;
-    
-    const totalCallOI = data.calls.reduce((sum: number, call: any) => 
+
+    const totalCallOI = data.calls.reduce((sum: number, call: any) =>
       sum + (call.open_interest || call.oi || 0), 0);
-    const totalPutOI = data.puts.reduce((sum: number, put: any) => 
+    const totalPutOI = data.puts.reduce((sum: number, put: any) =>
       sum + (put.open_interest || put.oi || 0), 0);
-    
+
     return totalCallOI > 0 ? totalPutOI / totalCallOI : 0;
   }, []);
 
@@ -89,13 +94,13 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
   useEffect(() => {
     if (actualLiveData && "calls" in actualLiveData && "puts" in actualLiveData && Array.isArray(actualLiveData.calls)) {
       // Process live data without render-time logging
-      
+
       // Use spot price from live data (new field name)
       setSpotPrice(actualLiveData.spot_price);
 
       // Build unified strike map by merging calls and puts
       const strikeMap: { [key: number]: { call_oi: number; put_oi: number; call_ltp: number; put_ltp: number; call_volume: number; put_volume: number } } = {};
-      
+
       // Process calls
       actualLiveData.calls.forEach((call: any) => {
         strikeMap[call.strike] = {
@@ -107,7 +112,7 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
           put_volume: 0
         };
       });
-      
+
       // Process puts and merge with existing strikes
       actualLiveData.puts.forEach((put: any) => {
         if (strikeMap[put.strike]) {
@@ -165,222 +170,191 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
 
   // Always render the UI, show loading/error states inline instead of blocking
 
+  // Calculate max OI for intensity scaling
+  const maxCallOI = Math.max(...oiData.map(r => r.oi), 1);
+  const maxPutOI = Math.max(...oiData.map(r => r.put_oi), 1);
+
   return (
-    <div className="heatmap-container" style={{
-      display: 'flex',
-      overflowX: 'auto',
-      gap: '8px',
-      width: '100%'
-    }}>
-      <div className="bg-[#111827] border border-[#1F2937] rounded-xl p-5 min-h-[600px]" style={{ minWidth: '100%' }}>
-        {/* Header with controls */}
-        <div className="flex flex-wrap items-center justify-between mb-6 gap-4">
-          <div className="flex items-center gap-4">
-            <h3 className="text-xl font-bold text-white">OI Heatmap</h3>
-            {loading && (
-              <div className="w-4 h-4 border-2 border-[#4F8CFF] border-t-transparent rounded-full animate-spin"></div>
-            )}
-          </div>
-          
-          {/* Loading/Error inline messages */}
-          {loading && oiData.length === 0 && (
-            <div className="flex items-center gap-2 px-3 py-1 bg-blue-900/50 rounded-lg">
-              <div className="w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin"></div>
-              <span className="text-blue-300 text-sm">Loading OI data...</span>
-            </div>
-          )}
-          
-          {error && oiData.length === 0 && (
-            <div className="px-3 py-1 bg-red-900/50 rounded-lg">
-              <span className="text-red-300 text-sm">Error: {error}</span>
-            </div>
-          )}
-          
-          {/* No data message */}
-          {!loading && !error && oiData.length === 0 && (
-            <div className="px-3 py-1 bg-gray-700 rounded-lg">
-              <span className="text-gray-400 text-sm">No OI data available</span>
-            </div>
-          )}
-          
-          {/* Controls section */}
-          <div className="flex flex-wrap items-center gap-4">
-            {/* Symbol display */}
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-mono text-gray-400">Symbol:</span>
-              <span className="text-sm font-bold text-white bg-white/10 px-2 py-1 rounded">{symbol}</span>
-            </div>
-            
-            {/* Expiry Selector */}
-            {expiryList.length > 0 && (
-              <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4" style={{ color: 'rgba(148,163,184,0.7)' }} />
-                <select
-                  value={selectedExpiry || ''}
-                  onChange={(e) => handleExpiryChange(e.target.value)}
-                  disabled={loadingExpiries}
-                  className="text-white text-xs font-mono px-2 py-1 rounded-lg outline-none transition-all cursor-pointer disabled:opacity-50"
-                  style={{ 
-                    background: 'rgba(0,0,0,0.3)', 
-                    border: '1px solid rgba(0,229,255,0.2)', 
-                    color: '#e2e8f0',
-                    minWidth: '120px'
-                  }}
-                >
-                  {loadingExpiries ? (
-                    <option>Loading...</option>
-                  ) : (
-                    expiryList.map((exp) => (
-                      <option key={exp} value={exp}>{exp}</option>
-                    ))
-                  )}
-                </select>
-                {optionChainConnected && (
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-70" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-400" />
-                  </span>
-                )}
-              </div>
-            )}
-            
-            {/* Legend */}
-            <div className="flex items-center gap-6">
-              <div className="flex items-center gap-2 text-xs font-bold uppercase">
-                <div className="w-3 h-3 bg-[#FF4D4F]/40 border border-[#FF4D4F]/60 rounded"></div>
-                <span className="text-gray-400">Calls</span>
-              </div>
-              <div className="flex items-center gap-2 text-xs font-bold uppercase">
-                <div className="w-3 h-3 bg-[#00FF9F]/40 border border-[#00FF9F]/60 rounded"></div>
-                <span className="text-gray-400">Puts</span>
-              </div>
-            </div>
+    <div className="w-full relative">
+      {/* ── Dashboard Integration Header ─────────────────────────── */}
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <div className="flex flex-col gap-1">
+          <SectionLabel>Option Intelligence Matrix</SectionLabel>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold font-mono tracking-widest text-slate-500 uppercase">Real-time OI Concentration</span>
+            <div className={`w-1.5 h-1.5 rounded-full ${optionChainConnected ? 'bg-cyan-500 animate-pulse' : 'bg-slate-700'}`} />
           </div>
         </div>
 
-        {/* Current Price Indicator */}
-        {spotPrice && (
-          <div className="mb-4 p-4 bg-black/20 rounded-xl border-l-4 border-l-[#00FF9F] border border-gray-800">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">Current Spot Price</span>
-              <div className="text-right">
-                <span className="text-xl font-black text-[#00FF9F]">
-                  ₹{spotPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
-              </div>
+        <div className="flex items-center gap-3">
+          <PremiumDropdown
+            value={selectedExpiry || ''}
+            onChange={handleExpiryChange}
+            options={expiryList}
+            loading={loadingExpiries}
+            placeholder="Expiry"
+            minWidth={156}
+            icon={<Calendar size={12} />}
+          />
+
+          <div className="hidden sm:flex items-center gap-4 px-4 py-2 bg-white/[0.02] border border-white/5 rounded-xl">
+            <div className="flex items-center gap-1.5">
+              <div className="w-2 h-2 rounded-full bg-red-500/50" />
+              <span className="text-[9px] font-bold font-mono text-slate-500 uppercase">Calls</span>
             </div>
-          </div>
-        )}
-
-        {/* OI Heatmap Table */}
-        <div className="relative border border-white/10 rounded-lg overflow-hidden">
-          {/* Fixed Header */}
-          <div className="sticky top-0 z-20 bg-[#111827] border-b border-white/10">
-            <table className="w-full table-fixed">
-              <thead>
-                <tr className="text-left text-xs text-muted-foreground uppercase tracking-wider font-bold">
-                  <th className="py-4 px-2 text-center" style={{ minWidth: '80px' }}>Call OI</th>
-                  <th className="py-4 px-2 text-center" style={{ minWidth: '80px' }}>Call Chg</th>
-                  <th className="py-4 px-2 text-center" style={{ minWidth: '80px' }}>Call LTP</th>
-                  <th className="py-4 px-2 text-center bg-white/5" style={{ minWidth: '80px' }}>Strike</th>
-                  <th className="py-4 px-2 text-center" style={{ minWidth: '80px' }}>Put LTP</th>
-                  <th className="py-4 px-2 text-center" style={{ minWidth: '80px' }}>Put Chg</th>
-                  <th className="py-4 px-2 text-center" style={{ minWidth: '80px' }}>Put OI</th>
-                </tr>
-              </thead>
-            </table>
-          </div>
-
-          {/* Scrollable Body */}
-          <div className="overflow-x-auto overflow-y-auto max-h-[500px] scrollbar-thin scrollbar-thumb-white/10" ref={tableRef}>
-            <table className="w-full table-auto">
-              <tbody className="divide-y divide-white/5">
-                {oiData.map((row) => {
-                  // Use backend ATM calculation instead of frontend derivation
-                  const isATM = actualLiveData?.atm_strike && Math.abs(row.strike - actualLiveData.atm_strike) <= 1;
-
-                  return (
-                    <tr
-                      key={row.strike}
-                      ref={isATM ? atmRowRef : null}
-                      className={`hover:bg-white/5 ${isATM ? 'bg-green-500/10' : ''}`}
-                    >
-                      {/* Call OI with heatmap */}
-                      <td className="py-3 text-center" style={{ minWidth: '80px' }}>
-                        <div
-                          className="px-2 py-1 rounded text-xs font-bold text-white mx-1 overflow-hidden text-ellipsis whitespace-nowrap"
-                          style={{ backgroundColor: 'rgba(239, 68, 68, 0.4)' }}
-                        >
-                          {row.oi.toLocaleString('en-IN')}
-                        </div>
-                      </td>
-
-                      {/* Call Change */}
-                      <td className="py-3 text-center" style={{ minWidth: '80px' }}>
-                        <div className={`text-xs font-bold tabular-nums ${row.change > 0 ? 'text-success-500' : row.change < 0 ? 'text-danger-500' : 'text-gray-300'}`}>
-                          {row.change > 0 ? '+' : ''}{row.change?.toLocaleString('en-IN')}
-                        </div>
-                      </td>
-
-                      {/* Call LTP */}
-                      <td className="py-3 text-center font-mono text-xs tabular-nums" style={{ minWidth: '80px' }}>
-                        {row.ltp?.toLocaleString('en-IN', {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2
-                        })}
-                      </td>
-
-                      {/* Strike */}
-                      <td className="py-3 px-2 text-center font-bold bg-white/5 relative" style={{ minWidth: '80px' }}>
-                        <span className={isATM ? 'text-green-400' : 'text-gray-300'}>
-                          {row.strike.toLocaleString('en-IN')}
-                        </span>
-                        {isATM && <div className="absolute left-0 top-0 bottom-0 w-1 bg-green-500"></div>}
-                      </td>
-
-                      {/* Put LTP */}
-                      <td className="py-3 text-center font-mono text-xs tabular-nums" style={{ minWidth: '80px' }}>
-                        {row.put_ltp?.toLocaleString('en-IN', {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2
-                        })}
-                      </td>
-
-                      {/* Put Change */}
-                      <td className="py-3 text-center" style={{ minWidth: '80px' }}>
-                        <div className={`text-xs font-bold tabular-nums ${row.put_change > 0 ? 'text-success-500' : row.put_change < 0 ? 'text-danger-500' : 'text-gray-300'}`}>
-                          {row.put_change > 0 ? '+' : ''}{row.put_change?.toLocaleString('en-IN')}
-                        </div>
-                      </td>
-
-                      {/* Put OI with heatmap */}
-                      <td className="py-3 text-center" style={{ minWidth: '80px' }}>
-                        <div
-                          className="px-2 py-1 rounded text-xs font-bold text-white mx-1 overflow-hidden text-ellipsis whitespace-nowrap"
-                          style={{ backgroundColor: 'rgba(34, 197, 94, 0.4)' }}
-                        >
-                          {row.put_oi.toLocaleString('en-IN')}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className="mt-4 pt-4 border-t border-white/10">
-          <div className="font-medium mb-2">Interpretation:</div>
-          <div className="text-sm text-muted-foreground space-y-1">
-            <div>• 📍 Green highlight indicates ATM (At-The-Money) strike</div>
-            <div>• Darker colors indicate higher Open Interest</div>
-            <div>• Color coded changes show OI addition (+) or reduction (-)</div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-2 h-2 rounded-full bg-green-500/50" />
+              <span className="text-[9px] font-bold font-mono text-slate-500 uppercase">Puts</span>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* ── Spot Indicator ────────────────────────────────────────── */}
+      {spotPrice && (
+        <div className="group relative overflow-hidden mb-6 p-4 rounded-2xl bg-[#00E5FF]/[0.02] border border-[#00E5FF]/10 transition-all duration-500 hover:bg-[#00E5FF]/[0.04]">
+          <div className="absolute top-0 left-0 w-1 h-full bg-[#00E5FF]" />
+          <div className="flex items-center justify-between relative z-10">
+            <div className="flex flex-col">
+              <span className="text-[10px] font-bold font-mono tracking-[0.2em] text-cyan-500/70 uppercase">Index Spot Reference</span>
+              <span className="text-[9px] font-bold font-mono text-slate-600 uppercase tracking-widest mt-0.5">Live Feed Active</span>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-[10px] font-bold font-mono text-cyan-500/50">INR</span>
+              <span
+                className="text-3xl font-black tabular-nums tracking-tighter text-white"
+                style={{ fontFamily: "'Space Grotesk', sans-serif" }}
+              >
+                {spotPrice.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── The Matrix ────────────────────────────────────────────── */}
+      <div className="relative rounded-2xl overflow-hidden border border-white/5 bg-black/20 backdrop-blur-sm">
+
+        {/* Matrix Header */}
+        <div className="sticky top-0 z-30 bg-[#090e1a]/95 backdrop-blur-xl border-b border-white/10">
+          <div className="grid grid-cols-7 py-3">
+            <div className="col-span-3 text-center border-r border-white/5">
+              <span className="text-[10px] font-bold font-mono tracking-[0.3em] text-red-500/80 uppercase">Call Dynamics</span>
+            </div>
+            <div className="col-span-1 text-center">
+              <span className="text-[10px] font-bold font-mono tracking-[0.3em] text-cyan-400 uppercase">ATM</span>
+            </div>
+            <div className="col-span-3 text-center border-l border-white/5">
+              <span className="text-[10px] font-bold font-mono tracking-[0.3em] text-green-500/80 uppercase">Put Dynamics</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-7 py-2.5 border-t border-white/[0.03] bg-white/[0.01]">
+            <div className="text-right pr-6 text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest">OI Units</div>
+            <div className="text-center text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest">Chg</div>
+            <div className="text-center text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest border-r border-white/5">LTP</div>
+            <div className="text-center text-[9px] font-bold font-mono text-cyan-400 uppercase tracking-widest">Strike</div>
+            <div className="text-center text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest border-l border-white/5">LTP</div>
+            <div className="text-center text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest">Chg</div>
+            <div className="text-left pl-6 text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest">OI Units</div>
+          </div>
+        </div>
+
+        {/* Matrix Body */}
+        <div
+          ref={tableRef}
+          className="overflow-y-auto custom-scrollbar"
+          style={{ maxHeight: '520px' }}
+        >
+          <div className="flex flex-col">
+            {oiData.map((row) => {
+              const checkSpot = actualLiveData?.atm_strike || spotPrice || 0;
+              const isATM = Math.abs(row.strike - checkSpot) <= 1;
+              const callIntensity = row.oi / maxCallOI;
+              const putIntensity = row.put_oi / maxPutOI;
+
+              return (
+                <div
+                  key={row.strike}
+                  ref={isATM ? atmRowRef : null}
+                  className={`grid grid-cols-7 py-2.5 border-b border-white/[0.02] transition-colors duration-300 relative ${isATM ? 'bg-cyan-500/[0.06] border-y border-cyan-500/20 z-10' : 'hover:bg-white/[0.02]'
+                    }`}
+                >
+                  {/* Call OI Intensity Bar */}
+                  <div className="absolute right-[57.14%] top-0 bottom-0 pointer-events-none overflow-hidden transition-all duration-700" style={{ width: `${callIntensity * 42.8}%` }}>
+                    <div className="absolute inset-0 bg-red-500/5 border-r border-red-500/20" />
+                  </div>
+
+                  {/* Call OI */}
+                  <div className="text-right pr-6 text-[12px] font-bold font-mono tabular-nums text-red-100 relative z-10 transition-colors" style={{ opacity: callIntensity > 0.1 ? 1 : 0.4 }}>
+                    {row.oi > 0 ? row.oi.toLocaleString() : '—'}
+                  </div>
+
+                  {/* Call Chg */}
+                  <div className="text-center text-[11px] font-mono text-slate-600 tabular-nums">
+                    {row.change !== 0 ? (row.change > 0 ? `+${row.change}` : row.change) : '—'}
+                  </div>
+
+                  {/* Call LTP */}
+                  <div className="text-center text-[11px] font-bold font-mono text-slate-400 tabular-nums border-r border-white/5">
+                    {row.ltp > 0 ? row.ltp.toFixed(1) : '—'}
+                  </div>
+
+                  {/* Strike */}
+                  <div className={`text-center text-[13px] font-black font-mono tabular-nums tracking-tighter ${isATM ? 'text-cyan-400' : 'text-white'}`}>
+                    {row.strike}
+                  </div>
+
+                  {/* Put LTP */}
+                  <div className="text-center text-[11px] font-bold font-mono text-slate-400 tabular-nums border-l border-white/5">
+                    {row.put_ltp > 0 ? row.put_ltp.toFixed(1) : '—'}
+                  </div>
+
+                  {/* Put Chg */}
+                  <div className="text-center text-[11px] font-mono text-slate-600 tabular-nums">
+                    {row.put_change !== 0 ? (row.put_change > 0 ? `+${row.put_change}` : row.put_change) : '—'}
+                  </div>
+
+                  {/* Put OI Intensity Bar */}
+                  <div className="absolute left-[57.14%] top-0 bottom-0 pointer-events-none overflow-hidden transition-all duration-700" style={{ width: `${putIntensity * 42.8}%` }}>
+                    <div className="absolute inset-0 bg-green-500/5 border-l border-green-500/20" />
+                  </div>
+
+                  {/* Put OI */}
+                  <div className="text-left pl-6 text-[12px] font-bold font-mono tabular-nums text-green-100 relative z-10 transition-colors" style={{ opacity: putIntensity > 0.1 ? 1 : 0.4 }}>
+                    {row.put_oi > 0 ? row.put_oi.toLocaleString() : '—'}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Matrix Footer */}
+      <div className="mt-4 flex items-center justify-between">
+        <div className="flex gap-6">
+          <div className="flex items-center gap-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-red-500/20 border border-red-500/40" />
+            <span className="text-[9px] font-bold font-mono text-slate-600 uppercase tracking-widest">Call Concentration</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-green-500/20 border border-green-500/40" />
+            <span className="text-[9px] font-bold font-mono text-slate-600 uppercase tracking-widest">Put Concentration</span>
+          </div>
+        </div>
+        <span className="text-[9px] font-bold font-mono text-slate-700 uppercase tracking-[0.2em]">Quantum Option Matrix v4.2</span>
+      </div>
+
+      <style jsx>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: rgba(0,0,0,0.1); }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.05); border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(0,229,255,0.2); }
+      `}</style>
     </div>
   );
 };
+
 
 export default memo(OIHeatmap);

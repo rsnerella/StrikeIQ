@@ -1,110 +1,115 @@
-import React, { useState, useEffect } from 'react';
+"use client";
+import React from 'react';
 import { useMarketStore } from '@/stores/marketStore';
+import { useExpirySelector } from '@/hooks/useExpirySelector';
+import { PremiumDropdown } from '@/components/ui/PremiumDropdown';
+import { BarChart2, Calendar } from 'lucide-react';
 
 const SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY"];
 
 export default function SymbolSelector() {
   const currentSymbol = useMarketStore(state => state.currentSymbol);
   const setCurrentSymbol = useMarketStore(state => state.setCurrentSymbol);
-  
-  const [expiries, setExpiries] = useState([]);
-  const [selectedExpiry, setSelectedExpiry] = useState(null);
 
-  useEffect(() => {
-    fetch(`/api/v1/market/expiries?symbol=${currentSymbol}`)
-      .then(async (res) => {
-        if (!res.ok) {
-          console.warn("Backend not available:", res.status)
-          return []
-        }
-
-        const text = await res.text()
-
-        try {
-          return JSON.parse(text)
-        } catch (err) {
-          console.warn("Invalid JSON from API:", text)
-          return []
-        }
-      })
-      .then((data) => {
-        const list =
-          data?.expiries ||
-          data?.data ||
-          data ||
-          []
-
-        if (!Array.isArray(list)) {
-          setExpiries([])
-          return
-        }
-
-        setExpiries(list)
-
-        const today = new Date();
-        
-        const nearest = list
-          .map(e => new Date(e))
-          .filter(e => e >= today)
-          .sort((a: Date, b: Date): number => a.getTime() - b.getTime())[0];
-
-        if (nearest) {
-          setSelectedExpiry(
-            nearest.toISOString().split("T")[0]
-          );
-        }
-      })
-      .catch((err) => {
-        console.warn("API request failed:", err)
-        setExpiries([])
-      });
-  }, [currentSymbol]);
+  const {
+    expiryList,
+    selectedExpiry,
+    loadingExpiries,
+    handleExpiryChange,
+  } = useExpirySelector();
 
   return (
-    <div className="flex items-center justify-between w-full">
-      <div className="flex gap-3 items-center">
-        {SYMBOLS.map(s => (
-          <button
-            key={s}
-            onClick={() => setCurrentSymbol(s)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-              s === currentSymbol
-                ? "bg-teal-500/10 text-teal-400 border border-teal-500/40 shadow-[0_0_10px_rgba(20,184,166,0.3)]"
-                : "text-gray-400 hover:text-white hover:bg-gray-800/50"
-            }`}
-          >
-            {s}
-          </button>
-        ))}
+    <div style={{
+      display: 'flex',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      width: '100%',
+      gap: 16,
+    }}>
+
+      {/* ── Left: Symbol toggle ───────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+
+        {/* Label */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 2 }}>
+          <BarChart2 size={14} style={{ color: 'rgba(0,229,255,0.70)' }} />
+          <span style={{
+            fontSize: 10,
+            fontFamily: "'JetBrains Mono', monospace",
+            fontWeight: 700,
+            letterSpacing: '0.20em',
+            textTransform: 'uppercase',
+            color: 'rgba(148,163,184,0.50)',
+          }}>
+            Index
+          </span>
+        </div>
+
+        {/* Toggle pills */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          padding: 4,
+          borderRadius: 12,
+          background: 'rgba(255,255,255,0.04)',
+          border: '1px solid rgba(255,255,255,0.08)',
+        }}>
+          {SYMBOLS.map(s => {
+            const active = s === currentSymbol;
+            return (
+              <button
+                key={s}
+                onClick={() => setCurrentSymbol(s)}
+                style={{
+                  padding: '5px 16px',
+                  borderRadius: 8,
+                  fontSize: 11,
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontWeight: 700,
+                  letterSpacing: '0.08em',
+                  cursor: 'pointer',
+                  transition: 'all 0.18s ease',
+                  background: active ? 'rgba(0,229,255,0.12)' : 'transparent',
+                  color: active ? '#00E5FF' : 'rgba(148,163,184,0.60)',
+                  border: active ? '1px solid rgba(0,229,255,0.28)' : '1px solid transparent',
+                  boxShadow: active ? '0 0 12px rgba(0,229,255,0.14), inset 0 1px 0 rgba(255,255,255,0.06)' : 'none',
+                }}
+              >
+                {s}
+              </button>
+            );
+          })}
+        </div>
       </div>
-      
-      <div className="flex items-center">
-        <select
-          value={selectedExpiry || ""}
-          onChange={(e) => {
-            const newExpiry = e.target.value;
-            setSelectedExpiry(newExpiry);
-            localStorage.setItem("selectedExpiry", newExpiry);
-          }}
-          style={{minWidth:"140px"}}
-          className="
-            bg-gray-900
-            text-white
-            border border-gray-700
-            rounded-lg
-            px-3 py-1.5
-            text-sm
-            hover:border-blue-500
-            focus:outline-none
-          "
-        >
-          {expiries.map(exp => (
-            <option key={exp} value={exp}>
-              {exp}
-            </option>
-          ))}
-        </select>
+
+      {/* ── Right: Expiry dropdown ────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <Calendar size={12} style={{ color: 'rgba(148,163,184,0.45)' }} />
+          <span style={{
+            fontSize: 10,
+            fontFamily: "'JetBrains Mono', monospace",
+            fontWeight: 700,
+            letterSpacing: '0.20em',
+            textTransform: 'uppercase',
+            color: 'rgba(148,163,184,0.45)',
+          }}>
+            Expiry
+          </span>
+        </div>
+
+        <PremiumDropdown
+          value={selectedExpiry || ''}
+          onChange={handleExpiryChange}
+          options={expiryList}
+          placeholder="Select expiry"
+          loading={loadingExpiries}
+          minWidth={148}
+        />
       </div>
+
     </div>
   );
 }

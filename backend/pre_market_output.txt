@@ -1,0 +1,162 @@
+13:26:18  INFO      pre_market_prep ù \u26a0\ufe0f  DRY RUN MODE ù no data will be modified
+13:26:18  INFO      pre_market_prep ù 
+\u2500\u2500 STEP 1: INSPECT POSTGRESQL TABLES \u2500\u2500
+13:26:19  INFO      pre_market_prep ù \u2705 Connected to PostgreSQL ù 7 tables found
+13:26:19  INFO      pre_market_prep ù   CONFIG (preserve): ['formula_experience', 'formula_master', 'paper_trade_log']
+13:26:19  INFO      pre_market_prep ù   RUNTIME (clean):   ['ai_event_log', 'market_snapshot', 'outcome_log', 'prediction_log']
+13:26:19  INFO      pre_market_prep ù 
+\u2500\u2500 STEP 2: CLEAN RUNTIME TABLES \u2500\u2500
+13:26:19  INFO      pre_market_prep ù   [DRY RUN] Would run: TRUNCATE TABLE "ai_event_log" RESTART IDENTITY CASCADE;
+13:26:19  INFO      pre_market_prep ù   [DRY RUN] Would run: TRUNCATE TABLE "market_snapshot" RESTART IDENTITY CASCADE;
+13:26:19  INFO      pre_market_prep ù   [DRY RUN] Would run: TRUNCATE TABLE "outcome_log" RESTART IDENTITY CASCADE;
+13:26:19  INFO      pre_market_prep ù   [DRY RUN] Would run: TRUNCATE TABLE "prediction_log" RESTART IDENTITY CASCADE;
+13:26:19  INFO      pre_market_prep ù 
+\u2500\u2500 STEP 3: CLEAR REDIS RUNTIME STATE \u2500\u2500
+13:26:19  INFO      pre_market_prep ù \u2705 Redis connected
+13:26:19  INFO      pre_market_prep ù \u2705 No matching Redis runtime keys found (or dry run)
+13:26:19  INFO      pre_market_prep ù 
+\u2500\u2500 STEP 4: RESET LEARNING DATASET \u2500\u2500
+13:26:19  INFO      pre_market_prep ù   [DRY RUN] Would create D:\StrikeIQ\backend\data\learning\learning_signals.jsonl
+13:26:19  INFO      pre_market_prep ù 
+\u2500\u2500 STEP 5: VERIFY BACKEND PIPELINE IMPORTS \u2500\u2500
+13:26:20  INFO      pre_market_prep ù \u2705 app.services.message_router.message_router
+13:26:20  INFO      pre_market_prep ù \u2705 app.services.candle_builder.candle_builder
+13:26:20  INFO      app.services.oi_buildup_engine ù OI Buildup Engine initialized
+13:26:20  INFO      app.services.option_chain_builder ù Option Chain Builder initialized with OI Buildup Engine
+13:26:20  INFO      pre_market_prep ù \u2705 app.services.option_chain_builder.option_chain_builder
+13:26:20  INFO      pre_market_prep ù \u2705 app.services.oi_heatmap_engine.oi_heatmap_engine
+13:26:20  INFO      pre_market_prep ù \u2705 app.services.analytics_broadcaster.analytics_broadcaster
+13:26:20  INFO      pre_market_prep ù \u2705 app.services.advanced_strategies_engine.run_advanced_strategies
+13:26:20  INFO      pre_market_prep ù \u2705 app.services.signal_scoring_engine.signal_scoring_engine
+13:26:20  INFO      pre_market_prep ù \u2705 app.services.structure_engine.structure_engine
+13:26:20  INFO      pre_market_prep ù \u2705 app.services.wave_engine.wave_engine
+13:26:20  INFO      pre_market_prep ù \u2705 app.services.zone_detection_engine.zone_detection_engine
+13:26:20  INFO      pre_market_prep ù \u2705 app.services.candle_pattern_engine.candle_pattern_engine
+13:26:20  INFO      pre_market_prep ù \u2705 app.services.chart_signal_engine.chart_signal_engine
+13:26:20  INFO      app.services.signal_outcome_tracker ù SignalOutcomeTracker initialized | dataset=D:\StrikeIQ\backend\app\services\..\..\data\learning\chart_signals.jsonl
+13:26:20  INFO      pre_market_prep ù \u2705 app.services.signal_outcome_tracker.signal_outcome_tracker
+13:26:20  INFO      pre_market_prep ù 
+\u2500\u2500 STEP 6: SIMULATE TICK FLOW \u2500\u2500
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY BANK
+13:26:20  INFO      pre_market_prep ù \u2705 Tick simulation complete ù routed=0 candle_ticks=65
+13:26:20  INFO      pre_market_prep ù \u2705 Candles built: 1m=5
+13:26:20  INFO      pre_market_prep ù 
+\u2500\u2500 STEP 7: VERIFY CHART SIGNAL ENGINE \u2500\u2500
+13:26:20  INFO      pre_market_prep ù   Chart engine output: signal=WAIT conf=0.083 wave=? trend=INSUFFICIENT_DATA
+13:26:20  INFO      pre_market_prep ù \u2705   \u2713 trend = INSUFFICIENT_DATA
+13:26:20  INFO      pre_market_prep ù \u2705   \u2713 wave = ?
+13:26:20  INFO      pre_market_prep ù \u2705   \u2713 supply_zone = []
+13:26:20  INFO      pre_market_prep ù \u2705   \u2713 demand_zone = []
+13:26:20  INFO      pre_market_prep ù \u2705   \u2713 signal = WAIT
+13:26:20  INFO      pre_market_prep ù \u2705   \u2713 confidence = 0.083
+13:26:20  INFO      pre_market_prep ù \u2705   \u2713 target_zone = []
+13:26:20  INFO      pre_market_prep ù \u2705   \u2713 stop_zone = []
+13:26:20  INFO      pre_market_prep ù 
+\u2500\u2500 STEP 8: VALIDATE WEBSOCKET BROADCAST MESSAGE TYPES \u2500\u2500
+13:26:20  WARNING   app.services.message_router ù Could not parse instrument key: NSE_INDEX|NIFTY 50
+13:26:20  WARNING   pre_market_prep ù \u26a0\ufe0f    ~ index_tick ù returned None/empty (may be normal if no chain data)
+13:26:20  INFO      pre_market_prep ù \u2705   \u2713 option_chain_update ù type=option_chain_update
+13:26:20  INFO      pre_market_prep ù \u2705   \u2713 heatmap_update ù type=heatmap_update
+13:26:20  INFO      pre_market_prep ù \u2705   \u2713 analytics ù type=analytics
+13:26:20  INFO      pre_market_prep ù \u2705   \u2713 advanced_strategies ù type=advanced_strategies
+13:26:20  ERROR     app.services.signal_scoring_engine ù Error building top signals: 'bool' object has no attribute 'get'
+13:26:20  INFO      pre_market_prep ù \u2705   \u2713 signal_score ù type=signal_score
+13:26:20  INFO      pre_market_prep ù \u2705   \u2713 chart_analysis ù type=chart_analysis
+13:26:20  INFO      pre_market_prep ù 
+\u2500\u2500 STEP 9: VALIDATE FRONTEND ZUSTAND STORE \u2500\u2500
+13:26:20  INFO      pre_market_prep ù \u2705   \u2713 wsStore handles 'chart_analysis'
+13:26:20  INFO      pre_market_prep ù \u2705   \u2713 wsStore handles 'advanced_strategies'
+13:26:20  INFO      pre_market_prep ù \u2705   \u2713 wsStore handles 'signal_score'
+13:26:20  INFO      pre_market_prep ù \u2705   \u2713 wsStore handles 'analytics'
+13:26:20  ERROR     pre_market_prep ù \u274c   \u2717 wsStore missing handler for 'option_chain_snapshot'
+13:26:20  INFO      pre_market_prep ù \u2705   \u2713 wsStore handles 'index_tick'
+13:26:20  INFO      pre_market_prep ù 
+\u2500\u2500 STEP 10: FINAL HEALTH REPORT \u2500\u2500
+Traceback (most recent call last):
+  File "D:\StrikeIQ\backend\scripts\pre_market_prep.py", line 626, in <module>
+    asyncio.run(main())
+    ~~~~~~~~~~~^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3312.0_x64__qbz5n2kfra8p0\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3312.0_x64__qbz5n2kfra8p0\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3312.0_x64__qbz5n2kfra8p0\Lib\asyncio\base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "D:\StrikeIQ\backend\scripts\pre_market_prep.py", line 619, in main
+    step10_health_report(
+    ~~~~~~~~~~~~~~~~~~~~^
+        preserve, runtime, cleaned, redis_cleared, dataset_result,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        imports, tick_sim, chart, ws_types, store
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\StrikeIQ\backend\scripts\pre_market_prep.py", line 515, in step10_health_report
+    print(f"\n{BOLD}{CYAN}{border}{RESET}")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3312.0_x64__qbz5n2kfra8p0\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 11-75: character maps to <undefined>

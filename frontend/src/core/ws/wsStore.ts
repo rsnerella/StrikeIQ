@@ -19,9 +19,15 @@ interface WSStore {
   optionChainSnapshot: any
   liveData: any
   wsLiveData: any
+  analytics: any
+  advancedStrategies: any        // Step 14: SMC/ICT/CRT/MSNR
+  signalScore: any               // Step 15: unified score
+  chartAnalysis: any             // Chart intelligence: waves, zones, signals
+  aiPrediction: any              // AI ML Probability Prediction
   _lastChainUpdate: number
   _THROTTLE_MS: number
   handleMessage: (message: any) => void
+  handleAnalytics: (analyticsPayload: any) => void
   setConnected: (v: boolean) => void
   setMarketOpen: (v: boolean | null) => void
   setLastMessage: (msg: any) => void
@@ -40,6 +46,11 @@ export const useWSStore = create<WSStore>((set, get) => ({
   optionChainSnapshot: null,
   liveData: null,
   wsLiveData: null,
+  analytics: null,
+  advancedStrategies: null,   // Step 14
+  signalScore: null,          // Step 15
+  chartAnalysis: null,        // Chart intelligence
+  aiPrediction: null,         // AI ML Prediction
   lastUpdate: 0,
   _lastChainUpdate: 0,
   _THROTTLE_MS: 50,
@@ -49,15 +60,63 @@ export const useWSStore = create<WSStore>((set, get) => ({
 
     // Market status update
     if (message.type === "market_status" && message.market_open !== undefined) {
-      console.log("📊 STORE: market_status →", message.market_open)
       set({ marketOpen: message.market_open, error: null })
       return
     }
 
-    // Market tick
+    // AI Prediction
+    if (message.type === "ai_prediction") {
+      set({ aiPrediction: message, error: null })
+      return
+    }
+
+    // INDEX TICK — backend broadcasts this for NIFTY/BANKNIFTY spot price
+    if (message.type === "index_tick" && message.data) {
+      const tick = message.data
+      set({
+        spot: tick.ltp ?? 0,
+        lastUpdate: Date.now(),
+        liveData: { ...tick, symbol: message.symbol },
+        wsLiveData: { ...tick, symbol: message.symbol },
+        error: null
+      })
+      return
+    }
+
+    // OPTION CHAIN UPDATE — backend broadcasts this every 500ms from option_chain_builder
+    if (message.type === "option_chain_update" && message.data) {
+      const now = Date.now()
+      const store = get()
+
+      if (now - store._lastChainUpdate < store._THROTTLE_MS) {
+        return
+      }
+
+      const data = message.data
+      set({
+        spot: data.spot ?? 0,
+        marketData: data,
+        optionChainSnapshot: data,
+        lastUpdate: now,
+        _lastChainUpdate: now,
+        error: null
+      })
+      return
+    }
+
+    // HEATMAP UPDATE — backend broadcasts this every 3s from oi_heatmap_engine
+    if (message.type === "heatmap_update") {
+      // heatmap data is forwarded via optionChainSnapshot for OIHeatmap component
+      const data = message.data
+      if (data) {
+        set({ marketData: { ...get().marketData, heatmap: data }, error: null })
+      }
+      return
+    }
+
+    // Market tick (legacy format)
     if (message.type === "market_tick" && message.data) {
       const tick = message.data
-      console.log("📊 STORE: market_tick → LTP=", tick.ltp)
       set({
         spot: tick.ltp ?? 0,
         lastUpdate: Date.now(),
@@ -68,9 +127,8 @@ export const useWSStore = create<WSStore>((set, get) => ({
       return
     }
 
-    // Market data with spot price
+    // Market data with spot price (legacy format)
     if (message.type === "market_data" && message.spot !== undefined) {
-      console.log("📊 STORE: market_data → spot=", message.spot)
       set({
         spot: message.spot,
         lastUpdate: Date.now(),
@@ -84,7 +142,6 @@ export const useWSStore = create<WSStore>((set, get) => ({
 
     // Market data with direct ltp (fallback)
     if (message.type === "market_data" && message.ltp !== undefined) {
-      console.log("📊 STORE: market_data → LTP=", message.ltp)
       set({
         spot: message.ltp,
         lastUpdate: Date.now(),
@@ -95,7 +152,7 @@ export const useWSStore = create<WSStore>((set, get) => ({
       return
     }
 
-    // Chain update
+    // Chain update (legacy format)
     if (message.type === "chain_update" && message.data) {
       const now = Date.now()
       const store = get()
@@ -105,13 +162,42 @@ export const useWSStore = create<WSStore>((set, get) => ({
       }
 
       const data = message.data
-      console.log("📊 STORE: chain_update → spot=", data.spot)
       set({
         spot: data.spot ?? 0,
         marketData: data,
         optionChainSnapshot: data,
         lastUpdate: now,
         _lastChainUpdate: now,
+        error: null
+      })
+      return
+    }
+
+    // INTELLIGENCE UPDATE — from LiveStructuralEngine
+    if (message.type === "intelligence_update" && message.intelligence) {
+      set({
+        analytics: { ...get().analytics, intelligence: message.intelligence },
+        lastUpdate: Date.now(),
+        error: null
+      })
+      return
+    }
+
+    // METRICS UPDATE — fallback from LiveStructuralEngine when AI pipeline fails
+    if (message.type === "metrics_update") {
+      set({
+        spot: message.spot ?? get().spot,
+        lastUpdate: Date.now(),
+        error: null
+      })
+      return
+    }
+
+    // AI SIGNAL — from LiveStructuralEngine signal generator
+    if (message.type === "ai_signal") {
+      set({
+        analytics: { ...get().analytics, ai_signals: message.signals },
+        lastUpdate: Date.now(),
         error: null
       })
       return
@@ -126,7 +212,6 @@ export const useWSStore = create<WSStore>((set, get) => ({
         return
       }
 
-      console.log("📊 STORE: optionChain → spot=", message.spot)
       set({
         spot: message.spot ?? 0,
         marketData: message,
@@ -138,48 +223,126 @@ export const useWSStore = create<WSStore>((set, get) => ({
       return
     }
 
-    console.warn("⚠️ WS UNKNOWN MESSAGE TYPE:", message.type)
-    set({ error: `Unknown message type: ${message.type}` })
+    // ADVANCED STRATEGIES — Step 14 (SMC, ICT, CRT, MSNR)
+    if (message.type === "advanced_strategies") {
+      // ADVANCED STRATEGIES — Step 14: only update if symbol or content changed
+      const prevAdv = get().advancedStrategies
+      if (
+        !prevAdv ||
+        prevAdv.symbol !== message.symbol ||
+        prevAdv.timestamp !== message.timestamp
+      ) {
+        set({
+          advancedStrategies: message,
+          analytics: { ...get().analytics, advanced_strategies: message },
+          lastUpdate: Date.now(),
+          error: null
+        })
+      }
+      return
+    }
+
+    // SIGNAL SCORE — Step 15: only update if score meaningfully changed
+    if (message.type === "signal_score") {
+      const prevScore = get().signalScore
+      const scoreDelta = Math.abs((prevScore?.score ?? -1) - (message.score ?? 0))
+      if (
+        !prevScore ||
+        prevScore.symbol !== message.symbol ||
+        scoreDelta >= 0.5 ||
+        prevScore.bias !== message.bias
+      ) {
+        set({
+          signalScore: message,
+          analytics: { ...get().analytics, signal_score: message },
+          lastUpdate: Date.now(),
+          error: null
+        })
+      }
+      return
+    }
+
+    // CHART ANALYSIS — from chart_signal_engine
+    if (message.type === "chart_analysis") {
+      const prev = get().chartAnalysis
+      // Dedup: only update if timestamp or signal changed
+      if (!prev || prev.timestamp !== message.timestamp || prev.signal !== message.signal) {
+        set({
+          chartAnalysis: message,
+          lastUpdate: Date.now(),
+          error: null
+        })
+      }
+      return
+    }
+
+    // Silently ignore known server ack/control messages
+    const silenced = ['subscribed', 'unsubscribed', 'pong', 'ping', 'ack']
+    if (silenced.includes(message.type)) return
+
+    // Unknown — log in dev only, do not pollute error state
+    if (process.env.NODE_ENV === "development") {
+      console.warn("⚠️ WS UNKNOWN MESSAGE TYPE:", message.type)
+    }
+  },
+
+  handleAnalytics: (payload) => {
+    if (!payload) return
+
+    // P5: skip set if analytics timestamp hasn't changed (prevents render on identical payload)
+    const prev = get().analytics
+    if (prev?.timestamp && prev.timestamp === payload.timestamp) return
+
+    if (process.env.NODE_ENV === "development") {
+      console.log("Analytics stored in Zustand")
+    }
+
+    set({
+      analytics: { ...payload },
+      lastUpdate: Date.now(),
+      connected: true,
+      error: null
+    })
   },
 
   setConnected: (v) => {
-    uiLog("STORE UPDATE", { 
-      store: "wsStore", 
-      action: "setConnected", 
-      connected: v 
+    uiLog("STORE UPDATE", {
+      store: "wsStore",
+      action: "setConnected",
+      connected: v
     })
     set({ connected: v })
   },
   setMarketOpen: (v) => {
-    uiLog("STORE UPDATE", { 
-      store: "wsStore", 
-      action: "setMarketOpen", 
-      marketOpen: v 
+    uiLog("STORE UPDATE", {
+      store: "wsStore",
+      action: "setMarketOpen",
+      marketOpen: v
     })
     set({ marketOpen: v })
   },
   setLastMessage: (msg) => {
-    uiLog("STORE UPDATE", { 
-      store: "wsStore", 
-      action: "setLastMessage", 
-      messageType: msg?.type 
+    uiLog("STORE UPDATE", {
+      store: "wsStore",
+      action: "setLastMessage",
+      messageType: msg?.type
     })
     set({ lastMessage: msg })
   },
   setMarketData: (data) => {
-    uiLog("STORE UPDATE", { 
-      store: "wsStore", 
-      action: "setMarketData", 
+    uiLog("STORE UPDATE", {
+      store: "wsStore",
+      action: "setMarketData",
       spot: data?.spot,
-      symbol: data?.symbol 
+      symbol: data?.symbol
     })
     set({ marketData: data })
   },
   setError: (error) => {
-    uiLog("STORE UPDATE", { 
-      store: "wsStore", 
-      action: "setError", 
-      error 
+    uiLog("STORE UPDATE", {
+      store: "wsStore",
+      action: "setError",
+      error
     })
     set({ error })
   }

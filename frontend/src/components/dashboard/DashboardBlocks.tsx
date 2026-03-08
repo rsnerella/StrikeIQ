@@ -5,53 +5,67 @@ import { CARD } from './DashboardTypes';
 
 export function LoadingBlock() {
     return (
-        <div className="flex flex-col items-center justify-center min-h-[60vh]">
-            <div className="relative mb-6">
+        <div className="flex flex-col items-center justify-center min-h-[60vh] relative overflow-hidden">
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] bg-cyan-500/5 rounded-full blur-[120px] pointer-events-none" />
+
+            <div className="relative mb-10 group">
+                <div className="absolute inset-0 rounded-full bg-cyan-500/20 blur-2xl animate-pulse" />
                 <div
-                    className="w-16 h-16 rounded-full border-2 animate-spin"
-                    style={{ borderColor: 'rgba(0,229,255,0.15)', borderTopColor: '#00E5FF' }}
+                    className="w-24 h-24 rounded-full border-[1px] animate-[spin_3s_linear_infinite] relative z-10"
+                    style={{ borderColor: 'rgba(0,229,255,0.05)', borderTopColor: '#00E5FF' }}
                 />
                 <div className="absolute inset-0 flex items-center justify-center">
                     <div
-                        className="w-8 h-8 rounded-full border-2 animate-spin"
-                        style={{ borderColor: 'rgba(124,58,237,0.2)', borderTopColor: '#7C3AED', animationDirection: 'reverse' }}
+                        className="w-16 h-16 rounded-full border-[1px] animate-[spin_2s_linear_infinite] relative z-20"
+                        style={{ borderColor: 'rgba(124,58,237,0.05)', borderTopColor: '#7C3AED', animationDirection: 'reverse' }}
                     />
                 </div>
+                <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="w-1.5 h-1.5 bg-white rounded-full animate-ping shadow-[0_0_15px_white]" />
+                </div>
             </div>
-            <p
-                className="text-sm font-mono animate-pulse tracking-widest uppercase"
-                style={{ color: 'rgba(0,229,255,0.8)', fontFamily: "'JetBrains Mono', monospace" }}
-            >
-                Synchronizing…
-            </p>
-            <p className="text-xs mt-2" style={{ color: 'rgba(148,163,184,0.4)', fontFamily: "'JetBrains Mono', monospace" }}>
-                Connecting to market feed
-            </p>
+
+            <div className="flex flex-col items-center gap-2 relative z-10">
+                <span className="text-xs font-black font-mono tracking-[0.4em] text-cyan-500 uppercase">
+                    Initializing Strike Engine
+                </span>
+                <div className="flex items-center gap-1.5 h-1 w-32 bg-white/5 rounded-full overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 animate-[prog_2s_ease-in-out_infinite]" style={{ width: '40%' }} />
+                </div>
+                <span className="text-[10px] font-bold font-mono text-slate-600 uppercase tracking-widest mt-2">
+                    Establishing Secure WebSocket Node...
+                </span>
+            </div>
+
+            <style jsx>{`
+                @keyframes prog {
+                    0% { transform: translateX(-100%); width: 30%; }
+                    50% { width: 60%; }
+                    100% { transform: translateX(300%); width: 30%; }
+                }
+            `}</style>
         </div>
     );
 }
 
 export function SnapshotReadyBlock() {
     return (
-        <div
-            className="flex flex-col items-center justify-center min-h-[40vh] mx-4 my-6 p-8 rounded-2xl"
-            style={{ ...CARD, border: '1px solid rgba(59,130,246,0.20)' }}
-        >
-            <div
-                className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4"
-                style={{ background: 'rgba(59,130,246,0.10)', border: '1px solid rgba(59,130,246,0.25)' }}
-            >
-                <Database className="w-7 h-7 text-blue-400" />
+        <div className="flex flex-col items-center justify-center min-h-[40vh] mx-4 my-10 p-12 trading-panel relative overflow-hidden group">
+            <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <Database className="w-32 h-32 text-blue-400 rotate-12" />
             </div>
-            <h3 className="text-lg font-bold text-blue-300 tracking-wide mb-2">Snapshot Mode Active</h3>
-            <p className="text-sm text-center max-w-md leading-relaxed mb-4" style={{ color: 'rgba(148,163,184,0.6)' }}>
-                Using REST snapshot data — market is currently closed
+
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-6 bg-blue-500/10 border border-blue-500/20 shadow-[0_0_20px_rgba(59,130,246,0.1)]">
+                <Database className="w-8 h-8 text-blue-400" />
+            </div>
+
+            <h3 className="text-xl font-black text-white tracking-tight mb-2 uppercase italic">Engine on Standby</h3>
+            <p className="text-sm text-center max-w-sm text-slate-500 leading-relaxed font-medium mb-6">
+                Direct WebSocket feed inactive. Utilizing high-fidelity REST snapshots for current analytical state.
             </p>
-            <div
-                className="px-4 py-1.5 rounded-full text-xs font-mono font-bold"
-                style={{ background: 'rgba(59,130,246,0.10)', border: '1px solid rgba(59,130,246,0.22)', color: '#60a5fa' }}
-            >
-                SNAPSHOT MODE
+
+            <div className="px-5 py-2 rounded-xl bg-blue-500/10 border border-blue-500/20 text-[10px] font-black font-mono text-blue-400 tracking-[0.2em] uppercase">
+                Snapshot Mode Active
             </div>
         </div>
     );
@@ -59,26 +73,24 @@ export function SnapshotReadyBlock() {
 
 export function ErrorBlock({ message }: { message: string }) {
     return (
-        <div
-            className="flex flex-col items-center justify-center min-h-[40vh] mx-4 my-6 p-8 rounded-2xl"
-            style={{ ...CARD, border: '1px solid rgba(239,68,68,0.18)' }}
-        >
-            <div
-                className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4"
-                style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.22)' }}
-            >
-                <WifiOff className="w-7 h-7 text-red-400" />
+        <div className="flex flex-col items-center justify-center min-h-[40vh] mx-4 my-10 p-12 trading-panel relative overflow-hidden group">
+            <div className="absolute -bottom-10 -left-10 p-4 opacity-5">
+                <WifiOff className="w-48 h-48 text-red-500 -rotate-12" />
             </div>
-            <h3 className="text-lg font-bold text-red-300 tracking-wide mb-2">Connection Interrupted</h3>
-            <p className="text-sm text-center max-w-md leading-relaxed mb-4" style={{ color: 'rgba(148,163,184,0.6)' }}>
-                {message}
+
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-6 bg-red-500/10 border border-red-500/20 shadow-[0_0_20px_rgba(239,68,68,0.1)]">
+                <WifiOff className="w-8 h-8 text-red-400" />
+            </div>
+
+            <h3 className="text-xl font-black text-white tracking-tight mb-2 uppercase italic">Circuit Interrupted</h3>
+            <p className="text-sm text-center max-w-sm text-slate-500 leading-relaxed font-medium mb-6">
+                {message || "Telemetry stream lost. Retrying connection to primary data nodes..."}
             </p>
-            <div
-                className="px-4 py-1.5 rounded-full text-xs font-mono font-bold"
-                style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.22)', color: '#f87171' }}
-            >
-                OFFLINE
+
+            <div className="px-5 py-2 rounded-xl bg-red-500/10 border border-red-500/20 text-[10px] font-black font-mono text-red-400 tracking-[0.2em] uppercase">
+                System Offline
             </div>
         </div>
     );
 }
+

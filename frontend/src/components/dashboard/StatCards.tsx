@@ -7,8 +7,8 @@ import type { LiveMarketData } from '../../hooks/useLiveMarketData';
 export function SectionLabel({ children }: { children: React.ReactNode }) {
     return (
         <div
-            className="text-[10px] font-bold tracking-[0.20em] uppercase mb-1"
-            style={{ color: 'rgba(148,163,184,0.55)', fontFamily: "'JetBrains Mono', monospace" }}
+            className="text-[10px] font-bold tracking-[0.22em] uppercase"
+            style={{ color: 'rgba(148,163,184,0.50)', fontFamily: "'JetBrains Mono', monospace" }}
         >
             {children}
         </div>
@@ -20,33 +20,48 @@ export function StatCard({
 }: { label: string; value: React.ReactNode; sub?: React.ReactNode; accent?: string }) {
     return (
         <div
-            className="flex flex-col justify-between p-4 sm:p-5 rounded-2xl transition-all duration-300"
-            style={CARD}
-            onMouseEnter={(e) => (e.currentTarget.style.borderColor = CARD_HOVER_BORDER)}
-            onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)')}
+            className="trading-panel flex flex-col justify-between group overflow-visible"
+            onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = CARD_HOVER_BORDER;
+            }}
+            onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)';
+            }}
         >
+            {/* Top highlight bar */}
             <div
-                className="text-[10px] font-semibold tracking-[0.18em] uppercase mb-2"
-                style={{ color: 'rgba(148,163,184,0.55)', fontFamily: "'JetBrains Mono', monospace" }}
-            >
-                {label}
-            </div>
+                className="absolute top-0 left-0 right-0 h-[2px] rounded-t-2xl opacity-50 group-hover:opacity-100 transition-opacity duration-300"
+                style={{ background: `linear-gradient(90deg, transparent, ${accent}, transparent)` }}
+            />
+
+            {/* Background glow */}
             <div
-                className="text-2xl sm:text-3xl font-black tabular-nums leading-none mb-1"
-                style={{
-                    background: `linear-gradient(135deg, ${accent} 0%, #a78bfa 100%)`,
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
-                    fontFamily: "'Space Grotesk', sans-serif",
-                }}
-            >
-                {value}
+                className="absolute -top-10 -left-10 w-32 h-32 blur-[60px] pointer-events-none opacity-0 group-hover:opacity-20 transition-opacity duration-500"
+                style={{ background: accent }}
+            />
+
+            <div className="flex flex-col gap-1 relative z-10">
+                <span className="text-[10px] font-bold font-mono tracking-[0.2em] text-slate-500 uppercase group-hover:text-slate-400 transition-colors">
+                    {label}
+                </span>
+                <div
+                    className="text-3xl sm:text-4xl font-black tabular-nums tracking-tighter"
+                    style={{
+                        background: `linear-gradient(135deg, white 0%, ${accent} 100%)`,
+                        WebkitBackgroundClip: 'text',
+                        WebkitTextFillColor: 'transparent',
+                        filter: `drop-shadow(0 0 10px ${accent}25)`,
+                    }}
+                >
+                    {value}
+                </div>
             </div>
-            {sub && (
-                <div className="text-[11px] font-mono" style={{ color: 'rgba(148,163,184,0.5)' }}>
+
+            <div className="mt-4 pt-3 border-t border-white/5 relative z-10">
+                <div className="text-[11px] font-mono text-slate-500 group-hover:text-slate-400 transition-colors uppercase tracking-tight">
                     {sub}
                 </div>
-            )}
+            </div>
         </div>
     );
 }
@@ -62,31 +77,35 @@ export function StatCardsRow({ data, isAnalyticsEnabled }: StatCardsRowProps) {
     const totalOI = (data?.analytics?.total_call_oi || 0) + (data?.analytics?.total_put_oi || 0);
 
     return (
-        <div id="section-analytics" className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 scroll-mt-20">
+        <div
+            id="section-analytics"
+            className="scroll-mt-20 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
+        >
             <StatCard
-                label="Expected Move"
+                label="VOLATILITY σ"
                 value={isAnalyticsEnabled ? (data?.intelligence?.probability?.expected_move || 0).toFixed(2) : 'N/A'}
-                sub={isAnalyticsEnabled ? `±${(data?.intelligence?.probability?.upper_1sd || 0).toFixed(2)} SD` : 'Analysis disabled'}
+                sub={isAnalyticsEnabled ? `RANGE: ±${(data?.intelligence?.probability?.upper_1sd || 0).toFixed(1)}` : 'Analysis disabled'}
                 accent="#00E5FF"
             />
             <StatCard
-                label="Put-Call Ratio"
+                label="MARKET PCR"
                 value={data?.analytics?.pcr?.toFixed(2) ?? '—'}
-                sub={pcr > 1 ? '▲ Bullish Bias' : pcr < 1 ? '▼ Bearish Bias' : '— Neutral'}
-                accent={pcr > 1 ? '#4ade80' : pcr < 1 ? '#f87171' : '#94a3b8'}
+                sub={pcr > 1 ? 'SENTIMENT: BULLISH' : pcr < 1 ? 'SENTIMENT: BEARISH' : 'SENTIMENT: NEUTRAL'}
+                accent={pcr > 1.2 ? '#4ade80' : pcr < 0.8 ? '#f87171' : '#94a3b8'}
             />
             <StatCard
-                label="Total OI"
+                label="TOTAL OI"
                 value={totalOI > 1e6 ? `${(totalOI / 1e6).toFixed(1)}M` : totalOI.toLocaleString()}
-                sub={`Vol: ${(data?.analytics?.total_volume || 0).toLocaleString()}`}
+                sub={`VOL: ${((data?.analytics?.total_volume || 0) / 1e6).toFixed(1)}M UNITS`}
                 accent="#a78bfa"
             />
             <StatCard
-                label="Breakout Risk"
+                label="BREACH RISK"
                 value={`${data?.intelligence?.probability?.breach_probability?.toFixed(0) ?? '0'}%`}
-                sub={`VWAP: ${data?.analytics?.vwap?.toFixed(2) ?? '—'}`}
+                sub={`VWAP: ${data?.analytics?.vwap?.toFixed(1) ?? '—'}`}
                 accent="#fb923c"
             />
         </div>
     );
 }
+

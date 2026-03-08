@@ -5,6 +5,7 @@ Maintains in-memory option chain and produces snapshots
 
 import asyncio
 import logging
+import math
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
@@ -58,13 +59,28 @@ class OptionChainBuilder:
         logger.info("Option Chain Builder initialized with OI Buildup Engine")
     
     def _get_next_expiry(self) -> str:
-        """Get next Thursday expiry date"""
-        today = datetime.now().date()
+        """Get the nearest Thursday expiry date.
+        On expiry Thursday before 3:30 PM IST, return today (active expiry).
+        After 3:30 PM or if today is not Thursday, return next Thursday.
+        """
+        import pytz
+        ist = pytz.timezone("Asia/Kolkata")
+        today = datetime.now(ist).date()
+        now_ist = datetime.now(ist)
+
         days_until_thursday = (3 - today.weekday()) % 7
+
         if days_until_thursday == 0:
-            days_until_thursday = 7  # Next Thursday if today is Thursday
-        
-        expiry_date = today + timedelta(days=days_until_thursday)
+            # Today is Thursday — check if expiry is still active (before 3:30 PM)
+            if now_ist.hour < 15 or (now_ist.hour == 15 and now_ist.minute <= 30):
+                # Expiry still live — use today
+                expiry_date = today
+            else:
+                # Expiry passed — use next Thursday
+                expiry_date = today + timedelta(days=7)
+        else:
+            expiry_date = today + timedelta(days=days_until_thursday)
+
         return expiry_date.strftime("%Y-%m-%d")
     
     async def start(self):
@@ -89,20 +105,34 @@ class OptionChainBuilder:
     
     async def _snapshot_loop(self):
         """Periodic snapshot generation"""
-        while self._running:
-            try:
-                await asyncio.sleep(0.5)  # 500ms intervals
-                await self._generate_snapshots()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Error in snapshot loop: {e}")
+        try:
+            while self._running:
+                try:
+                    await asyncio.sleep(0.5)  # 500ms intervals
+                    await self._generate_snapshots()
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"Error in snapshot loop: {e}")
+        except asyncio.CancelledError:
+            logger.info("Option chain snapshot loop stopped")
+            raise
     
     async def _generate_snapshots(self):
         """Generate snapshots for all active symbols"""
         current_time = datetime.now()
-        
+
         for symbol in list(self.spot_prices.keys()):
+            # P3: Evict strikes more than 20% from spot to bound memory
+            spot = self.spot_prices.get(symbol, 0)
+            if spot > 0 and symbol in self.chains:
+                far_strikes = [
+                    s for s in list(self.chains[symbol].keys())
+                    if abs(s - spot) / spot > 0.20
+                ]
+                for s in far_strikes:
+                    del self.chains[symbol][s]
+
             # Check if we need to generate snapshot
             last_snapshot = self.last_snapshots.get(symbol, datetime.min)
             if (current_time - last_snapshot).total_seconds() >= 0.5:
@@ -211,7 +241,7 @@ class OptionChainBuilder:
     def update_option_tick(self, symbol: str, strike: float, right: str, ltp: float, oi: int = 0, volume: int = 0):
         """Update option data from tick"""
         try:
-            logger.info(f"OPTION TICK → {symbol}_{strike}{right} | LTP={ltp} | OI={oi} | Volume={volume}")
+            logger.debug(f"OPTION TICK → {symbol}_{strike}{right} | LTP={ltp} | OI={oi} | Volume={volume}")
             
             if symbol not in self.chains:
                 self.chains[symbol] = {}
@@ -223,9 +253,13 @@ class OptionChainBuilder:
                 self.chains[symbol][strike][right] = OptionData(strike=strike)
             
             option_data = self.chains[symbol][strike][right]
+            # Guard against NaN / negative LTP
+            if ltp is None or math.isnan(ltp) or ltp < 0:
+                logger.debug(f"Rejected bad LTP={ltp} for {symbol} {strike} {right}")
+                return
             option_data.ltp = ltp
-            option_data.oi = oi
-            option_data.volume = volume
+            option_data.oi = max(0, oi)   # reject negative OI
+            option_data.volume = max(0, volume)
             option_data.last_update = datetime.now()
             
             # Detect OI buildup signal

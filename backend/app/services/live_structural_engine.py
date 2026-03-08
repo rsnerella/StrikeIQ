@@ -125,15 +125,12 @@ class LiveStructuralEngine:
                 signals = await self._generate_ai_signals(symbol, metrics)
                 
                 if signals:
-                    await manager.broadcast_json(
-                        "market_data",
-                        {
-                            "type": "ai_signal",
-                            "symbol": symbol,
-                            "signals": signals
-                        }
-                    )
-                    logger.info(f"AI SIGNAL BROADCAST: {symbol} -> {signals}")
+                    await manager.broadcast({
+                        "type": "ai_signal",
+                        "symbol": symbol,
+                        "signals": signals
+                    })
+                    logger.debug(f"AI SIGNAL BROADCAST: {symbol} → {len(signals)} signals")
         
         except Exception as e:
             logger.error(f"Error broadcasting AI signals: {e}")
@@ -1111,7 +1108,7 @@ class LiveStructuralEngine:
                 }
                 
                 # Broadcast intelligence to WebSocket clients
-                await manager.broadcast_json("market_data", {
+                await manager.broadcast({
                     "type": "intelligence_update",
                     "symbol": symbol,
                     "intelligence": intelligence_payload
@@ -1124,7 +1121,7 @@ class LiveStructuralEngine:
         except Exception as e:
             logger.error(f"❌ AI pipeline execution failed for {symbol}: {e}")
             # Still broadcast basic metrics without AI analysis
-            await manager.broadcast_json("market_data", {
+            await manager.broadcast({
                 "type": "metrics_update",
                 "symbol": symbol,
                 "timestamp": datetime.now(timezone.utc).isoformat(),

@@ -682,7 +682,7 @@ class MarketStateManager:
             state.spot = spot_price
             state.rest_last_update = datetime.now(timezone.utc)
             
-            print(f"[MarketStateManager] Updated REST spot for {symbol}: {spot_price}")
+            logger.debug(f"[MarketStateManager] Updated REST spot for {symbol}: {spot_price}")
 
 
 # Singleton instance

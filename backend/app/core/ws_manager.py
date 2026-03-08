@@ -5,9 +5,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Global broadcast lock
-broadcast_lock = asyncio.Lock()
-
 
 class WSManager:
 
@@ -16,11 +13,13 @@ class WSManager:
         # Active connections
         self.active_connections: list[WebSocket] = []
 
-        # Prevent race conditions
+        # Prevent race conditions on list mutation
         self._lock = asyncio.Lock()
 
-        # Instance broadcast lock
-        self.broadcast_lock = asyncio.Lock()
+        # STEP 13 MONITORING: broadcast statistics
+        self._total_broadcasts = 0
+        self._total_connects = 0
+        self._peak_connections = 0
 
     async def connect(self, websocket: WebSocket):
 
@@ -28,8 +27,13 @@ class WSManager:
 
             if websocket not in self.active_connections:
                 self.active_connections.append(websocket)
+                self._total_connects += 1
+                self._peak_connections = max(self._peak_connections, len(self.active_connections))
 
-            logger.info(f"🟢 WS CLIENT CONNECTED | clients={len(self.active_connections)}")
+            logger.info(
+                f"🟢 WS CLIENT CONNECTED | clients={len(self.active_connections)} "
+                f"total={self._total_connects} peak={self._peak_connections}"
+            )
 
     async def disconnect(self, websocket: WebSocket):
 
@@ -49,31 +53,41 @@ class WSManager:
         pass
 
     async def broadcast(self, message):
-        """Broadcast message to all connected clients concurrently"""
+        """Broadcast message to all connected clients concurrently.
 
-        async with self.broadcast_lock:
+        We snapshot the connection list under _lock (brief), then release
+        the lock BEFORE awaiting sends — this prevents a slow/dead client
+        from blocking all other clients (head-of-line blocking).
+        """
 
-            logger.info(f"BROADCAST CALLED → clients={len(self.active_connections)}")
-
-            if not self.active_connections:
-                return
-
+        # Brief lock to snapshot connections, then immediately release
+        async with self._lock:
             connections = self.active_connections.copy()
 
-            tasks = []
+        if not connections:
+            return
 
-            for connection in connections:
-                tasks.append(connection.send_json(message))
+        logger.debug(f"WS broadcast → clients={len(connections)}")
 
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(
+            *[conn.send_json(message) for conn in connections],
+            return_exceptions=True
+        )
 
-            # Remove dead connections
-            for conn, result in zip(connections, results):
+        # STEP 13 MONITORING: track broadcast count
+        self._total_broadcasts += 1
 
-                if isinstance(result, Exception):
-                    logger.warning("⚠️ Removing dead WS connection")
-
-                    await self.disconnect(conn)
+        # Remove dead connections (re-acquire lock only for list mutation)
+        dead = [
+            conn for conn, result in zip(connections, results)
+            if isinstance(result, Exception)
+        ]
+        if dead:
+            async with self._lock:
+                for conn in dead:
+                    if conn in self.active_connections:
+                        self.active_connections.remove(conn)
+            logger.warning(f"⚠️ Removed {len(dead)} dead WS connection(s)")
 
 
 # Singleton instance

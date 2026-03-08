@@ -1,12 +1,11 @@
 "use client";
 
-import React, { useState, useEffect, memo } from 'react';
-import { Activity, Database } from 'lucide-react';
+import React, { useEffect, memo } from 'react';
+import { AlertTriangle, Minus } from 'lucide-react';
 import { useLiveMarketData } from '../hooks/useLiveMarketData';
 import { useExpirySelector } from '../hooks/useExpirySelector';
 import { useMarketStore } from '../stores/marketStore';
-import { useModeGuard, useEffectiveSpot, useSnapshotAnalytics, useTimeoutProtection } from './SafeModeGuard';
-import DebugBadge from './DebugBadge';
+import { useModeGuard, useEffectiveSpot } from './SafeModeGuard';
 import SymbolSelector from './SymbolSelector';
 import AIInterpretationPanel from './AIInterpretationPanel';
 import AICommandCenter from './AICommandCenter';
@@ -17,9 +16,21 @@ import AlertPanelFinal from './intelligence/AlertPanelFinal';
 import { LoadingBlock, SnapshotReadyBlock, ErrorBlock } from './dashboard/DashboardBlocks';
 import { TickerStrip } from './dashboard/TickerStrip';
 import { StatCardsRow } from './dashboard/StatCards';
-import { BiasAndMove } from './dashboard/BiasAndMove';
-import { SmartMoneyAndLiquidity } from './dashboard/SmartMoneyAndLiquidity';
-import { CARD } from './dashboard/DashboardTypes';
+import { GammaExposurePanel } from './dashboard/GammaExposurePanel';
+import { InstitutionalFlowPanel } from './dashboard/InstitutionalFlowPanel';
+import { SignalMatrixPanel } from './dashboard/SignalMatrixPanel';
+import { TradeSetupPanel } from './dashboard/TradeSetupPanel';
+import { ChartIntelligencePanel } from './dashboard/ChartIntelligencePanel';
+import { VolatilityRegimePanel } from './dashboard/VolatilityRegimePanel';
+import { TrapDetectionPanel } from './dashboard/TrapDetectionPanel';
+import { GammaSqueezePanel } from './dashboard/GammaSqueezePanel';
+import { LiquidityVacuumPanel } from './dashboard/LiquidityVacuumPanel';
+import { ExpiryMagnetPanel } from './dashboard/ExpiryMagnetPanel';
+import { BiasPanel, ExpectedMovePanel } from './dashboard/BiasAndMove';
+import { SmartMoneyPanel, LiquidityPanel } from './dashboard/SmartMoneyAndLiquidity';
+import { CARD, CARD_HOVER_BORDER } from './dashboard/DashboardTypes';
+import { SectionLabel } from './dashboard/StatCards';
+import type { LiveMarketData } from '../hooks/useLiveMarketData';
 
 // ── Memoized heavy panels ─────────────────────────────────────────────────────
 const MemoizedOIHeatmap = memo(OIHeatmap);
@@ -30,19 +41,152 @@ const MemoizedAICommandCenter = memo(AICommandCenter);
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface DashboardProps { initialSymbol?: string; }
 
+// ── Global dashboard CSS ──────────────────────────────────────────────────────
+const DASHBOARD_CSS = `
+  /* ── Panel card base ──────────────────────────────────────────── */
+  .trading-panel {
+    background: rgba(6,9,18,0.72);
+    border-radius: 18px;
+    border: 1px solid rgba(255,255,255,0.07);
+    padding: 20px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.25), 0 8px 32px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.04);
+    transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.2s ease;
+    position: relative;
+    overflow: hidden;
+    backdrop-filter: blur(24px);
+  }
+  .trading-panel::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent 0%, rgba(0,229,255,0.30) 50%, transparent 100%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+  .trading-panel::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: radial-gradient(ellipse at top left, rgba(0,229,255,0.03), transparent 60%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+  }
+  .trading-panel:hover {
+    border-color: rgba(0,229,255,0.20);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.30), 0 12px 40px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,229,255,0.06), inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+  .trading-panel:hover::before { opacity: 1; }
+  .trading-panel:hover::after  { opacity: 1; }
+  .trading-panel.no-pad { padding: 0; }
+
+  /* ── Panel section label ─────────────────────────────────────── */
+  .panel-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: rgba(148,163,184,0.55);
+    font-family: 'JetBrains Mono', monospace;
+    margin-bottom: 4px;
+  }
+
+  /* ── 12-col responsive grid ──────────────────────────────────── */
+  .dash-grid {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 18px;
+  }
+
+  /* Desktop: exact col spans */
+  .col-12 { grid-column: span 12; }
+  .col-8  { grid-column: span 8;  }
+  .col-6  { grid-column: span 6;  }
+  .col-4  { grid-column: span 4;  }
+  .col-3  { grid-column: span 3;  }
+
+  /* Tablet (768–1279px): 2 columns for most panels */
+  @media (max-width: 1279px) and (min-width: 768px) {
+    .dash-grid { gap: 14px; }
+    .col-3  { grid-column: span 6;  }
+    .col-4  { grid-column: span 6;  }
+    .col-8  { grid-column: span 12; }
+  }
+
+  /* Mobile (<768px): full width for most, 2-col for small panels */
+  @media (max-width: 767px) {
+    .dash-grid { gap: 12px; }
+    .col-3  { grid-column: span 6;  }
+    .col-4  { grid-column: span 12; }
+    .col-6  { grid-column: span 12; }
+    .col-8  { grid-column: span 12; }
+  }
+
+  /* Extra-small (<480px): all full width */
+  @media (max-width: 479px) {
+    .col-3  { grid-column: span 12; }
+  }
+
+  /* h-full support inside grid cells */
+  .dash-grid > div > .trading-panel.h-full { height: 100%; }
+
+  /* ── Section divider ─────────────────────────────────────────── */
+  .section-divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(0,229,255,0.12), rgba(99,102,241,0.10), transparent);
+    margin: 2px 0;
+    border-radius: 1px;
+  }
+
+  /* ── Metric row ──────────────────────────────────────────────── */
+  .metric-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 0;
+  }
+  .metric-label {
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: rgba(148,163,184,0.55);
+  }
+  .metric-value {
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+    color: #fff;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Stat mini-card ──────────────────────────────────────────── */
+  .stat-mini {
+    background: rgba(255,255,255,0.025);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 12px;
+    padding: 10px 12px;
+    transition: background 0.2s ease, border-color 0.2s ease;
+  }
+  .stat-mini:hover {
+    background: rgba(255,255,255,0.042);
+    border-color: rgba(255,255,255,0.11);
+  }
+`;
+
+
+
+// ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function Dashboard({ initialSymbol = 'NIFTY' }: DashboardProps) {
-  // Initialize store with initial symbol if needed
   const setCurrentSymbol = useMarketStore(state => state.setCurrentSymbol);
   const currentSymbol = useMarketStore(state => state.currentSymbol);
-  
+
   useEffect(() => {
-    // Only set initial symbol if store symbol is still default
     if (currentSymbol === 'NIFTY' && initialSymbol !== 'NIFTY') {
       setCurrentSymbol(initialSymbol);
     }
   }, [initialSymbol, setCurrentSymbol, currentSymbol]);
 
-  // Use expiry selector hook - reads symbol from store automatically
   const {
     expiryList,
     selectedExpiry,
@@ -53,153 +197,62 @@ export default function Dashboard({ initialSymbol = 'NIFTY' }: DashboardProps) {
   } = useExpirySelector();
 
   const { data, error, loading, mode } = useLiveMarketData(currentSymbol, selectedExpiry);
-  
+
   const isLiveMode = useModeGuard(mode, 'LIVE');
   const isSnapshotMode = useModeGuard(mode, 'SNAPSHOT');
   const effectiveSpot = useEffectiveSpot(data, mode);
   const isAnalyticsEnabled = (data as any)?.analytics_enabled !== false;
 
-  // Add/remove snapshot-mode body class
+  // Inject global CSS once
   React.useEffect(() => {
-    if (mode !== 'live') {
-      document.body.classList.add('snapshot-mode');
-    } else {
-      document.body.classList.remove('snapshot-mode');
+    const id = 'dashboard-global-css';
+    if (!document.getElementById(id)) {
+      const el = document.createElement('style');
+      el.id = id;
+      el.textContent = DASHBOARD_CSS;
+      document.head.appendChild(el);
     }
-  }, [mode]);
-
-  // Add dashboard card styles
-  React.useEffect(() => {
-    const style = document.createElement('style');
-    style.textContent = `
-      .trading-panel {
-        background: rgba(255,255,255,0.04);
-        border-radius: 12px;
-        border: 1px solid rgba(255,255,255,0.08);
-        padding: 16px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.25);
-        transition: all 0.3s ease;
-        position: relative;
-        overflow: hidden;
-      }
-      
-      .trading-panel::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 1px;
-        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
-        opacity: 0;
-        transition: opacity 0.3s ease;
-      }
-      
-      .trading-panel:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 24px rgba(0,0,0,0.35);
-        border-color: rgba(255,255,255,0.12);
-      }
-      
-      .trading-panel:hover::before {
-        opacity: 1;
-      }
-      
-      .full-width {
-        grid-column: 1 / -1;
-      }
-      
-      .chip {
-        background: rgba(255,255,255,0.1);
-        border: 1px solid rgba(255,255,255,0.2);
-        border-radius: 20px;
-        padding: 8px 16px;
-        color: white;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        font-weight: 500;
-      }
-      
-      .chip:hover {
-        background: rgba(255,255,255,0.2);
-        border-color: rgba(255,255,255,0.3);
-      }
-      
-      .chip-active {
-        background: linear-gradient(135deg, #3b82f6, #1d4ed8);
-        border: 1px solid #3b82f6;
-        border-radius: 20px;
-        padding: 8px 16px;
-        color: white;
-        cursor: pointer;
-        font-weight: 600;
-        box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
-      }
-      
-      /* Typography System */
-      .panel-title {
-        font-size: 14px;
-        font-weight: 600;
-        color: white;
-      }
-      
-      .panel-value {
-        font-size: 18px;
-        font-weight: 700;
-        color: white;
-      }
-      
-      @media (max-width: 768px) {
-        .dashboard-grid {
-          grid-template-columns: 1fr !important;
-        }
-      }
-    `;
-    document.head.appendChild(style);
-    return () => {
-      document.head.removeChild(style);
-    };
+    return () => { document.getElementById(id)?.remove(); };
   }, []);
+
+  // Snapshot-mode body class
+  React.useEffect(() => {
+    document.body.classList.toggle('snapshot-mode', mode !== 'live');
+  }, [mode]);
 
   const safeError = typeof error === 'string' ? error : null;
   const modeLabel = mode === 'live' ? 'LIVE' : mode === 'snapshot' ? 'SNAPSHOT' : mode === 'error' ? 'HALTED' : 'OFFLINE';
   const modeColor = mode === 'live' ? '#4ade80' : mode === 'snapshot' ? '#60a5fa' : '#f87171';
 
-  // ── State guards ──────────────────────────────────────────────────────────
+  // ── State guards ─────────────────────────────────────────────────────────────
   if (loading) return mode === 'snapshot' ? <SnapshotReadyBlock /> : <LoadingBlock />;
   if (safeError) return <ErrorBlock message={safeError} />;
-  // CRITICAL FIX: Always render UI, even in snapshot mode without data
-  // Remove blocking condition that was preventing dashboard from rendering
 
-  // ── Main render ───────────────────────────────────────────────────────────
+  // ── Main render ──────────────────────────────────────────────────────────────
   return (
-    <div
-      className="min-h-screen text-white"
-      style={{ background: 'radial-gradient(ellipse 100% 50% at 50% 0%, #0d1117 0%, #080b10 60%)' }}
-    >
+    <div className="w-full">
       {/* Subtle grid overlay */}
       <div
         className="pointer-events-none fixed inset-0 z-0"
         style={{
           backgroundImage: 'linear-gradient(rgba(0,229,255,1) 1px, transparent 1px), linear-gradient(90deg, rgba(0,229,255,1) 1px, transparent 1px)',
           backgroundSize: '48px 48px',
-          opacity: 0.018,
+          opacity: 0.016,
         }}
       />
 
-      <div className="relative z-10 max-w-[1920px] mx-auto px-3 sm:px-5 lg:px-8 py-4 sm:py-6">
-        <div className="dashboard-grid" style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr',
-          gap: '20px'
-        }}>
+      <div className="relative z-10 w-full max-w-[1920px] mx-auto px-3 sm:px-5 lg:px-8 py-4 sm:py-6">
+        <div className="dash-grid">
 
-        {/* ROW 1 — Symbol Selector + Ticker strip (full width) */}
-        <div className="full-width" style={{ gridColumn: '1 / -1' }}>
-          <div className="trading-panel mb-4">
-            <SymbolSelector />
+          {/* ROW 1 — Symbol Selector (full width) */}
+          <div className="col-12">
+            <div className="trading-panel">
+              <SymbolSelector />
+            </div>
           </div>
-          <div className="trading-panel">
+
+          {/* ROW 2 — Ticker Strip (full width) */}
+          <div className="col-12">
             <TickerStrip
               symbol={currentSymbol}
               data={data}
@@ -209,63 +262,97 @@ export default function Dashboard({ initialSymbol = 'NIFTY' }: DashboardProps) {
               modeColor={modeColor}
             />
           </div>
-        </div>
 
-        {/* ROW 2 — Four stat cards (full width) */}
-        <div className="full-width" style={{ gridColumn: '1 / -1' }}>
-          <div className="trading-panel">
+          {/* ROW 3 — Four Stat Cards (full width, internally 4-col) */}
+          <div className="col-12">
             <StatCardsRow data={data} isAnalyticsEnabled={isAnalyticsEnabled} />
           </div>
-        </div>
 
-        {/* ROW 3 — Alert Panel (compact) */}
-        <div className="full-width" style={{ gridColumn: '1 / -1' }}>
-          <div className="trading-panel" style={{ minHeight: '120px' }}>
-            <MemoizedAlerts alerts={(data as any)?.alerts || []} />
+          {/* ROW 4 — Alert Panel (compact, full width) */}
+          <div className="col-12">
+            <div className="trading-panel" style={{ padding: '10px 16px' }}>
+              <MemoizedAlerts alerts={(data as any)?.alerts || []} />
+            </div>
           </div>
-        </div>
 
-        {/* ROW 4 — Market Bias + Expected Move | Smart Money + Liquidity */}
-        <div className="trading-panel">
-          <BiasAndMove data={data} isSnapshotMode={isSnapshotMode} />
-        </div>
+          {/* ROW 5 — Market Bias (4 cols) | Expected Move Range (8 cols) */}
+          <div className="col-4">
+            <BiasPanel data={data} />
+          </div>
+          <div className="col-8">
+            <ExpectedMovePanel data={data} isSnapshotMode={isSnapshotMode} />
+          </div>
 
-        <div className="trading-panel">
-          <SmartMoneyAndLiquidity
-            data={data}
-            isLiveMode={isLiveMode}
-            isSnapshotMode={isSnapshotMode}
-            mode={mode}
-          />
-        </div>
+          {/* ROW 6 — Smart Money | Liquidity | Gamma Exposure | Institutional Flow (3 cols each) */}
+          <div className="col-3">
+            <SmartMoneyPanel data={data} isSnapshotMode={isSnapshotMode} />
+          </div>
+          <div className="col-3">
+            <LiquidityPanel data={data} />
+          </div>
+          <div className="col-3">
+            <GammaExposurePanel data={data} />
+          </div>
+          <div className="col-3">
+            <InstitutionalFlowPanel data={data} />
+          </div>
 
-        {/* ROW 5 — OI Heatmap (full width horizontal scroll) */}
-        <div className="full-width" style={{ gridColumn: '1 / -1' }}>
-          <div className="trading-panel">
-            <div id="oi-heatmap" className="rounded-2xl overflow-x-auto" style={CARD}>
-              <div className="h-[1px] w-full" style={{ background: 'linear-gradient(90deg, transparent, rgba(245,158,11,0.40), transparent)' }} />
-              <div className="p-4 sm:p-5 min-w-[800px]">
-                <MemoizedOIHeatmap symbol={currentSymbol} />
+          {/* ROW 7 — Signal Matrix (4 cols) | Trade Setup (4 cols) | Chart Intelligence (4 cols) */}
+          <div className="col-4">
+            <SignalMatrixPanel data={data} />
+          </div>
+          <div className="col-4">
+            <TradeSetupPanel data={data} />
+          </div>
+          <div className="col-4">
+            <ChartIntelligencePanel />
+          </div>
+
+          {/* ROW 8 — Volatility Regime (full width) */}
+          <div className="col-12">
+            <VolatilityRegimePanel data={data} />
+          </div>
+
+          {/* ROW 9 — OI Heatmap (full width, horizontal scroll) */}
+          <div className="col-12">
+            <div className="trading-panel" style={{ padding: 0 }}>
+              <div id="oi-heatmap" className="rounded-2xl overflow-x-auto" style={CARD}>
+                <div className="h-[1px] w-full" style={{ background: 'linear-gradient(90deg, transparent, rgba(245,158,11,0.40), transparent)' }} />
+                <div className="p-4 sm:p-5 min-w-[640px]">
+                  <MemoizedOIHeatmap symbol={currentSymbol} />
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        {/* ROW 7 — AI Interpretation Panel */}
-        <div className="full-width" style={{ gridColumn: '1 / -1' }}>
-          <div className="trading-panel">
-            <div id="section-ai" className="scroll-mt-20" />
-            <DebugBadge className="mb-1" />
-            <MemoizedAIPanel intelligence={data?.intelligence ?? null} />
+          {/* ROW 10 — Advanced Intelligence: 4 panels × 3 cols */}
+          <div className="col-3">
+            <TrapDetectionPanel data={data} />
           </div>
-        </div>
+          <div className="col-3">
+            <GammaSqueezePanel data={data} />
+          </div>
+          <div className="col-3">
+            <LiquidityVacuumPanel data={data} />
+          </div>
+          <div className="col-3">
+            <ExpiryMagnetPanel data={data} />
+          </div>
 
-        {/* ROW 8 — AI Command Center */}
-        <div className="full-width" style={{ gridColumn: '1 / -1' }}>
-          <div className="trading-panel">
-            <MemoizedAICommandCenter />
+          {/* ROW 11 — AI Interpretation Panel (full width) */}
+          <div className="col-12">
+            <div className="trading-panel">
+              <div id="section-ai" className="scroll-mt-20" />
+              <MemoizedAIPanel intelligence={data?.intelligence ?? null} />
+            </div>
           </div>
-        </div>
+
+          {/* ROW 12 — AI Command Center (full width) */}
+          <div className="col-12">
+            <div className="trading-panel">
+              <MemoizedAICommandCenter />
+            </div>
+          </div>
 
         </div>
       </div>

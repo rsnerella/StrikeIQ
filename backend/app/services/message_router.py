@@ -74,7 +74,7 @@ class MessageRouter:
             tick["oi"] = oi
             tick["volume"] = volume
 
-            logger.info(
+            logger.debug(
                 f"ROUTING TICK → {instrument_key} LTP={ltp} OI={oi} VOL={volume}"
             )
 
@@ -98,6 +98,20 @@ class MessageRouter:
             # -------------------------------------------------
 
             if instrument_type == "INDEX":
+                # Feed price history for Step 14 advanced strategies
+                try:
+                    from app.services.advanced_strategies_engine import push_price
+                    push_price(symbol, ltp)
+                except Exception:
+                    pass
+
+                # Feed candle builder for chart intelligence
+                try:
+                    from app.services.candle_builder import candle_builder
+                    candle_builder.push_tick(symbol, ltp, volume=volume)
+                except Exception:
+                    pass
+
                 return self._create_index_tick(symbol, ltp, timestamp)
 
             elif instrument_type == "OPTION":
@@ -127,11 +141,7 @@ class MessageRouter:
                 
                 # Forward to option chain builder
                 try:
-                    if hasattr(asyncio, 'create_task'):
-                        asyncio.create_task(option_chain_builder.process_option_tick(normalized_tick))
-                    else:
-                        loop = asyncio.get_event_loop()
-                        loop.create_task(option_chain_builder.process_option_tick(normalized_tick))
+                    asyncio.create_task(option_chain_builder.process_option_tick(normalized_tick))
                 except Exception as e:
                     logger.error(f"Failed to forward option tick: {e}")
                 
@@ -170,11 +180,16 @@ class MessageRouter:
 
             if segment == "NSE_INDEX":
 
-                if "Nifty 50" in token:
+                token_upper = token.upper()
+
+                if "NIFTY 50" in token_upper or "NIFTY50" in token_upper:
                     return {"symbol": "NIFTY", "type": "INDEX"}
 
-                elif "Nifty Bank" in token:
+                elif "NIFTY BANK" in token_upper or "BANKNIFTY" in token_upper:
                     return {"symbol": "BANKNIFTY", "type": "INDEX"}
+
+                elif "FINNIFTY" in token_upper or "FIN NIFTY" in token_upper:
+                    return {"symbol": "FINNIFTY", "type": "INDEX"}
 
                 else:
                     logger.debug(f"Unknown index symbol: {token}")

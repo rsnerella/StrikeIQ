@@ -128,9 +128,17 @@ async def lifespan(app: FastAPI):
 
         if token:
 
-            logger.info("Starting Upstox market feed")
-
-            await start_market_feed()
+            from app.services.market_status_service import get_market_status
+            
+            status = await get_market_status()
+            
+            if status == "OPEN":
+                logger.info("Starting Upstox market feed")
+                from app.services.websocket_market_feed import start_market_feed
+                
+                asyncio.create_task(start_market_feed())
+            else:
+                logger.info("Market closed — skipping market feed startup")
 
         else:
 
@@ -178,32 +186,31 @@ async def lifespan(app: FastAPI):
 
     logger.info("🛑 Shutdown initiated...")
 
+    # Stop websocket feed
     try:
-        if hasattr(app.state, "analytics_task"):
-            app.state.analytics_task.cancel()
-            await asyncio.gather(app.state.analytics_task, return_exceptions=True)
-            logger.info("Analytics loop stopped")
-    except Exception as e:
-        logger.error(f"Analytics shutdown error: {e}")
+        from app.services.websocket_market_feed import market_feed_instance
 
-    try:
-        await ws_feed_manager.cleanup_all()
-        logger.info("WS feed cleaned")
-    except Exception as e:
-        logger.error(f"WS cleanup failed: {e}")
+        if market_feed_instance:
+            await market_feed_instance.stop()
 
-    try:
-        if ENABLE_AI:
-            ai_scheduler.stop()
     except Exception as e:
-        logger.error(f"AI Scheduler stop failed: {e}")
+        logger.warning(f"Market feed stop error: {e}")
 
+    # Stop background services safely
     try:
-        auth_service = get_upstox_auth_service()
-        await auth_service.close()
-        logger.info("Auth service closed")
+        if hasattr(app.state, "option_chain_builder"):
+            await app.state.option_chain_builder.stop()
+
+        if hasattr(app.state, "analytics_broadcaster"):
+            await app.state.analytics_broadcaster.stop()
+
+        if hasattr(app.state, "oi_heatmap_engine"):
+            await app.state.oi_heatmap_engine.stop()
+
     except Exception as e:
-        logger.error(f"Auth shutdown failed: {e}")
+        logger.warning(f"Background service stop error: {e}")
+
+    logger.info("Shutdown complete")
 
 
 # ================= APP =================

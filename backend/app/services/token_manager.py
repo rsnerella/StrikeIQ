@@ -189,6 +189,21 @@ class TokenManager:
         logger.warning("No Upstox token available")
         return None
 
+    async def save_token(self, token: str) -> None:
+        """
+        Save token to memory and Redis.
+        """
+        self._access_token = token
+        try:
+            await redis_client.setex(
+                "upstox_access_token",
+                3600,  # 1 hour expiry
+                token
+            )
+            logger.info("Token saved to Redis")
+        except Exception as e:
+            logger.warning(f"Failed to save token to Redis: {e}")
+
 
 # Global singleton instance
 token_manager = TokenManager()

@@ -5,10 +5,10 @@
  * It does NOT create WebSocket connections.
  */
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
 import { useWSStore } from "@/core/ws/wsStore"
 import { useOptionChainStore } from "@/core/ws/optionChainStore"
-import { throttle } from "@/utils/throttle"
+import throttle from "lodash/throttle"
 import { uiLog } from "@/utils/uiLogger"
 
 export interface LiveMarketData {
@@ -49,20 +49,19 @@ export function useLiveMarketData(symbol: string, expiry: string | null) {
   }
 
   // READ ONLY from stores
-  const { spot, lastUpdate, connected } = useWSStore()
+  const { spot, lastUpdate, connected, analytics } = useWSStore()
   const { optionChainData, optionChainLastUpdate } = useOptionChainStore()
+  
+  // Spot fallback logic
+  const effectiveSpot =
+    optionChainData?.spot ||
+    spot ||
+    0
 
-  // Throttled update function
-  const throttledSetData = useRef(
-    throttle((transformedData: LiveMarketData) => {
-      const safeSpot = Number(transformedData.spot) || 0
-      console.log("📊 UI RENDER: spot=", safeSpot, "symbol=", transformedData.symbol)
-      setData(transformedData)
-      setMode("live")
-      setLoading(false)
-      setError(null)
-    }, 100)
-  ).current
+  // Throttled update function - memoized to prevent re-renders
+  const throttledSetData = useMemo(() => {
+    return throttle(setData, 300)
+  }, [])
 
   useEffect(() => {
     uiLog("COMPONENT MOUNTED", "useLiveMarketData")
@@ -73,27 +72,60 @@ export function useLiveMarketData(symbol: string, expiry: string | null) {
 
   useEffect(() => {
     // Transform store data → UI data
+    const safeAnalytics = analytics || {}
+    
+    if (process.env.NODE_ENV === "development") {
+      console.log("🔗 ANALYTICS FROM STORE:", safeAnalytics)
+    }
+    
     const transformed: LiveMarketData = {
       symbol,
-      spot: spot || optionChainData?.spot || 0,
+      spot: effectiveSpot,
       timestamp: new Date(lastUpdate || optionChainLastUpdate).toISOString(),
       analytics_enabled: optionChainData?.analytics_enabled,
       available_expiries: [],
       optionChain: optionChainData
         ? {
           symbol: optionChainData.symbol || symbol,
-          spot: optionChainData.spot || spot,
+          spot: optionChainData.spot || effectiveSpot,
           expiry: optionChainData.expiry || expiry || "",
           calls: optionChainData.calls || [],
           puts: optionChainData.puts || []
         }
         : null,
       analytics: optionChainData?.analytics,
-      intelligence: optionChainData?.intelligence
+      intelligence: {
+        // Map analytics to intelligence object for UI components
+        bias: {
+          ...safeAnalytics?.bias,
+          label: safeAnalytics?.bias?.divergence_type === 'bullish' ? 'BULLISH' : 
+                safeAnalytics?.bias?.divergence_type === 'bearish' ? 'BEARISH' : 'NEUTRAL',
+          score: safeAnalytics?.bias?.bias_strength || 0
+        },
+        probability: safeAnalytics?.expected_move,
+        volatility_regime: safeAnalytics?.structural?.volatility_regime ?? "UNKNOWN",
+        breach_probability: safeAnalytics?.structural?.breach_probability ?? 0,
+        expected_move: safeAnalytics?.structural?.expected_move ?? 0,
+        gamma_regime: safeAnalytics?.structural?.gamma_regime ?? "neutral",
+        support_level: safeAnalytics?.structural?.support_level ?? 0,
+        resistance_level: safeAnalytics?.structural?.resistance_level ?? 0,
+        net_gamma: safeAnalytics?.structural?.net_gamma ?? 0,
+        gamma_flip_level: safeAnalytics?.structural?.gamma_flip_level ?? 0,
+        distance_from_flip: safeAnalytics?.structural?.distance_from_flip ?? 0,
+        intent_score: safeAnalytics?.structural?.intent_score ?? 0,
+        oi_velocity: safeAnalytics?.structural?.oi_velocity ?? 0,
+        total_oi: safeAnalytics?.structural?.total_oi ?? 0,
+        // Keep existing optionChain intelligence if available
+        ...optionChainData?.intelligence
+      }
+    }
+    
+    if (process.env.NODE_ENV === "development") {
+      console.log("🧠 INTELLIGENCE MAPPING:", transformed.intelligence)
     }
 
     throttledSetData(transformed)
-  }, [spot, optionChainData, lastUpdate, optionChainLastUpdate, symbol, expiry])
+  }, [spot, optionChainData, lastUpdate, optionChainLastUpdate, analytics, symbol, expiry])
 
   useEffect(() => {
     // Handle connection status
@@ -105,6 +137,13 @@ export function useLiveMarketData(symbol: string, expiry: string | null) {
       setLoading(false)
     }
   }, [connected, data])
+
+  // Cleanup throttle on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      throttledSetData.cancel()
+    }
+  }, [throttledSetData])
 
   return {
     data,

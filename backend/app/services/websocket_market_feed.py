@@ -29,6 +29,9 @@ from app.services.live_structural_engine import LiveStructuralEngine
 from app.core.live_market_state import get_market_state_manager
 from app.core.logging_config import TICK_DEBUG
 
+# Global market feed instance
+market_feed_instance = None
+
 # Import new components
 from app.services.message_router import message_router
 from app.services.option_chain_builder import option_chain_builder
@@ -125,6 +128,9 @@ class WebSocketMarketFeed:
         self.tick_counter = 0
         self.last_atm = None
         self.instrument_registry = None
+        self.last_index_price = None
+        self._failsafe_task: Optional[asyncio.Task] = None  # P5: track to prevent leaks
+        self._disconnect_task: Optional[asyncio.Task] = None  # P1: track to prevent duplicate reconnects
         
         # AUDIT METRICS - STEP 1: Queue Consumer Lag Detection
         self.max_queue_size = 0
@@ -356,16 +362,27 @@ class WebSocketMarketFeed:
             # ADD OPTION INSTRUMENTS FOR BOTH NIFTY AND BANKNIFTY
             if self.instrument_registry and self.current_expiry:
                 try:
-                    options_nifty = self.instrument_registry.get_option_instruments("NIFTY", self.current_expiry)
-                    options_banknifty = self.instrument_registry.get_option_instruments("BANKNIFTY", self.current_expiry)
+                    options_nifty = self.instrument_registry.get_option_instruments("NIFTY")
+                    options_banknifty = self.instrument_registry.get_option_instruments("BANKNIFTY")
+                    
+                    # Filter to keep only strikes near ATM to prevent websocket overload
+                    spot = self.last_index_price
+                    if spot is None:
+                        logger.info("Spot not available yet — skipping ATM filtering")
+                        return
                     
                     all_options = options_nifty + options_banknifty
                     
-                    for option_key in all_options:
-                        instrument_keys.append(option_key)
-                        logger.info(f"OPTION INSTRUMENT: {option_key}")
+                    filtered = [
+                        opt for opt in all_options
+                        if abs(opt["strike"] - spot) <= 1250
+                    ]
                     
-                    logger.info(f"ADDED {len(options_nifty)} NIFTY options + {len(options_banknifty)} BANKNIFTY options")
+                    for opt in filtered:
+                        instrument_keys.append(opt["instrument_key"])
+                        logger.info(f"OPTION INSTRUMENT: {opt}")
+                    
+                    logger.info(f"OPTIONS SUBSCRIBED → {len(filtered)} ATM instruments")
                     
                 except Exception as e:
                     logger.warning(f"Failed to get option instruments: {e}")
@@ -415,8 +432,10 @@ class WebSocketMarketFeed:
             # Confirm subscription sent
             logger.info("✅ SUBSCRIPTION SENT - WAITING FOR MARKET DATA")
             
-            # TASK 6: START FAILSAFE TIMER FOR NO DATA DETECTION
-            asyncio.create_task(self._failsafe_no_data_check())
+            # TASK 6: START FAILSAFE TIMER FOR NO DATA DETECTION — cancel old task first
+            if self._failsafe_task and not self._failsafe_task.done():
+                self._failsafe_task.cancel()
+            self._failsafe_task = asyncio.create_task(self._failsafe_no_data_check())
 
         except Exception as e:
 
@@ -577,155 +596,71 @@ class WebSocketMarketFeed:
 
             await asyncio.sleep(10)
 
+    async def _handle_message(self, raw: bytes) -> None:
+        """
+        Decode raw Upstox Protobuf frame → push valid ticks into self._message_queue.
+
+        Pipeline:
+            _recv_loop → _handle_message → _message_queue → _process_loop → message_router
+        """
+        try:
+            ticks = await decode_protobuf_message(raw)
+
+            if not ticks:
+                return
+
+            now = time.time()
+            for tick in ticks:
+                tick["_ingest_time"] = now
+                try:
+                    self._message_queue.put_nowait(tick)
+                    self.tick_counter += 1
+                except asyncio.QueueFull:
+                    self.dropped_ticks += 1
+                    now2 = time.time()
+                    if now2 - self.last_queue_warning > 5:
+                        logger.warning(
+                            "QUEUE FULL — dropping tick. dropped_total=%d queue_size=%d",
+                            self.dropped_ticks,
+                            self._message_queue.qsize(),
+                        )
+                        self.last_queue_warning = now2
+
+        except Exception as e:
+            logger.error("_handle_message error: %s", e, exc_info=True)
+
     async def _recv_loop(self):
+        try:
+            while self.running:
 
-        while self.running:
+                try:
 
-            try:
+                    if not self.websocket:
+                        await asyncio.sleep(1)
+                        continue
 
-                if not self.websocket:
-                    await asyncio.sleep(1)
-                    continue
+                    raw = await self.websocket.recv()
 
-                raw = await self.websocket.recv()
-                
-                if getattr(self, "_debug_ws", True):
-                    logger.info("WS FRAME RECEIVED")
-                    try:
-                        logger.info(f"WS FRAME SIZE = {len(raw)}")
-                    except Exception:
-                        logger.info("WS FRAME SIZE UNKNOWN")
-                logger.info(f"WS FRAME TYPE = {type(raw)}")
+                    if getattr(self, "_debug_ws", False):
+                        logger.debug(f"WS FRAME SIZE = {len(raw) if raw else 0}")
 
-                if not raw:
-                    continue
+                    if not raw:
+                        continue
 
-                # STEP 1: PACKET SIZE LOGGING - DEBUG ONLY
-                packet_size = len(raw)
-                if TICK_DEBUG and logger.isEnabledFor(logging.DEBUG):
-                    logger.debug("PACKET SIZE = %d", packet_size)
-                
-                # STEP 1: PROTOBUF DECODING LOGS - DEBUG ONLY
-                if TICK_DEBUG:
-                    logger.debug("STARTING PROTOBUF DECODE")
-                
-                # STEP 1: Detect JSON control frames
-                if isinstance(raw, str):
-                    logger.info(f"WS CONTROL MESSAGE: {raw}")
-                    try:
-                        import json
-                        msg = json.loads(raw)
+                    await self._handle_message(raw)
 
-                        if "type" in msg:
-                            logger.info(f"WS CONTROL TYPE: {msg['type']}")
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.warning(f"WebSocket recv error: {e} — triggering disconnect handler")
+                    # P1: only spawn one disconnect handler at a time
+                    if not self._disconnect_task or self._disconnect_task.done():
+                        self._disconnect_task = asyncio.create_task(self._handle_disconnect())
+                    return  # Exit this recv loop; _handle_disconnect will restart tasks
 
-                        if "data" in msg:
-                            logger.info(f"CONTROL DATA: {msg['data']}")
-
-                    except Exception as e:
-                        logger.warning(f"CONTROL MESSAGE PARSE ERROR: {e}")
-
-                    continue
-
-                # STEP 3: Binary frame handling
-                if not isinstance(raw, (bytes, bytearray)):
-                    logger.warning(f"UNKNOWN FRAME TYPE: {type(raw)}")
-                    continue
-
-                # STEP 3: CRITICAL - RAW MESSAGE DEBUGGING BEFORE PARSING
-                logger.debug(f"=== RAW MESSAGE DEBUG ===")
-                logger.debug(f"RAW MESSAGE TYPE: {type(raw)}")
-                logger.debug(f"RAW PACKET SIZE: {len(raw)}")
-                
-                # Log first 50 bytes for structure analysis
-                if len(raw) > 0:
-                    sample_bytes = raw[:50]
-                    logger.debug(f"FIRST 50 BYTES: {sample_bytes.hex()}")
-                
-                if getattr(self, "_debug_ws", True):
-                    logger.info("STARTING PROTOBUF DECODE")
-                # STEP 4: DECODE PROTOBUF
-                ticks = await decode_protobuf_message(raw)
-                if getattr(self, "_debug_ws", True):
-                    logger.info("PROTOBUF DECODE COMPLETE")
-                if TICK_DEBUG and logger.isEnabledFor(logging.DEBUG):
-                    logger.debug("PARSER OUTPUT → %d ticks", len(ticks))
-                if TICK_DEBUG and logger.isEnabledFor(logging.DEBUG):
-                    logger.debug("TICKS PARSED = %d", len(ticks))
-                
-                # Update throughput counter
-                self.tick_counter += len(ticks)
-                
-                if not ticks:
-                    if TICK_DEBUG:
-                        logger.warning("NO TICKS IN MESSAGE")
-                    
-                if ticks:
-                    # STEP 2: TICK PIPELINE TRACE - DEBUG ONLY
-                    if TICK_DEBUG:
-                        logger.debug("PUSHING TICKS INTO ANALYTICS QUEUE")
-                        
-                    self._debug_tick_counter = getattr(self, "_debug_tick_counter", 0)
-                    queue_put = self._message_queue.put_nowait
-                    now = time.time()
-                    
-                    for tick in ticks:
-                        tick["_ingest_time"] = now
-                        try:
-                            self._debug_tick_counter += 1
-                            if self._debug_tick_counter % 500 == 0:
-                                logger.info(f"TICK PIPELINE ACTIVE count={self._debug_tick_counter}")
-                            queue_put(tick)
-                        except asyncio.QueueFull:
-                            self.dropped_ticks += 1
-                            if self.dropped_ticks % 100 == 0:
-                                logger.warning(f"Dropped ticks count: {self.dropped_ticks}")
-                    
-                queue_size = self._message_queue.qsize()
-                
-                # AUDIT METRICS - STEP 1: Queue Consumer Lag Detection
-                self.max_queue_size = max(self.max_queue_size, queue_size)
-                
-                # Bounded buffer to prevent memory growth with running total
-                self.queue_size_samples.append(queue_size)
-                self.queue_size_total += queue_size
-                
-                if len(self.queue_size_samples) > 100:
-                    removed = self.queue_size_samples.pop(0)
-                    self.queue_size_total -= removed
-                
-                queue_limit = int(self._message_queue.maxsize * 0.8)
-                
-                if queue_size > queue_limit and now - self.last_queue_lag_warning > 10:
-                    logger.warning(f"QUEUE_LAG_WARNING: Queue size {queue_size}/{self._message_queue.maxsize} ({queue_size/self._message_queue.maxsize*100:.1f}%)")
-                    logger.warning(f"  Max observed: {self.max_queue_size}, Avg: {self.avg_queue_size:.1f}")
-                    self.last_queue_lag_warning = now
-                    
-                    # AUDIT METRICS - STEP 1: Queue Consumer Lag Detection
-                    self.max_queue_size = max(self.max_queue_size, queue_size)
-                    
-                    # Bounded buffer to prevent memory growth with running total
-                    self.queue_size_samples.append(queue_size)
-                    self.queue_size_total += queue_size
-                    
-                    if len(self.queue_size_samples) > 100:
-                        removed = self.queue_size_samples.pop(0)
-                        self.queue_size_total -= removed
-                    
-                    queue_limit = int(self._message_queue.maxsize * 0.8)
-                    
-                    if queue_size > queue_limit and now - self.last_queue_lag_warning > 10:
-                        logger.warning(f"QUEUE_LAG_WARNING: Queue size {queue_size}/{self._message_queue.maxsize} ({queue_size/self._message_queue.maxsize*100:.1f}%)")
-                        logger.warning(f"  Max observed: {self.max_queue_size}, Avg: {self.avg_queue_size:.1f}")
-                        self.last_queue_lag_warning = now
-
-            except Exception as e:
-
-                logger.error(f"WebSocket recv error: {e}")
-
-                await self._handle_disconnect()
-
-                break
+        except asyncio.CancelledError:
+            logger.info("WebSocket receive loop stopped")
+            raise
 
     async def _process_loop(self):
         """Process queued binary messages: decode protobuf → route ticks → broadcast."""
@@ -799,7 +734,8 @@ class WebSocketMarketFeed:
                     "processed_ticks": self.processed_ticks,
                     "max_tick_latency": self.max_tick_latency
                 }
-                logger.info(f"SYSTEM METRICS {metrics}")
+                if metrics["processed_ticks"] > 0:
+                    logger.info(f"SYSTEM METRICS {metrics}")
                 
                 # Calculate avg queue size using running total (no sum() operation)
                 if self.queue_size_samples:
@@ -916,6 +852,10 @@ class WebSocketMarketFeed:
                 
                 if not ltp:
                     return  # Skip malformed ticks
+                
+                # Update last_index_price for NIFTY
+                if symbol == "NIFTY":
+                    self.last_index_price = ltp
                 
                 # AUDIT METRICS - STEP 3: Option Chain Builder CPU Time
                 start = time.time()
@@ -1213,3 +1153,28 @@ def build_option_keys(symbol: str, atm: int, expiry: str):
         logger.error(f"OPTION KEY BUILD FAILED: {e}")
 
     return keys
+
+
+async def start_market_feed():
+    """Start the global market feed singleton. Safe to call multiple times."""
+    global market_feed_instance
+    
+    if market_feed_instance and market_feed_instance.running:
+        logger.info("Market feed already running — skipping duplicate start")
+        return
+    
+    market_feed_instance = WebSocketMarketFeed()
+    await market_feed_instance.start()
+
+
+async def stop_market_feed():
+    """Stop the global market feed singleton."""
+    global market_feed_instance
+    
+    if market_feed_instance:
+        try:
+            await market_feed_instance.disconnect()
+        except Exception as e:
+            logger.error(f"stop_market_feed error: {e}")
+        finally:
+            market_feed_instance = None

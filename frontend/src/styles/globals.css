@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -44,20 +46,19 @@ body {
   html {
     scroll-behavior: smooth;
     overflow-anchor: none;
-    scroll-padding-top: 0;
-    scroll-padding-bottom: 0;
+    scroll-padding-top: 64px; /* account for sticky navbar */
   }
   
   body {
     @apply bg-background text-foreground;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     overflow-x: hidden;
-    max-width: 100vw;
+    width: 100%;
+    -webkit-tap-highlight-color: transparent;
   }
   
   * {
-    scroll-margin-top: 0;
-    scroll-margin-bottom: 0;
+    scroll-margin-top: 64px;
   }
 }
 
@@ -96,6 +97,23 @@ body {
   .oi-heatmap-cell:hover {
     transform: scale(1.05);
     z-index: 10;
+  }
+
+  /* Responsive Table Container */
+  .table-container {
+    overflow-x: auto;
+    width: 100%;
+  }
+
+  /* Responsive Typography */
+  .responsive-text {
+    font-size: clamp(14px, 2vw, 18px);
+  }
+
+  /* Responsive Buttons */
+  .responsive-button {
+    min-height: 44px;
+    padding: 10px 14px;
   }
   
   .signal-card {

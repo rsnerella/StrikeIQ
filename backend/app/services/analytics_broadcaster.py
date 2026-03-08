@@ -7,6 +7,7 @@ Stable production version
 
 import asyncio
 import logging
+import time
 from typing import Dict, Any, Optional
 from datetime import datetime
 
@@ -26,11 +27,17 @@ class AnalyticsBroadcaster:
 
         # update interval
         self.update_interval = 3.0
+        
+        # analytics broadcast interval control
+        self.ANALYTICS_INTERVAL = 3  # seconds
+        self._last_analytics_time = 0
 
         # engines (lazy loaded)
         self._bias_engine = None
         self._expected_move_engine = None
         self._structural_engine = None
+        self._adv_strategies_enabled = True  # Step 14
+        self._signal_scoring_enabled = True  # Step 15
 
     # --------------------------------------------------------
     # ANALYTICS COMPUTATION
@@ -90,14 +97,16 @@ class AnalyticsBroadcaster:
 
                 try:
 
-                    logger.info(f"COMPUTING MARKET BIAS FOR {symbol}")
+                    logger.debug(f"COMPUTING MARKET BIAS FOR {symbol}")
 
                     bias = bias_engine.compute(engine_data)
 
-                    analytics_results["market_bias"] = {
-                        "pcr": getattr(bias, "pcr", None),
-                        "bias": getattr(bias, "bias", None),
-                        "bias_strength": getattr(bias, "bias_strength", None),
+                    analytics_results["bias"] = {
+                        "pcr": getattr(bias, "pcr", 0),
+                        "bias_strength": getattr(bias, "bias_strength", 0),
+                        "price_vs_vwap": getattr(bias, "price_vs_vwap", 0),
+                        "divergence_detected": getattr(bias, "divergence_detected", False),
+                        "divergence_type": getattr(bias, "divergence_type", "none"),
                     }
 
                 except Exception as e:
@@ -113,13 +122,17 @@ class AnalyticsBroadcaster:
 
                 try:
 
-                    logger.info(f"COMPUTING EXPECTED MOVE FOR {symbol}")
+                    logger.debug(f"COMPUTING EXPECTED MOVE FOR {symbol}")
 
                     move = move_engine.compute(engine_data)
 
                     analytics_results["expected_move"] = {
-                        "range": getattr(move, "range", None),
-                        "probability": getattr(move, "probability", None),
+                        "move_1sd": getattr(move, "expected_move_1sd", 0),
+                        "move_2sd": getattr(move, "expected_move_2sd", 0),
+                        "breakout_detected": getattr(move, "breakout_detected", False),
+                        "breakout_direction": getattr(move, "breakout_direction", "none"),
+                        "breakout_strength": getattr(move, "breakout_strength", 0),
+                        "implied_volatility": getattr(move, "implied_volatility", 0),
                     }
 
                 except Exception as e:
@@ -135,35 +148,77 @@ class AnalyticsBroadcaster:
 
                 try:
 
-                    logger.info(f"COMPUTING STRUCTURAL ANALYSIS FOR {symbol}")
+                    logger.debug(f"COMPUTING STRUCTURAL ANALYSIS FOR {symbol}")
 
-                    if hasattr(self._structural_engine, "compute"):
-                        structural = self._structural_engine.compute(engine_data)
+                    if self._structural_engine:
+                        structural = self._structural_engine.compute(symbol, chain_data)
                     else:
                         structural = {}
 
                     analytics_results["structural"] = {
-                        "gamma": getattr(structural, "gamma", None),
-                        "vega": getattr(structural, "vega", None),
-                        "theta": getattr(structural, "theta", None),
-                        "delta": getattr(structural, "delta", None),
+                        "expected_move": getattr(structural, "expected_move", 0),
+                        "upper_1sd": getattr(structural, "upper_1sd", 0),
+                        "lower_1sd": getattr(structural, "lower_1sd", 0),
+                        "upper_2sd": getattr(structural, "upper_2sd", 0),
+                        "lower_2sd": getattr(structural, "lower_2sd", 0),
+                        "breach_probability": getattr(structural, "breach_probability", 0),
+                        "range_hold_probability": getattr(structural, "range_hold_probability", 0),
+                        "gamma_regime": getattr(structural, "gamma_regime", "neutral"),
+                        "volatility_regime": getattr(structural, "volatility_regime", "normal"),
+                        "support_level": getattr(structural, "support_level", 0),
+                        "resistance_level": getattr(structural, "resistance_level", 0),
+                        "intent_score": getattr(structural, "intent_score", 0),
+                        "oi_velocity": getattr(structural, "oi_velocity", 0),
+                        "total_oi": getattr(structural, "total_oi", 0),
+                        "net_gamma": getattr(structural, "net_gamma", 0),
+                        "gamma_flip_level": getattr(structural, "gamma_flip_level", 0),
+                        "distance_from_flip": getattr(structural, "distance_from_flip", 0),
                     }
 
                 except Exception as e:
                     logger.error(f"Error computing structural analysis: {e}")
 
-            # metadata
-            analytics_results["symbol"] = symbol
-            analytics_results["timestamp"] = datetime.now().isoformat()
+            # ── STEP 14: Advanced Strategies ──────────────────────────────────
+            advanced_payload = None
+            signal_payload = None
+            if self._adv_strategies_enabled:
+                try:
+                    from app.services.advanced_strategies_engine import run_advanced_strategies
+                    advanced_payload = run_advanced_strategies(symbol, chain_data)
+                    analytics_results["advanced_strategies"] = advanced_payload
+                except Exception as e:
+                    logger.debug(f"Advanced strategies skipped: {e}")
+
+            # ── STEP 15: Signal Scoring ──────────────────────────────────────
+            if self._signal_scoring_enabled and advanced_payload:
+                try:
+                    from app.services.signal_scoring_engine import signal_scoring_engine
+                    signal_payload = signal_scoring_engine.score(
+                        symbol=symbol,
+                        chain_data=chain_data,
+                        analytics=analytics_results,
+                        advanced=advanced_payload,
+                    )
+                    analytics_results["signal_score"] = signal_payload
+                except Exception as e:
+                    logger.debug(f"Signal scoring skipped: {e}")
+
+            analytics_payload = {
+                "type": "analytics",
+                "version": "2.0",
+                "symbol": symbol,
+                "timestamp": datetime.utcnow().isoformat(),
+                **analytics_results
+            }
 
             # cache store
-            self.analytics_cache[symbol] = analytics_results
+            self.analytics_cache[symbol] = analytics_payload
 
             logger.info(
-                f"ANALYTICS COMPUTED FOR {symbol} → {len(analytics_results)} fields"
+                f"ANALYTICS COMPUTED FOR {symbol} → {list(analytics_results.keys())}"
             )
 
-            return analytics_results
+            return analytics_payload
 
         except Exception as e:
 
@@ -174,18 +229,29 @@ class AnalyticsBroadcaster:
     # BROADCAST
     # --------------------------------------------------------
 
-    async def _broadcast_analytics(self, analytics_data: Dict[str, Any]):
+    async def _broadcast_analytics(self, analytics_payload: Dict[str, Any]):
+
+        # Ensure payload exists before logging
+        if not analytics_payload:
+            logger.warning("Analytics payload empty — skipping broadcast")
+            return
 
         try:
 
             from app.core.ws_manager import manager
 
-            logger.info("ANALYTICS GENERATED — SENDING TO BROADCAST")
-            logger.info(
-                f"BROADCASTING ANALYTICS UPDATE → {analytics_data.get('symbol','UNKNOWN')}"
-            )
+            # STEP 13 MONITORING: Analytics broadcast latency tracker
+            broadcast_start = time.time()
 
-            await manager.broadcast(analytics_data)
+            try:
+                await manager.broadcast(dict(analytics_payload))
+                broadcast_ms = (time.time() - broadcast_start) * 1000
+                logger.info(
+                    f"ANALYTICS BROADCAST → symbol={analytics_payload.get('symbol','?')} "
+                    f"clients={len(manager.active_connections)} latency={broadcast_ms:.1f}ms"
+                )
+            except Exception as e:
+                logger.error(f"Analytics broadcast failed: {e}")
 
         except Exception as e:
             logger.error(f"Error broadcasting analytics: {e}")
@@ -209,35 +275,110 @@ class AnalyticsBroadcaster:
     async def _analytics_loop(self):
 
         from app.services.option_chain_builder import option_chain_builder
+        from app.core.ws_manager import manager
+        from app.services.market_status_service import get_market_status
 
-        while self._running:
+        try:
+            while self._running:
 
-            try:
+                # skip analytics if no websocket clients
+                if not manager.active_connections:
+                    await asyncio.sleep(1)
+                    continue
 
-                logger.info("COMPUTING ANALYTICS FOR ACTIVE SYMBOLS")
+                # reduce analytics spam when market closed
+                status = await get_market_status()
+                if status not in ("OPEN", "PREOPEN"):
+                    await asyncio.sleep(5)
+                    continue
 
-                for symbol in ["NIFTY", "BANKNIFTY"]:
+                # rate limit analytics computation
+                if time.time() - self._last_analytics_time < self.ANALYTICS_INTERVAL:
+                    await asyncio.sleep(0.2)
+                    continue
 
-                    logger.info(f"PROCESSING ANALYTICS FOR {symbol}")
+                try:
+                    # STEP 13 MONITORING: track analytics tick rate
+                    loop_start = time.time()
+                    
+                    for symbol in ["NIFTY", "BANKNIFTY"]:
+                        chain_data = option_chain_builder.get_chain(symbol)
+                        
+                        if chain_data:
+                            analytics = await self._compute_analytics(symbol, chain_data)
+                            
+                            if analytics:
+                                await self._broadcast_analytics(analytics)
 
-                    chain_data = option_chain_builder.get_chain(symbol)
+                                # ── Step 14/15: broadcast advanced + score separately ──
+                                adv = analytics.get("advanced_strategies")
+                                score = analytics.get("signal_score")
 
-                    if chain_data:
+                                if adv:
+                                    try:
+                                        await manager.broadcast(adv)
+                                    except Exception as e:
+                                        logger.debug(f"Advanced strategies broadcast failed: {e}")
 
-                        analytics = await self._compute_analytics(symbol, chain_data)
+                                if score:
+                                    try:
+                                        await manager.broadcast(score)
+                                    except Exception as e:
+                                        logger.debug(f"Signal score broadcast failed: {e}")
 
-                        if analytics:
-                            await self._broadcast_analytics(analytics)
+                                # ── Chart Intelligence (Steps 2–9) ────────────────
+                                try:
+                                    from app.services.chart_signal_engine import chart_signal_engine
+                                    from app.services.signal_outcome_tracker import signal_outcome_tracker
+                                    spot = chain_data.get("spot", 0)
+                                    if spot > 0:
+                                        chart_payload = chart_signal_engine.analyze(
+                                            symbol=symbol,
+                                            current_price=spot,
+                                            chain_data=chain_data,
+                                            options_analytics=analytics,
+                                        )
+                                        if chart_payload and chart_payload.get("signal") != "WAIT":
+                                            await manager.broadcast(chart_payload)
+                                            signal_outcome_tracker.record_signal(
+                                                chart_payload,
+                                                extra={
+                                                    "pcr": chain_data.get("pcr", 0),
+                                                    "signal_score": (score or {}).get("score", 0),
+                                                }
+                                            )
+                                            
+                                            # AI ML Prediction Integration
+                                            try:
+                                                from app.services.feature_builder import feature_builder
+                                                from app.services.probability_engine import probability_engine
+                                                features = feature_builder.build_features({**chart_payload, "pcr": chain_data.get("pcr", 0)})
+                                                if features:
+                                                    ai_prediction = probability_engine.predict(symbol, features)
+                                                    if ai_prediction:
+                                                        await manager.broadcast(ai_prediction)
+                                            except Exception as ai_e:
+                                                logger.debug(f"AI ML Pipeline error: {ai_e}", exc_info=True)
 
-                    else:
+                                        await signal_outcome_tracker.evaluate_pending(symbol, spot)
+                                except Exception as e:
+                                    logger.debug(f"Chart signal engine skipped: {e}")
 
-                        logger.warning(f"No chain data available for {symbol}")
+                        else:
+                            logger.debug(f"No chain data yet for {symbol} — skipping analytics")
+                    
+                    self._last_analytics_time = time.time()
+                    elapsed = (time.time() - loop_start) * 1000
+                    logger.debug(f"ANALYTICS LOOP → elapsed={elapsed:.1f}ms clients={len(manager.active_connections)}")
+                    
+                except Exception as e:
+                    logger.error(f"Analytics build failed: {e}")
+                    await asyncio.sleep(1)
+                    continue
 
-                await asyncio.sleep(self.update_interval)
-
-            except Exception as e:
-
-                logger.error(f"Error in analytics loop: {e}")
+        except asyncio.CancelledError:
+            logger.info("Analytics broadcaster stopped gracefully")
+            raise
 
     # --------------------------------------------------------
     # START / STOP
@@ -305,24 +446,15 @@ class AnalyticsBroadcaster:
         if self._structural_engine is None:
 
             try:
-
-                from app.services.live_structural_engine import (
-                    LiveStructuralEngine,
-                    market_state_mgr,
-                )
-
-                self._structural_engine = LiveStructuralEngine(market_state_mgr())
-
-            except ImportError as e:
-
-                logger.error(f"Could not import LiveStructuralEngine: {e}")
-                
-                # Try alternative import without market_state_mgr
-                try:
-                    from app.services.live_structural_engine import LiveStructuralEngine
-                    self._structural_engine = LiveStructuralEngine(None)
-                except ImportError as e2:
-                    logger.error(f"Could not import LiveStructuralEngine at all: {e2}")
+                from app.services.live_structural_engine import LiveStructuralEngine
+                from app.core.live_market_state import get_market_state_manager
+                market_state_mgr = get_market_state_manager()
+                structural_engine = LiveStructuralEngine(market_state_mgr)
+            except Exception as e:
+                logger.warning("Structural engine unavailable: %s", e)
+                structural_engine = None
+            
+            self._structural_engine = structural_engine
 
         return self._structural_engine
 

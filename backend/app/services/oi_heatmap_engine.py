@@ -47,14 +47,18 @@ class OIHeatmapEngine:
     
     async def _heatmap_loop(self):
         """Periodic heatmap computation"""
-        while self._running:
-            try:
-                await asyncio.sleep(self.update_interval)
-                await self._compute_and_broadcast_heatmaps()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Error in heatmap loop: {e}")
+        try:
+            while self._running:
+                try:
+                    await asyncio.sleep(self.update_interval)
+                    await self._compute_and_broadcast_heatmaps()
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"Error in heatmap loop: {e}")
+        except asyncio.CancelledError:
+            logger.info("Heatmap loop stopped")
+            raise
     
     async def _compute_and_broadcast_heatmaps(self):
         """Compute heatmaps for all active symbols"""

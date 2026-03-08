@@ -156,8 +156,15 @@ class MarketBiasEngine:
             total_call_oi = sum(call.get("open_interest", 0) for call in calls)
             total_put_oi = sum(put.get("open_interest", 0) for put in puts)
             
-            if total_call_oi == 0 and total_put_oi == 0:
-                raise MissingOIError("No OI data available for PCR calculation")
+            if total_call_oi == 0 or total_put_oi == 0:
+                logger.warning("OI data not ready for PCR calculation")
+                return {
+                    "pcr": 1.0,
+                    "bias_strength": 50,
+                    "price_vs_vwap": 0,
+                    "divergence_detected": False,
+                    "divergence_type": "none"
+                }
             
             return total_put_oi / total_call_oi if total_call_oi > 0 else 1.0
             

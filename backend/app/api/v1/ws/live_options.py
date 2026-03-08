@@ -23,7 +23,8 @@ async def live_options_ws(websocket: WebSocket, symbol: str):
     key = f"{symbol}:{expiry}"
 
     await websocket.accept()
-    await manager.connect(key, websocket)
+    await manager.connect(websocket)
+    await manager.register_subscription(websocket, symbol, expiry or "")
 
     logger.info(f"🟢 WS CONNECTED → {key}")
 
@@ -41,23 +42,22 @@ async def live_options_ws(websocket: WebSocket, symbol: str):
         # START BUILDER ONLY ONCE
         await builder.start()
 
-        # CRITICAL FIX: Passive keepalive loop.
-        # Do NOT use receive_text() — frontend does not send messages.
-        # Server broadcasts chain_update via manager.broadcast_json().
+        # Passive keepalive loop.
+        # Frontend does not send messages — server broadcasts via manager.broadcast()
         while True:
             await asyncio.sleep(60)
 
     except WebSocketDisconnect:
 
         logger.info(f"🔴 WS DISCONNECTED → {key}")
-        await manager.disconnect(key, websocket)
+        await manager.disconnect(websocket)
 
         if builder:
             await builder.stop_tasks()
 
     except Exception as e:
         logger.error(f"❌ WS ERROR → {key}: {e}")
-        await manager.disconnect(key, websocket)
+        await manager.disconnect(websocket)
 
         if builder:
             try:

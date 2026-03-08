@@ -1,8 +1,10 @@
 import { useMarketStore } from "../stores/marketStore"
+import { useWSStore } from "../core/ws/wsStore"
 import { wsLog, wsError, wsCritical } from "@/utils/uiLogger"
 
 let socket: WebSocket | null = null
 let isConnecting = false
+let intentionalClose = false  // BUG 10 FIX: guard against reconnect on intentional disconnect
 
 let reconnectAttempts = 0
 let visibilityListenerAdded = false
@@ -20,17 +22,17 @@ const WS_URL = "ws://localhost:8000/ws/market"
 export function connectMarketWS() {
   if (socket &&
     (socket.readyState === WebSocket.OPEN ||
-     socket.readyState === WebSocket.CONNECTING)) {
+      socket.readyState === WebSocket.CONNECTING)) {
     console.log("🔒 WebSocket already connecting")
     return
   }
-  
+
   console.log("WS CONNECTING")
   console.log("⚡ CONNECT() EXECUTED", {
     reconnectAttempts,
     time: Date.now()
   })
-  
+
   wsLog("WS CONNECTING", { url: WS_URL, reconnectAttempts })
 
   if (reconnectAttempts > MAX_RECONNECTS) {
@@ -82,7 +84,7 @@ export function connectMarketWS() {
 
   socket = new WebSocket(WS_URL)
 
-  ;(window as any).__strikeiq_ws = socket
+    ; (window as any).__strikeiq_ws = socket
 
   socket.onopen = () => {
     console.log("WS OPEN")
@@ -92,10 +94,11 @@ export function connectMarketWS() {
     })
 
     window.__WS_CONNECTED__ = true
+    reconnectAttempts = 0  // P6: reset counter on successful connect
 
     if (typeof window !== "undefined") {
-        window.dispatchEvent(new Event("ws-connected"))
-        console.log("WS TRACE → EVENT DISPATCHED ws-connected")
+      window.dispatchEvent(new Event("ws-connected"))
+      console.log("WS TRACE → EVENT DISPATCHED ws-connected")
     }
 
     // Update marketStore with connection state
@@ -105,11 +108,16 @@ export function connectMarketWS() {
       lastUpdate: Date.now()
     })
 
+    // P7: dynamic expiry fallback — next Thursday from today
+    const getNextThursday = () => {
+      const d = new Date()
+      const day = d.getDay()
+      const daysUntilThursday = (4 - day + 7) % 7 || 7
+      d.setDate(d.getDate() + daysUntilThursday)
+      return d.toISOString().split('T')[0]
+    }
     const storedExpiry = localStorage.getItem("selectedExpiry")
-
-    const expiry = storedExpiry && storedExpiry.length > 5
-      ? storedExpiry
-      : "2026-03-10"
+    const expiry = storedExpiry && storedExpiry.length > 5 ? storedExpiry : getNextThursday()
 
     socket.send(JSON.stringify({
       type: "subscribe",
@@ -145,25 +153,48 @@ export function connectMarketWS() {
   }
 
   socket.onmessage = (event) => {
-  try {
-    const data = JSON.parse(event.data)
-    console.log("WS DATA", data)
-  } catch (e) {
-    console.warn("Invalid WS message", event.data)
-  }
-}
+    try {
+      const data = JSON.parse(event.data)
 
-  socket.onclose = () => {
-    console.log("WS CLOSED")
-    console.log("WS TRACE → SOCKET CLOSED", {
-      readyState: socket.readyState
-    })
+      // Route analytics to handleAnalytics
+      if (data.type === "analytics") {
+        if (process.env.NODE_ENV === "development") {
+          console.log("📊 ANALYTICS RECEIVED:", data)
+        }
+        const wsStore = useWSStore.getState()
+        if (wsStore.handleAnalytics) {
+          wsStore.handleAnalytics(data)
+        }
+        return
+      }
+
+      // Route ALL other message types through handleMessage
+      // This covers: index_tick, option_chain_update, heatmap_update,
+      // market_tick, market_data, chain_update
+      const wsStore = useWSStore.getState()
+      if (wsStore.handleMessage) {
+        wsStore.handleMessage(data)
+      }
+    } catch (e) {
+      console.warn("Invalid WS message", event.data)
+    }
+  }
+
+  socket.onclose = (event) => {
+    console.log("WS CLOSED", { code: event.code, wasClean: event.wasClean })
 
     window.__WS_CONNECTED__ = false
+    isConnecting = false
 
     if (typeof window !== "undefined") {
-        window.dispatchEvent(new Event("ws-disconnected"))
-        console.log("WS TRACE → EVENT DISPATCHED ws-disconnected")
+      window.dispatchEvent(new Event("ws-disconnected"))
+    }
+
+    // BUG 10 FIX: Do not reconnect on intentional close
+    if (intentionalClose) {
+      console.log("🔒 WS closed intentionally — skipping reconnect")
+      intentionalClose = false
+      return
     }
 
     setTimeout(() => {
@@ -174,11 +205,11 @@ export function connectMarketWS() {
   socket.onerror = (err) => {
     console.error("🔥 WS ERROR", err)
     console.log("WS TRACE → SOCKET ERROR", err)
-    
-    wsError("WS ERROR", { 
+
+    wsError("WS ERROR", {
       error: err,
       readyState: socket?.readyState,
-      url: WS_URL 
+      url: WS_URL
     })
 
     console.error("WebSocket error", err)
@@ -186,7 +217,7 @@ export function connectMarketWS() {
     if (socket) {
       console.error("Socket readyState:", socket.readyState)
     }
-    
+
     // Safe reconnect: only attempt if socket is not in OPEN state
     if (socket?.readyState !== WebSocket.OPEN) {
       console.log("🔄 Socket not open, will attempt reconnect")
@@ -208,17 +239,17 @@ function scheduleReconnect() {
 
   reconnectAttempts++
   const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000) // Exponential backoff, max 30s
-  
+
   // Ensure minimum 3-second delay when backend is down
   const safeDelay = Math.max(delay, 3000)
 
-  wsLog("WS SCHEDULING RECONNECT", { 
-    attempt: reconnectAttempts, 
+  wsLog("WS SCHEDULING RECONNECT", {
+    attempt: reconnectAttempts,
     delay: safeDelay,
-    maxDelay: 30000 
+    maxDelay: 30000
   })
 
-  console.log(`🔄 Reconnecting in ${safeDelay/1000}s... Attempt ${reconnectAttempts}/${MAX_RECONNECTS}`)
+  console.log(`🔄 Reconnecting in ${safeDelay / 1000}s... Attempt ${reconnectAttempts}/${MAX_RECONNECTS}`)
 
   reconnectTimer = setTimeout(() => {
     console.log(`🔄 Reconnecting... Attempt ${reconnectAttempts}/${MAX_RECONNECTS}`)
@@ -227,15 +258,17 @@ function scheduleReconnect() {
 }
 
 export function disconnectMarketWS() {
-  if (socket) {
-    console.warn("⚠️ MANUAL WS CLOSE TRIGGERED", (new Error()).stack || "No stack trace available");
-    socket.close()
-    socket = null
-  }
+  // BUG 10 FIX: Set flag before close so onclose does not auto-reconnect
+  intentionalClose = true
 
   if (reconnectTimer) {
     clearTimeout(reconnectTimer)
     reconnectTimer = null
+  }
+
+  if (socket) {
+    socket.close()
+    socket = null
   }
 
   const marketStore = useMarketStore.getState()
