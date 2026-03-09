@@ -75,10 +75,24 @@ class ChartSignalEngine:
         """
         try:
             t0 = time.monotonic()
+            
+            # DEBUG: Log input data
+            logger.info(f"CHART INTELLIGENCE INPUT → {symbol} price={current_price}")
+            logger.info(f"CHAIN DATA KEYS → {list(chain_data.keys()) if chain_data else 'None'}")
+            logger.info(f"OPTIONS ANALYTICS KEYS → {list(options_analytics.keys()) if options_analytics else 'None'}")
+            
+            if chain_data:
+                logger.info(f"CHAIN DATA SAMPLE → spot={chain_data.get('spot')} pcr={chain_data.get('pcr')} total_oi={chain_data.get('total_oi_calls', 0) + chain_data.get('total_oi_puts', 0)}")
+            
+            if options_analytics:
+                bias = options_analytics.get('bias', {})
+                struct = options_analytics.get('structural', {})
+                logger.info(f"ANALYTICS SAMPLE → bias_label={bias.get('label')} pcr={bias.get('pcr')} gamma_regime={struct.get('gamma_regime')}")
 
             candles = candle_builder.get_candles(symbol, interval, n=100)
 
             if not candles or current_price <= 0:
+                logger.warning(f"CHART INTELLIGENCE INSUFFICIENT DATA → candles={len(candles) if candles else 0} price={current_price}")
                 return self._empty(symbol, current_price, "Insufficient candle data")
 
             # ── Sub-engine calls ───────────────────────────────────────────────
@@ -134,16 +148,20 @@ class ChartSignalEngine:
                 if demand:
                     stop_zone = [demand["bottom"], demand["top"]]
             elif signal == "SELL":
-                target_zone = [round(current_price - atr * 2, 2), round(current_price - atr, 2)]
-                stop_zone   = [round(current_price + atr, 2), round(current_price + atr * 1.5, 2)]
+                target_zone = [round(current_price - atr * 2, 2), round(current_price - atr * 2, 2)]
+                stop_zone   = [round(current_price + atr * 2, 2), round(current_price + atr * 1.5, 2)]
                 if demand:
                     target_zone = [demand["bottom"], demand["top"]]
                 if supply:
                     stop_zone = [supply["bottom"], supply["top"]]
             else:
                 target_zone = []
-                stop_zone   = []
+                stop_zone = []
 
+            # DEBUG: Log final signal
+            logger.info(f"CHART INTELLIGENCE SIGNAL → {symbol} {signal} confidence={confidence:.2f} bull={bull:.2f} bear={bear:.2f}")
+
+            # ── Payload assembly ────────────────────────────────────────────────
             elapsed_ms = round((time.monotonic() - t0) * 1000, 1)
 
             result = {

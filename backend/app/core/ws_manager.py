@@ -13,6 +13,9 @@ class WSManager:
         # Active connections
         self.active_connections: list[WebSocket] = []
 
+        # Track subscriptions per client
+        self.client_subscriptions: dict[WebSocket, dict] = {}
+
         # Prevent race conditions on list mutation
         self._lock = asyncio.Lock()
 
@@ -42,15 +45,22 @@ class WSManager:
             if websocket in self.active_connections:
                 self.active_connections.remove(websocket)
 
-                logger.info(
-                    f"🔴 WebSocket client disconnected | clients={len(self.active_connections)}"
-                )
+            # Remove client subscriptions
+            self.client_subscriptions.pop(websocket, None)
+
+            logger.info(
+                f"🔴 WebSocket client disconnected | clients={len(self.active_connections)}"
+            )
 
     async def register_subscription(self, websocket: WebSocket, symbol: str, expiry: str):
         """Register a subscription for a client"""
         logger.info(f"📡 Subscription registered → {symbol} {expiry}")
-        # Future enhancement: track subscriptions per client
-        pass
+        
+        async with self._lock:
+            self.client_subscriptions[websocket] = {
+                "symbol": symbol,
+                "expiry": expiry
+            }
 
     async def broadcast(self, message):
         """Broadcast message to all connected clients concurrently.
@@ -60,17 +70,36 @@ class WSManager:
         from blocking all other clients (head-of-line blocking).
         """
 
-        # Brief lock to snapshot connections, then immediately release
+        # Brief lock to snapshot connections and subscriptions, then immediately release
         async with self._lock:
             connections = self.active_connections.copy()
+            subscriptions = self.client_subscriptions.copy()
 
         if not connections:
             return
 
         logger.debug(f"WS broadcast → clients={len(connections)}")
 
+        # Filter connections based on symbol subscription
+        target_connections = []
+        message_symbol = message.get("symbol")
+        
+        if message_symbol:
+            # Only send to clients subscribed to this symbol
+            for conn in connections:
+                client_sub = subscriptions.get(conn, {})
+                if client_sub.get("symbol") == message_symbol:
+                    target_connections.append(conn)
+        else:
+            # Non-symbol messages (like market status) go to all clients
+            target_connections = connections
+
+        if not target_connections:
+            logger.debug(f"No clients subscribed to {message_symbol}")
+            return
+
         results = await asyncio.gather(
-            *[conn.send_json(message) for conn in connections],
+            *[conn.send_json(message) for conn in target_connections],
             return_exceptions=True
         )
 
@@ -79,7 +108,7 @@ class WSManager:
 
         # Remove dead connections (re-acquire lock only for list mutation)
         dead = [
-            conn for conn, result in zip(connections, results)
+            conn for conn, result in zip(target_connections, results)
             if isinstance(result, Exception)
         ]
         if dead:
@@ -87,6 +116,7 @@ class WSManager:
                 for conn in dead:
                     if conn in self.active_connections:
                         self.active_connections.remove(conn)
+                    self.client_subscriptions.pop(conn, None)
             logger.warning(f"⚠️ Removed {len(dead)} dead WS connection(s)")
 
 

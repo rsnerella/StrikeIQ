@@ -253,6 +253,56 @@ class RiskEngine:
             logger.error(f"Position size calculation error: {e}")
             return 1  # Conservative default
     
+    def calculate_trade_risk(self, trade_suggestion, capital: float = 100000) -> Dict[str, Any]:
+        """
+        Calculate detailed risk metrics for a trade suggestion
+        """
+        try:
+            # Handle both objects (AITradeOutput) and dicts (trade_calc)
+            if isinstance(trade_suggestion, dict):
+                entry = trade_suggestion.get("entry", 0)
+                target = trade_suggestion.get("target", 0)
+                stoploss = trade_suggestion.get("stoploss", 0)
+            else:
+                entry = getattr(trade_suggestion, "entry_price", getattr(trade_suggestion, "entry", 0))
+                target = getattr(trade_suggestion, "target_price", getattr(trade_suggestion, "target", 0))
+                stoploss = getattr(trade_suggestion, "stoploss_price", getattr(trade_suggestion, "stoploss", 0))
+            
+            # Distance from entry
+            stoploss_distance = abs(entry - stoploss)
+            target_distance = abs(target - entry)
+            
+            # Risk/Reward
+            rr_ratio = target_distance / stoploss_distance if stoploss_distance > 0 else 0
+            
+            # Lot size calculation (risk 2% of capital)
+            risk_per_trade = capital * self.max_risk_per_trade
+            
+            # Risk per contract (stoploss distance * multiplier)
+            risk_per_contract = stoploss_distance * 75
+            
+            lot_size = int(risk_per_trade / risk_per_contract) if risk_per_contract > 0 else 1
+            lot_size = max(1, min(lot_size, 10)) # Reasonable bounds
+            
+            # Expected PnL (absolute values)
+            expected_loss = risk_per_contract * lot_size
+            expected_profit = target_distance * 75 * lot_size
+            
+            return {
+                "expected_profit": round(expected_profit, 2),
+                "expected_loss": round(expected_loss, 2),
+                "risk_reward_ratio": round(rr_ratio, 2),
+                "lot_size": lot_size
+            }
+        except Exception as e:
+            logger.error(f"Error calculating detailed trade risk: {e}")
+            return {
+                "expected_profit": 0,
+                "expected_loss": 0,
+                "risk_reward_ratio": 0,
+                "lot_size": 1
+            }
+
     def update_daily_performance(self, pnl: float):
         """Update daily P&L after trade completion"""
         try:

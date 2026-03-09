@@ -7,6 +7,7 @@
 
 import { create } from "zustand"
 import { uiLog } from "@/utils/uiLogger"
+import { useMarketStore } from "@/stores/marketStore"
 
 interface WSStore {
   connected: boolean
@@ -80,6 +81,15 @@ export const useWSStore = create<WSStore>((set, get) => ({
     // INDEX TICK — backend broadcasts this for NIFTY/BANKNIFTY spot price
     if (message.type === "index_tick" && message.data) {
       const tick = message.data
+      
+      // PATCH 2: Filter WebSocket index ticks by selected symbol
+      const marketStore = useMarketStore.getState()
+      const selectedSymbol = marketStore?.currentSymbol || 'NIFTY'
+      
+      if (tick.symbol !== selectedSymbol) {
+        return
+      }
+      
       set({
         spot: tick.ltp ?? 0,
         lastUpdate: Date.now(),
@@ -295,6 +305,14 @@ export const useWSStore = create<WSStore>((set, get) => ({
 
   handleAnalytics: (payload) => {
     if (!payload) return
+
+    // PATCH 1: Prevent symbol mismatch from analytics
+    const marketStore = useMarketStore.getState()
+    const selectedSymbol = marketStore?.currentSymbol || 'NIFTY'
+    
+    if (payload.symbol && payload.symbol !== selectedSymbol) {
+      return
+    }
 
     // P5: skip set if analytics timestamp hasn't changed (prevents render on identical payload)
     const prev = get().analytics

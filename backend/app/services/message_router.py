@@ -112,7 +112,7 @@ class MessageRouter:
                 except Exception:
                     pass
 
-                return self._create_index_tick(symbol, ltp, timestamp)
+                return self._create_index_tick(symbol, ltp, timestamp, instrument_key=instrument_key)
 
             elif instrument_type == "OPTION":
                 # ---- PATCH OPTION TICK ROUTING ----
@@ -229,7 +229,8 @@ class MessageRouter:
         self,
         symbol: str,
         ltp: float,
-        timestamp: int
+        timestamp: int,
+        instrument_key: str = None
     ) -> Dict[str, Any]:
 
         last_price = self.last_index_prices.get(symbol, ltp)
@@ -244,6 +245,7 @@ class MessageRouter:
         return {
             "type": "index_tick",
             "symbol": symbol,
+            "instrument_key": instrument_key,
             "timestamp": timestamp,
             "data": {
                 "ltp": ltp,

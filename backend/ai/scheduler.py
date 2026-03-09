@@ -77,20 +77,30 @@ class AIScheduler:
                 max_instances=1  # Prevent overlapping
             )
             
-            # Market snapshot collector → every 30 seconds
+            # Adaptive learning update → every 30 minutes (Step 11)
             self.scheduler.add_job(
-                func=self.market_snapshot_job,
-                trigger=IntervalTrigger(seconds=30),
-                id='market_snapshot',
-                name='Collect market snapshots',
+                func=self.adaptive_learning_job,
+                trigger=IntervalTrigger(minutes=30),
+                id='adaptive_learning',
+                name='Update strategy learning scores',
                 replace_existing=True,
-                max_instances=1  # Prevent overlapping
+                max_instances=1
             )
             
             logger.info("AI scheduler jobs setup completed")
             
         except Exception as e:
             logger.error(f"Error setting up scheduler jobs: {e}")
+            
+    async def adaptive_learning_job(self):
+        """Job for updating AI strategy scores based on history (Step 11)"""
+        try:
+            from ai.adaptive_learning_engine import adaptive_learning_engine
+            scores = await adaptive_learning_engine.update_strategy_scores()
+            if scores:
+                logger.info(f"Adaptive learning: strategy scores updated {scores}")
+        except Exception as e:
+            logger.error(f"Error in adaptive learning job: {e}")
     
     async def signal_generation_job(self):
         """Job for generating AI signals"""

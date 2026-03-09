@@ -5,10 +5,22 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.core.ws_manager import manager
 from app.services.instrument_registry import get_instrument_registry
+from app.services.websocket_market_feed import get_market_feed
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+async def handle_subscription(symbol: str, expiry: str):
+    """Handle symbol subscription switch"""
+    logger.info(f"SYMBOL SWITCH → {symbol} {expiry}")
+    
+    websocket_feed = get_market_feed()
+    if websocket_feed:
+        await websocket_feed.switch_symbol(symbol, expiry)
+    else:
+        logger.warning("Market feed not available for subscription switch")
 
 
 @router.websocket("/ws/market")
@@ -54,7 +66,7 @@ async def market_ws(websocket: WebSocket):
 
                     logger.info(f"SUBSCRIPTION → {symbol} {expiry}")
 
-                    await manager.register_subscription(websocket, symbol, expiry)
+                    await handle_subscription(symbol, expiry)
 
                     await websocket.send_json({
                         "type": "subscribed",

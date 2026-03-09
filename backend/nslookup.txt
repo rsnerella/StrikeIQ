@@ -1,0 +1,5 @@
+*** UnKnown can't find db.yjxdepuwskcankmtfjvz.supabase.co: No response from server
+
+Server:  UnKnown
+Address:  2401:4900:50:9::7d5
+

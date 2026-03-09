@@ -27,14 +27,14 @@ api.interceptors.request.use(
   (config) => {
     const traceId = getTraceId()
     config.metadata = { traceId, startTime: performance.now() }
-    
+
     apiLog("API REQUEST START", {
       traceId,
       method: config.method?.toUpperCase(),
       url: config.url,
       baseURL: config.baseURL
     })
-    
+
     // DISABLED: Auth checks are disabled per system memory
     // Allow requests to proceed without token validation
     return config
@@ -50,32 +50,38 @@ api.interceptors.response.use(
   (response) => {
     const { traceId, startTime } = response.config.metadata || {}
     const latency = startTime ? performance.now() - startTime : 0
-    
+
     apiLog("API RESPONSE RECEIVED", {
       traceId,
       status: response.status,
       latency: `${latency.toFixed(2)}ms`
     })
-    
+
     return response
   },
   (error) => {
     const { traceId, startTime } = error.config?.metadata || {}
     const latency = startTime ? performance.now() - startTime : 0
-    
+
     // DISABLED: Auth checks are disabled per system memory
     // Do not redirect on 401 errors
-    
-    // Handle network errors
-    if (!error.response) {
-      apiError("NETWORK ERROR", { traceId, latency: `${latency.toFixed(2)}ms` })
-      console.error('🌐 Network error - please check your connection')
-      return Promise.reject(error)
+
+    // Handle network errors or proxy 500s (backend offline)
+    const isOffline = !error.response || error.response.status === 500;
+
+    if (isOffline) {
+      apiError("OFFLINE", { traceId, latency: `${latency.toFixed(2)}ms` })
+      console.warn('🌐 StrikeIQ Backend Offline - Soft resolution triggered')
+      return Promise.resolve({
+        data: null,
+        status: error.response?.status || 500,
+        offline: true
+      })
     }
 
     // Handle other HTTP errors
-    apiError("API ERROR", { 
-      traceId, 
+    apiError("API ERROR", {
+      traceId,
       status: error.response?.status,
       message: error.response?.data?.detail || error.message,
       latency: `${latency.toFixed(2)}ms`

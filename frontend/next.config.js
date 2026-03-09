@@ -11,7 +11,7 @@ const nextConfig = {
     remotePatterns: [
       {
         protocol: "http",
-        hostname: "localhost",
+        hostname: "**",
         port: "8000",
       },
       {
@@ -25,20 +25,12 @@ const nextConfig = {
     return [
       {
         source: "/api/:path*",
-        destination: "http://127.0.0.1:8000/api/:path*",
+        destination: "http://127.0.0.1:8000/api/:path*", // FIXED
       },
     ];
   },
 
-  /*
-  Allow Next.js dev server to accept requests from
-  mobile devices on the same network.
-  */
-
-  allowedDevOrigins: [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-  ],
+  allowedDevOrigins: ["*"],
 };
 
 module.exports = nextConfig;

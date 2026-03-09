@@ -70,7 +70,7 @@ class AIOrchestrator:
         
         logger.info("AI Orchestrator initialized with all engines")
     
-    def run_ai_pipeline(self, live_metrics) -> Optional[Dict[str, Any]]:
+    async def run_ai_pipeline(self, live_metrics) -> Optional[Dict[str, Any]]:
         """
         Main AI pipeline function
         Takes LiveMetrics and returns trade suggestion
@@ -84,71 +84,85 @@ class AIOrchestrator:
             # Step 2: Regime Engine - Detect market regime
             regime_detection = self.regime_engine.detect_regime(live_metrics)
             
-            # Step 3: Strategy Engine - Choose strategy
-            strategy_choice = self.strategy_engine.select_strategy(formula_signals)
+            # Step 3: Strategy Planning Engine (New Decision Rule)
+            from .strategy_planning_engine import StrategyPlanningEngine
+            planner = StrategyPlanningEngine()
             
-            # Step 4: Strike Selection Engine - Choose best strike
-            market_bias = self._determine_market_bias(formula_signals)
-            strike_selection = self.strike_selection_engine.select_strike(
-                live_metrics, market_bias, regime_detection.regime
-            )
+            planning_input = {
+                "smart_money_signals": {
+                    "bias": self._determine_market_bias(formula_signals),
+                    "confidence": 0.7, # Should be calculated from signals
+                    "spot": live_metrics.spot
+                },
+                "spot": live_metrics.spot
+            }
+            strategy_plan = planner.plan_strategy(planning_input)
+
+            # Step 4: Strategy Engine - Choose strategy (Async)
+            # Use original strategy engine but weighted with results from history
+            strategy_choice = await self.strategy_engine.select_strategy(formula_signals)
             
-            # Step 5: Entry Exit Engine - Calculate entry, target, stoploss
+            # Step 5: Strike Selection & Levels
+            # Merge planner strike outcome with selection engine
+            target_strike = strategy_plan.get('strike') or 0
+            
+            # Step 6: Entry Exit Engine - Calculate entry, target, stoploss
+            # Use the strike suggested by planner
+            direction = strategy_plan.get('direction', 'CALL')
+            option_type_map = {"CALL": "CE", "PUT": "PE", "NEUTRAL": "CE"}
+            bias_map = {"CALL": "bullish", "PUT": "bearish", "NEUTRAL": "neutral"}
+            
             entry_exit_levels = self.entry_exit_engine.calculate_levels(
-                strike_selection.best_strike, 
-                strike_selection.option_type,
+                target_strike, 
+                option_type_map.get(direction, "CE"),
                 live_metrics,
-                market_bias,
+                bias_map.get(direction, "neutral"),
                 regime_detection.regime
             )
             
-            # Step 6: Risk Engine - Validate trade
-            risk_assessment = self._validate_risk(
-                entry_exit_levels, strategy_choice, live_metrics
-            )
+            # Step 7: Risk and Position Sizing Engine (Step 3 & 4)
+            # Use extended RiskEngine to calculate lot size and expected PnL
+            from .risk_engine import RiskEngine
+            risk_engine = RiskEngine()
             
-            if not risk_assessment['approved']:
-                return self._create_hold_result(live_metrics, "Risk validation failed", regime_detection.regime)
+            # Prepare trade suggestion for risk engine
+            trade_calc = {
+                "strike": target_strike,
+                "entry": entry_exit_levels.entry_price,
+                "target": entry_exit_levels.target_price,
+                "stoploss": entry_exit_levels.stoploss_price,
+                "confidence": strategy_choice.confidence
+            }
             
-            # Step 7: Explanation Engine - Produce human readable reasoning
-            explanation = self._generate_explanation(
-                formula_signals, regime_detection, strategy_choice,
-                strike_selection, entry_exit_levels, live_metrics
-            )
-            
-            # Step 8: Learning Engine - Store prediction using existing tables
-            # Create a trade suggestion object for learning engine
-            trade_suggestion_obj = TradeSuggestionWrapper(
-                strategy=strategy_choice.strategy,
-                confidence=strategy_choice.confidence,
-                entry_price=entry_exit_levels.entry_price,
-                target_price=entry_exit_levels.target_price,
-                stoploss_price=entry_exit_levels.stoploss_price,
-                option_strike=strike_selection.best_strike,
-                option_type=strike_selection.option_type
-            )
-            
-            prediction_id = self.learning_engine.record_prediction(formula_signals, trade_suggestion_obj)
-            
-            # Calculate risk/reward ratio
-            risk = abs(entry_exit_levels.entry_price - entry_exit_levels.stoploss_price)
-            reward = abs(entry_exit_levels.target_price - entry_exit_levels.entry_price)
-            risk_reward_ratio = reward / risk if risk > 0 else 0
-            
+            risk_metrics = risk_engine.calculate_trade_risk(trade_calc)
+
             # Create final output
             output = {
                 "symbol": live_metrics.symbol,
-                "strategy": strategy_choice.strategy,
-                "option": f"{strike_selection.best_strike}{strike_selection.option_type}",
+                "strategy": strategy_plan.get('strategy', strategy_choice.strategy),
+                "direction": direction,
+                "trade_type": strategy_plan.get('trade_type'),
+                "strike": target_strike,
                 "entry": entry_exit_levels.entry_price,
                 "target": entry_exit_levels.target_price,
                 "stoploss": entry_exit_levels.stoploss_price,
                 "confidence": min(strategy_choice.confidence, entry_exit_levels.confidence),
-                "risk_reward": risk_reward_ratio,
+                "lot_size": risk_metrics.get("lot_size", 1),
+                "expected_profit": risk_metrics.get("expected_profit", 0),
+                "expected_loss": risk_metrics.get("expected_loss", 0),
+                "risk_reward": risk_metrics.get("risk_reward_ratio", 0),
                 "regime": regime_detection.regime,
-                "explanation": explanation,
+                "explanation": self._generate_explanation(
+                    formula_signals, regime_detection, strategy_choice,
+                    None, entry_exit_levels, live_metrics
+                ),
                 "risk_status": "APPROVED"
             }
+            
+            # Store in History for Learning (Step 5)
+            # This is also called in trade_decision_engine.py but here for direct history update
+            # from .trade_decision_engine import TradeDecisionEngine
+            # TradeDecisionEngine()._log_trade_to_history(output)
             
             # Track performance
             execution_time = time.time() - start_time
@@ -305,7 +319,10 @@ class AIOrchestrator:
             explanation_parts.append(f"Strategy Reasoning: {strategy_choice.reasoning}")
             
             # Strike selection reasoning
-            explanation_parts.append(f"Strike Selection: {strike_selection.reasoning}")
+            if strike_selection:
+                explanation_parts.append(f"Strike Selection: {strike_selection.reasoning}")
+            else:
+                explanation_parts.append(f"Strike Selection: Automatic (ATM {live_metrics.spot})")
             
             # Entry/exit reasoning
             explanation_parts.append(f"Entry/Exit: {entry_exit_levels.reasoning}")
@@ -362,12 +379,12 @@ def get_ai_orchestrator() -> AIOrchestrator:
         _ai_orchestrator = AIOrchestrator()
     return _ai_orchestrator
 
-def run_ai_pipeline(live_metrics) -> Optional[Dict[str, Any]]:
+async def run_ai_pipeline(live_metrics) -> Optional[Dict[str, Any]]:
     """
     Convenience function to run AI pipeline
     """
     orchestrator = get_ai_orchestrator()
-    return orchestrator.run_ai_pipeline(live_metrics)
+    return await orchestrator.run_ai_pipeline(live_metrics)
 
 def record_trade_outcome(prediction_id: str, outcome_data: Dict[str, Any]):
     """

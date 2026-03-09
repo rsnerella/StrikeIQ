@@ -241,7 +241,7 @@ class OptionChainBuilder:
     def update_option_tick(self, symbol: str, strike: float, right: str, ltp: float, oi: int = 0, volume: int = 0):
         """Update option data from tick"""
         try:
-            logger.debug(f"OPTION TICK → {symbol}_{strike}{right} | LTP={ltp} | OI={oi} | Volume={volume}")
+            logger.info(f"OPTION TICK → {symbol}_{strike}{right} | LTP={ltp} | OI={oi} | Volume={volume}")
             
             if symbol not in self.chains:
                 self.chains[symbol] = {}
@@ -261,6 +261,10 @@ class OptionChainBuilder:
             option_data.oi = max(0, oi)   # reject negative OI
             option_data.volume = max(0, volume)
             option_data.last_update = datetime.now()
+            
+            # Log OI update for debugging
+            if oi > 0:
+                logger.info(f"OI UPDATE → {symbol}_{strike}{right} OI={oi}")
             
             # Detect OI buildup signal
             instrument_key = f"{symbol}_{strike}{right}"

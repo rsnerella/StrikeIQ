@@ -133,6 +133,10 @@ async def get_async_db():
     """Get async database instance"""
     return async_db
 
+async def get_db_pool():
+    """Get database pool for probability engine"""
+    return async_db.pool
+
 async def execute_query(query: str, *args) -> str:
     """Execute query without results"""
     return await async_db.execute(query, *args)

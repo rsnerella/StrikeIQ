@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import logging
 from ai.formula_integrator import store_formula_signal
 import asyncio
+import math
 from app.core.live_market_state import MarketStateManager
 from app.services.structural_alert_engine import StructuralAlertEngine
 from app.services.gamma_pressure_map import GammaPressureMapEngine
@@ -61,6 +62,7 @@ class LiveMetrics:
     flow_gamma_interaction: Optional[Dict[str, Any]] = None
     regime_dynamics: Optional[Dict[str, Any]] = None
     expiry_magnet_analysis: Optional[Dict[str, Any]] = None
+    trade_suggestion: Optional[Dict[str, Any]] = None
 
 class LiveStructuralEngine:
     """
@@ -333,6 +335,9 @@ class LiveStructuralEngine:
             pcr = snapshot.get("pcr", 0)
             call_oi = snapshot.get("total_oi_calls", 0)
             put_oi = snapshot.get("total_oi_puts", 0)
+            total_oi = call_oi + put_oi
+            
+            logger.info(f"STRUCTURAL ENGINE DEBUG → {symbol} PCR={pcr} CALL_OI={call_oi} PUT_OI={put_oi} TOTAL_OI={total_oi}")
 
             # 🔥 F01: PCR Based Signal
             if pcr > 1.2:
@@ -617,20 +622,28 @@ class LiveStructuralEngine:
             if not strikes:
                 return "normal"
             
-            # Collect IV data
+            # Calculate implied volatility from option prices
             iv_values = []
             for strike_data in strikes.values():
                 call_data = strike_data.get("call", {})
                 put_data = strike_data.get("put", {})
                 
+                # Basic IV estimation from option prices
                 for option_data in [call_data, put_data]:
-                    if option_data.get("iv"):
-                        iv_values.append(option_data["iv"])
+                    ltp = option_data.get("ltp", 0)
+                    oi = option_data.get("oi", 0)
+                    if ltp > 0 and oi > 0:
+                        # Simple IV proxy: option price / strike * 100
+                        strike = strike_data.get("strike", 1)
+                        if strike > 0:
+                            iv_proxy = (ltp / strike) * 100 * sqrt(365)  # Annualized
+                            iv_values.append(iv_proxy)
             
             if not iv_values:
                 return "normal"
             
             avg_iv = np.mean(iv_values)
+            logger.info(f"IV CALCULATION INPUT → option_prices={len(iv_values)} avg_iv={avg_iv:.2f}")
             
             # Classify volatility regime
             if avg_iv < 10:
@@ -1060,7 +1073,7 @@ class LiveStructuralEngine:
         """
         try:
             # Run AI pipeline with LiveMetrics
-            ai_result = await asyncio.to_thread(self.ai_orchestrator.run_ai_pipeline, metrics)
+            ai_result = await self.ai_orchestrator.run_ai_pipeline(metrics)
             
             if ai_result:
                 # Build intelligence payload for frontend
@@ -1103,9 +1116,12 @@ class LiveStructuralEngine:
                         "range_hold_probability": metrics.range_hold_probability,
                         "volatility_state": "normal"
                     },
-                    "trade_suggestion": ai_result.get("trade_suggestion"),
+                    "trade_suggestion": ai_result,
                     "reasoning": ai_result.get("explanation", [])
                 }
+                
+                # TASK 9: Store trade suggestion back into metrics for API retrieval
+                metrics.trade_suggestion = ai_result
                 
                 # Broadcast intelligence to WebSocket clients
                 await manager.broadcast({

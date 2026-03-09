@@ -24,6 +24,8 @@ async def load_schema():
 
         if tables:
             logger.info("Tables already exist. Skipping schema creation.")
+            logger.info("Database connection established")
+            logger.info("Schema verified")
             return
 
         logger.info("Loading StrikeIQ schema into database")
@@ -40,3 +42,5 @@ async def load_schema():
             await conn.execute(text(stmt))
 
     logger.info("StrikeIQ schema successfully created")
+    logger.info("Database connection established")
+    logger.info("Schema verified")

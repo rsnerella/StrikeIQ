@@ -1,0 +1,9 @@
+D:\StrikeIQ\backend\db\database.py:35: RuntimeWarning: coroutine 'debug_db_connection' was never awaited
+  pass
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+DEBUG ENV DATABASE_URL: postgresql+asyncpg://postgres.yjxdepuwskcankmtfjvz:StrikeIQ%402026%23DB@aws-0-ap-south-1.pooler.supabase.com:6543/postgres
+DEBUG DATABASE_URL: postgresql+asyncpg://postgres.yjxdepuwskcankmtfjvz:StrikeIQ%402026%23DB@aws-0-ap-south-1.pooler.supabase.com:6543/postgres
+DEBUG DB HOST: aws-0-ap-south-1.pooler.supabase.com
+DEBUG DB USER: postgres.yjxdepuwskcankmtfjvz
+DEBUG DB PORT: 6543
+DEBUG: asyncpg connection FAILED: Tenant or user not found

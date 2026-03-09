@@ -9,6 +9,9 @@ from dataclasses import dataclass
 from datetime import datetime
 import math
 
+from .risk_engine import RiskEngine
+from .ai_db import ai_db
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -39,6 +42,7 @@ class TradeDecisionEngine:
         self.default_risk_reward = 2.0  # Target:Risk ratio
         self.stoploss_pct = 0.25  # 25% of premium as stoploss
         self.target_pct = 0.50   # 50% of premium as target
+        self.risk_engine = RiskEngine()
     
     def generate_trade(self, metrics, strategy_choice) -> Optional[TradeSuggestion]:
         """
@@ -52,26 +56,73 @@ class TradeDecisionEngine:
             spot = metrics.spot
             
             # Generate trade based on strategy
+            suggestion = None
             if strategy_choice.strategy == "Long Call":
-                return self._generate_long_call(symbol, spot, strategy_choice, metrics)
+                suggestion = self._generate_long_call(symbol, spot, strategy_choice, metrics)
             elif strategy_choice.strategy == "Long Put":
-                return self._generate_long_put(symbol, spot, strategy_choice, metrics)
+                suggestion = self._generate_long_put(symbol, spot, strategy_choice, metrics)
             elif strategy_choice.strategy == "Bull Call Spread":
-                return self._generate_bull_call_spread(symbol, spot, strategy_choice, metrics)
+                suggestion = self._generate_bull_call_spread(symbol, spot, strategy_choice, metrics)
             elif strategy_choice.strategy == "Bear Put Spread":
-                return self._generate_bear_put_spread(symbol, spot, strategy_choice, metrics)
+                suggestion = self._generate_bear_put_spread(symbol, spot, strategy_choice, metrics)
             elif strategy_choice.strategy == "Iron Condor":
-                return self._generate_iron_condor(symbol, spot, strategy_choice, metrics)
+                suggestion = self._generate_iron_condor(symbol, spot, strategy_choice, metrics)
             elif strategy_choice.strategy == "Straddle":
-                return self._generate_straddle(symbol, spot, strategy_choice, metrics)
+                suggestion = self._generate_straddle(symbol, spot, strategy_choice, metrics)
             elif strategy_choice.strategy == "Strangle":
-                return self._generate_strangle(symbol, spot, strategy_choice, metrics)
-            else:
-                return None
+                suggestion = self._generate_strangle(symbol, spot, strategy_choice, metrics)
+            
+            # Log successful trade generation
+            if suggestion:
+                self._log_trade_to_history(suggestion, metrics, strategy_choice)
+                
+            return suggestion
                 
         except Exception as e:
             logger.error(f"Trade generation error: {e}")
             return None
+
+    def _log_trade_to_history(self, suggestion, metrics, strategy_choice):
+        """Log trade to ai_trade_history table"""
+        try:
+            risk_metrics = self.risk_engine.calculate_trade_risk(suggestion)
+            
+            query = """
+            INSERT INTO ai_trade_history (
+                symbol, strategy, direction, trade_type, entry_price, 
+                target_price, stoploss_price, confidence, trade_reason, 
+                strike, lot_size, expected_profit, expected_loss, 
+                market_regime, signal_strength
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            
+            direction = "CALL" if suggestion.option_type == "CE" else "PUT"
+            trade_type = "BUY" # Default
+            if "Iron Condor" in suggestion.strategy:
+                trade_type = "SELL"
+                
+            params = (
+                suggestion.symbol,
+                suggestion.strategy,
+                direction,
+                trade_type,
+                suggestion.entry_price,
+                suggestion.target_price,
+                suggestion.stoploss_price,
+                suggestion.confidence,
+                getattr(strategy_choice, 'reasoning', 'AI Generated'),
+                suggestion.option_strike,
+                risk_metrics['lot_size'],
+                risk_metrics['expected_profit'],
+                risk_metrics['expected_loss'],
+                getattr(metrics, 'regime', 'UNKNOWN'),
+                getattr(metrics, 'signal_strength', 0.0)
+            )
+            
+            ai_db.execute_query(query, params)
+            
+        except Exception as e:
+            logger.error(f"Error logging trade to history: {e}")
     
     def _generate_long_call(self, symbol: str, spot: float, strategy_choice, metrics) -> TradeSuggestion:
         """Generate Long Call trade"""

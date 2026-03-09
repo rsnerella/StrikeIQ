@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Wifi, WifiOff, Heart, BarChart2, Link2, Activity, Bell, Menu, X } from "lucide-react";
+import { Wifi, WifiOff, Heart, BarChart2, Link2, Activity, Bell, Home, TrendingUp, Brain, Settings } from "lucide-react";
 import { useMarketStore } from "@/stores/marketStore";
 import { useWSStore } from "@/core/ws/wsStore";
+import api from "@/api/client";
 
 const HEARTBEAT_CSS = `
 @keyframes ws-heartbeat {
@@ -26,14 +27,15 @@ const HEARTBEAT_CSS = `
 }
 `;
 
-const NAV_TABS = [
-  { id: "dashboard", sectionId: "section-dashboard", label: "Dashboard", icon: BarChart2 },
-  { id: "chain", sectionId: "oi-heatmap", label: "Options Chain", icon: Link2 },
-  { id: "analytics", sectionId: "section-analytics", label: "Analytics", icon: Activity },
-  { id: "alerts", sectionId: "section-alerts", label: "Alerts", icon: Bell },
+const BOTTOM_NAV_TABS = [
+  { id: "dashboard", sectionId: "section-dashboard", label: "Dashboard", icon: Home },
+  { id: "chain", sectionId: "oi-heatmap", label: "Option Chain", icon: Link2 },
+  { id: "smart-money", sectionId: "section-analytics", label: "Smart Money", icon: TrendingUp },
+  { id: "ai-signals", sectionId: "section-alerts", label: "AI Signals", icon: Brain },
+  { id: "settings", sectionId: "section-settings", label: "Settings", icon: Settings },
 ] as const;
 
-type TabId = typeof NAV_TABS[number]["id"];
+type TabId = typeof BOTTOM_NAV_TABS[number]["id"];
 
 function scrollToSection(sectionId: string) {
   const el = document.getElementById(sectionId);
@@ -45,31 +47,18 @@ export default function Navbar() {
   const connected = useMarketStore((s) => s.connected);
 
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const marketStatus = useWSStore((s) => s.marketStatus);
   const setMarketStatus = useWSStore((s) => s.setMarketStatus);
 
   useEffect(() => {
-    const getBaseURL = () => {
-      const envUrl = process.env.NEXT_PUBLIC_API_URL;
-      if (envUrl && !envUrl.includes("localhost")) {
-        return envUrl;
-      }
-      if (typeof window !== "undefined") {
-        return `http://${window.location.hostname}:8000`;
-      }
-      return "http://localhost:8000";
-    };
-
     const fetchMarketStatus = async () => {
       try {
-        const API = getBaseURL();
-        const res = await fetch(`${API}/api/v1/market/status`);
-        const data = await res.json();
+        const response = await api.get('/v1/market/status');
+        const data = response.data;
 
-        if (data && data.status) {
-          setMarketStatus(data.status);
+        if (data && (data.market_status || data.status)) {
+          setMarketStatus(data.market_status || data.status || "UNKNOWN");
         }
       } catch (err) {
         console.warn("Failed to fetch market status", err);
@@ -145,15 +134,6 @@ export default function Navbar() {
 
             </div>
 
-            {/* MOBILE MENU BUTTON */}
-
-            <button
-              className="md:hidden flex items-center p-2 rounded-lg transition-colors"
-              style={{ color: '#00E5FF', background: 'rgba(0,229,255,0.06)', border: '1px solid rgba(0,229,255,0.14)' }}
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            >
-              {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
-            </button>
 
             {/* DESKTOP TABS */}
 
@@ -162,7 +142,7 @@ export default function Navbar() {
               style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
             >
 
-              {NAV_TABS.map((tab) => {
+              {BOTTOM_NAV_TABS.filter(tab => ['dashboard', 'chain', 'smart-money', 'ai-signals'].includes(tab.id)).map((tab) => {
 
                 const Icon = tab.icon;
                 const active = activeTab === tab.id;
@@ -349,76 +329,42 @@ export default function Navbar() {
 
         </div>
 
-        {/* MOBILE MENU */}
 
-        {mobileMenuOpen && (
+      </nav>
 
-          <div className="md:hidden fixed inset-0 z-50 flex items-center justify-center"
-            style={{ background: 'rgba(2,4,12,0.90)', backdropFilter: 'blur(16px)' }}
-          >
+      {/* BOTTOM NAVIGATION FOR MOBILE */}
+      <nav className="fixed bottom-0 left-0 right-0 h-16 bg-black border-t border-gray-800 flex justify-around items-center md:hidden z-50"
+        style={{
+          background: 'rgba(4,6,14,0.95)',
+          backdropFilter: 'blur(24px) saturate(180%)',
+          borderTop: '1px solid rgba(255,255,255,0.07)',
+        }}
+      >
+        {BOTTOM_NAV_TABS.map((tab) => {
+          const Icon = tab.icon;
+          const active = activeTab === tab.id;
 
-            <div
-              className="rounded-2xl p-5 w-[90%] max-w-sm"
-              style={{
-                background: 'rgba(8,11,22,0.96)',
-                border: '1px solid rgba(255,255,255,0.10)',
-                boxShadow: '0 24px 80px rgba(0,0,0,0.70)',
+          return (
+            <button
+              key={tab.id}
+              onClick={() => {
+                setActiveTab(tab.id);
+                scrollToSection(tab.sectionId);
               }}
+              className={`flex flex-col items-center justify-center gap-1 p-2 rounded-lg transition-all duration-200 ${active
+                ? "text-cyan-400"
+                : "text-slate-400 hover:text-slate-200"
+                }`}
+              style={active ? {
+                background: 'rgba(0,229,255,0.10)',
+                border: '1px solid rgba(0,229,255,0.22)',
+              } : undefined}
             >
-
-              <div className="flex justify-between items-center mb-5">
-
-                <div>
-                  <h3 className="text-base font-bold text-white">Navigation</h3>
-                  <p className="text-[10px] text-slate-500 font-mono mt-0.5">StrikeIQ Dashboard</p>
-                </div>
-
-                <button
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
-                >
-                  <X size={18} />
-                </button>
-
-              </div>
-
-              <div className="space-y-1">
-                {NAV_TABS.map((tab) => {
-
-                  const Icon = tab.icon;
-                  const active = activeTab === tab.id;
-
-                  return (
-                    <button
-                      key={tab.id}
-                      onClick={() => {
-                        setActiveTab(tab.id);
-                        scrollToSection(tab.sectionId);
-                        setMobileMenuOpen(false);
-                      }}
-                      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-[12px] font-bold tracking-widest uppercase transition-all ${active
-                        ? "text-cyan-400"
-                        : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
-                        }`}
-                      style={active ? {
-                        background: 'rgba(0,229,255,0.08)',
-                        border: '1px solid rgba(0,229,255,0.20)',
-                      } : undefined}
-                    >
-                      <Icon size={16} />
-                      {tab.label}
-                    </button>
-                  );
-
-                })}
-              </div>
-
-            </div>
-
-          </div>
-
-        )}
-
+              <Icon size={18} />
+              <span className="text-[9px] font-medium uppercase tracking-wider">{tab.label.split(' ')[0]}</span>
+            </button>
+          );
+        })}
       </nav>
     </>
   );

@@ -151,29 +151,33 @@ class AnalyticsBroadcaster:
                     logger.debug(f"COMPUTING STRUCTURAL ANALYSIS FOR {symbol}")
 
                     if self._structural_engine:
-                        structural = self._structural_engine.compute(symbol, chain_data)
+                        # Use await for the async method and handle return type
+                        structural = await self._structural_engine.compute_symbol_metrics(symbol)
                     else:
-                        structural = {}
+                        structural = None
 
-                    analytics_results["structural"] = {
-                        "expected_move": getattr(structural, "expected_move", 0),
-                        "upper_1sd": getattr(structural, "upper_1sd", 0),
-                        "lower_1sd": getattr(structural, "lower_1sd", 0),
-                        "upper_2sd": getattr(structural, "upper_2sd", 0),
-                        "lower_2sd": getattr(structural, "lower_2sd", 0),
-                        "breach_probability": getattr(structural, "breach_probability", 0),
-                        "range_hold_probability": getattr(structural, "range_hold_probability", 0),
-                        "gamma_regime": getattr(structural, "gamma_regime", "neutral"),
-                        "volatility_regime": getattr(structural, "volatility_regime", "normal"),
-                        "support_level": getattr(structural, "support_level", 0),
-                        "resistance_level": getattr(structural, "resistance_level", 0),
-                        "intent_score": getattr(structural, "intent_score", 0),
-                        "oi_velocity": getattr(structural, "oi_velocity", 0),
-                        "total_oi": getattr(structural, "total_oi", 0),
-                        "net_gamma": getattr(structural, "net_gamma", 0),
-                        "gamma_flip_level": getattr(structural, "gamma_flip_level", 0),
-                        "distance_from_flip": getattr(structural, "distance_from_flip", 0),
-                    }
+                    if structural:
+                        analytics_results["structural"] = {
+                            "expected_move": getattr(structural, "expected_move", 0),
+                            "upper_1sd": getattr(structural, "upper_1sd", 0),
+                            "lower_1sd": getattr(structural, "lower_1sd", 0),
+                            "upper_2sd": getattr(structural, "upper_2sd", 0),
+                            "lower_2sd": getattr(structural, "lower_2sd", 0),
+                            "breach_probability": getattr(structural, "breach_probability", 0),
+                            "range_hold_probability": getattr(structural, "range_hold_probability", 0),
+                            "gamma_regime": getattr(structural, "gamma_regime", "neutral"),
+                            "volatility_regime": getattr(structural, "volatility_regime", "normal"),
+                            "support_level": getattr(structural, "support_level", 0),
+                            "resistance_level": getattr(structural, "resistance_level", 0),
+                            "intent_score": getattr(structural, "intent_score", 0),
+                            "oi_velocity": getattr(structural, "oi_velocity", 0),
+                            "total_oi": getattr(structural, "total_oi", 0),
+                            "net_gamma": getattr(structural, "net_gamma", 0),
+                            "gamma_flip_level": getattr(structural, "gamma_flip_level", 0),
+                            "distance_from_flip": getattr(structural, "distance_from_flip", 0),
+                        }
+                    else:
+                        analytics_results["structural"] = {}
 
                 except Exception as e:
                     logger.error(f"Error computing structural analysis: {e}")
@@ -214,7 +218,7 @@ class AnalyticsBroadcaster:
             # cache store
             self.analytics_cache[symbol] = analytics_payload
 
-            logger.info(
+            logger.debug(
                 f"ANALYTICS COMPUTED FOR {symbol} → {list(analytics_results.keys())}"
             )
 
@@ -246,7 +250,7 @@ class AnalyticsBroadcaster:
             try:
                 await manager.broadcast(dict(analytics_payload))
                 broadcast_ms = (time.time() - broadcast_start) * 1000
-                logger.info(
+                logger.debug(
                     f"ANALYTICS BROADCAST → symbol={analytics_payload.get('symbol','?')} "
                     f"clients={len(manager.active_connections)} latency={broadcast_ms:.1f}ms"
                 )
@@ -314,17 +318,14 @@ class AnalyticsBroadcaster:
                                 adv = analytics.get("advanced_strategies")
                                 score = analytics.get("signal_score")
 
+                                # Parallel broadcast all analytics components
+                                broadcast_tasks = []
+                                
                                 if adv:
-                                    try:
-                                        await manager.broadcast(adv)
-                                    except Exception as e:
-                                        logger.debug(f"Advanced strategies broadcast failed: {e}")
-
+                                    broadcast_tasks.append(manager.broadcast(adv))
+                                
                                 if score:
-                                    try:
-                                        await manager.broadcast(score)
-                                    except Exception as e:
-                                        logger.debug(f"Signal score broadcast failed: {e}")
+                                    broadcast_tasks.append(manager.broadcast(score))
 
                                 # ── Chart Intelligence (Steps 2–9) ────────────────
                                 try:
@@ -339,7 +340,7 @@ class AnalyticsBroadcaster:
                                             options_analytics=analytics,
                                         )
                                         if chart_payload and chart_payload.get("signal") != "WAIT":
-                                            await manager.broadcast(chart_payload)
+                                            broadcast_tasks.append(manager.broadcast(chart_payload))
                                             signal_outcome_tracker.record_signal(
                                                 chart_payload,
                                                 extra={
@@ -356,13 +357,20 @@ class AnalyticsBroadcaster:
                                                 if features:
                                                     ai_prediction = probability_engine.predict(symbol, features)
                                                     if ai_prediction:
-                                                        await manager.broadcast(ai_prediction)
+                                                        broadcast_tasks.append(manager.broadcast(ai_prediction))
                                             except Exception as ai_e:
                                                 logger.debug(f"AI ML Pipeline error: {ai_e}", exc_info=True)
 
                                         await signal_outcome_tracker.evaluate_pending(symbol, spot)
                                 except Exception as e:
                                     logger.debug(f"Chart signal engine skipped: {e}")
+
+                                # Execute all broadcasts in parallel
+                                if broadcast_tasks:
+                                    try:
+                                        await asyncio.gather(*broadcast_tasks, return_exceptions=True)
+                                    except Exception as e:
+                                        logger.debug(f"Parallel broadcast failed: {e}")
 
                         else:
                             logger.debug(f"No chain data yet for {symbol} — skipping analytics")

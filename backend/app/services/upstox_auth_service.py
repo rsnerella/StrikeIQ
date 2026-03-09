@@ -38,7 +38,8 @@ class UpstoxAuthService:
 
     # ================= AUTH URL =================
     def get_authorization_url(self):
-        encoded_redirect = urllib.parse.quote(settings.REDIRECT_URI, safe='')
+        redirect_uri = os.getenv("UPSTOX_REDIRECT_URI")
+        encoded_redirect = urllib.parse.quote(redirect_uri, safe='')
         return (
             f"https://api.upstox.com/v2/login/authorization/dialog"
             f"?response_type=code"
@@ -100,7 +101,7 @@ class UpstoxAuthService:
                 "code": code,
                 "client_id": settings.UPSTOX_API_KEY,
                 "client_secret": settings.UPSTOX_API_SECRET,
-                "redirect_uri": settings.REDIRECT_URI,
+                "redirect_uri": os.getenv("UPSTOX_REDIRECT_URI"),
                 "grant_type": "authorization_code"
             }
 
@@ -170,7 +171,7 @@ class UpstoxAuthService:
             "refresh_token": self._credentials.refresh_token,
             "client_id": settings.UPSTOX_API_KEY,
             "client_secret": settings.UPSTOX_API_SECRET,
-            "redirect_uri": settings.REDIRECT_URI,
+            "redirect_uri": os.getenv("UPSTOX_REDIRECT_URI"),
             "grant_type": "refresh_token"
         }
 

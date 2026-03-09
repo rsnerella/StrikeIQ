@@ -1,7 +1,14 @@
+from dotenv import load_dotenv
+load_dotenv()
+import os
+print("DEBUG ENV DATABASE_URL:", os.getenv("DATABASE_URL"))
 import logging
 import asyncio
-import os
-from dotenv import load_dotenv
+import sys
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -19,8 +26,8 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from .env file (now moved up)
+# load_dotenv()
 
 # ================= AI + SCHEDULER LOGGING CONFIG =================
 
@@ -81,6 +88,26 @@ from app.api.v1.ws.live_options import router as ui_ws_router
 # ================= LOCK =================
 
 _ws_start_lock = asyncio.Lock()
+
+async def snapshot_cleanup_worker():
+    """Background worker to run snapshot cleanup every 24 hours"""
+    while True:
+        try:
+            # Use existing database connection
+            from app.models.database import engine
+            from sqlalchemy import text
+            
+            async with engine.begin() as conn:
+                result = await conn.execute(text("SELECT cleanup_old_snapshots()"))
+                cleanup_result = result.scalar()
+                
+            logger.info(f"🧹 Snapshot cleanup executed successfully: {cleanup_result}")
+            
+        except Exception as e:
+            logger.error(f"❌ Snapshot cleanup failed: {e}")
+        
+        # Sleep for 24 hours (86400 seconds)
+        await asyncio.sleep(86400)
 
 async def start_market_feed():
     """Start Upstox Market Feed with current token"""
@@ -150,13 +177,14 @@ async def lifespan(app: FastAPI):
             
             status = await get_market_status()
             
-            if status == "OPEN":
-                logger.info("Starting Upstox market feed")
+            # Always start market feed (needed for subscription testing)
+            try:
                 from app.services.websocket_market_feed import start_market_feed
                 
                 asyncio.create_task(start_market_feed())
-            else:
-                logger.info("Market closed — skipping market feed startup")
+                logger.info("Market feed started (market may be closed)")
+            except Exception as e:
+                logger.error(f"Market feed startup failed: {e}")
 
         else:
 
@@ -197,6 +225,13 @@ async def lifespan(app: FastAPI):
             logger.info("🧠 AI Scheduler DISABLED")
     except Exception as e:
         logger.error(f"AI Scheduler start failed: {e}")
+
+    # -------- SNAPSHOT CLEANUP WORKER --------
+    try:
+        asyncio.create_task(snapshot_cleanup_worker())
+        logger.info("Snapshot cleanup worker started")
+    except Exception as e:
+        logger.error(f"Snapshot cleanup worker start failed: {e}")
 
     yield
 
@@ -242,12 +277,16 @@ app = FastAPI(
 
 # ================= CORS =================
 
+origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000"
-    ],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -417,7 +456,6 @@ app.include_router(predictions_router, prefix="/api/v1/predictions")
 app.include_router(debug_router, prefix="/api/v1/debug")
 app.include_router(intelligence_router, prefix="/api/v1/intelligence")
 app.include_router(market_session_router, prefix="/api/v1/market")
-
 app.include_router(ws_router)
 app.include_router(ai_status_router, prefix="/api/v1/ai")
 app.include_router(ui_ws_router)

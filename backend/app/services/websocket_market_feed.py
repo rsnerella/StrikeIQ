@@ -3,7 +3,7 @@ import json
 import logging
 import time
 import os
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 import httpx
@@ -31,6 +31,10 @@ from app.core.logging_config import TICK_DEBUG
 
 # Global market feed instance
 market_feed_instance = None
+
+def get_market_feed():
+    """Get the global market feed instance"""
+    return market_feed_instance
 
 # Import new components
 from app.services.message_router import message_router
@@ -116,8 +120,8 @@ class WebSocketMarketFeed:
         self._client = httpx.AsyncClient(timeout=30)
         
         # Option subscription tracking
-        self.current_atm = None
-        self.current_expiry = None
+        self.current_atms = {"NIFTY": None, "BANKNIFTY": None}
+        self.current_expiries = {"NIFTY": None, "BANKNIFTY": None}
         self.current_option_keys = []
         self.subscribed_instruments = set()
         self.dropped_ticks = 0
@@ -126,9 +130,9 @@ class WebSocketMarketFeed:
         self.last_queue_warning = 0
         self.max_tick_latency = 0
         self.tick_counter = 0
-        self.last_atm = None
-        self.instrument_registry = None
-        self.last_index_price = None
+        self.last_atms = {"NIFTY": None, "BANKNIFTY": None}
+        self.instrument_registry = get_instrument_registry()
+        self.last_index_prices = {"NIFTY": None, "BANKNIFTY": None}
         self._failsafe_task: Optional[asyncio.Task] = None  # P5: track to prevent leaks
         self._disconnect_task: Optional[asyncio.Task] = None  # P1: track to prevent duplicate reconnects
         
@@ -165,6 +169,14 @@ class WebSocketMarketFeed:
         # AUDIT METRICS - STEP 8: WebSocket Broadcast Latency
         self.max_broadcast_latency = 0
         self.slow_broadcast_count = 0
+        self.feeds_received_count = 0
+        
+        # PATCH 2: Symbol-driven subscription state
+        self.active_symbol = None
+        self.active_expiry = None
+        self.subscribed_instruments = set()
+        self.last_spot_price = {}
+        self.current_atm = None
 
     async def start(self):
 
@@ -265,7 +277,7 @@ class WebSocketMarketFeed:
             raise Exception(f"V3 authorization failed: {response.status_code}")
         
         data = response.json()
-        ws_url = data.get("data", {}).get("authorizedRedirectUri")
+        ws_url = data.get("data", {}).get("authorized_redirect_uri")
         
         if not ws_url:
             raise Exception("No WebSocket URL in V3 response")
@@ -322,7 +334,8 @@ class WebSocketMarketFeed:
 
     async def subscribe_indices(self):
         """
-        TASK 4: SUBSCRIBE TO NIFTY/BANKNIFTY INDICES USING REGISTRY ONLY
+        Initialize instrument registry only.
+        Subscriptions now handled via switch_symbol() calls.
         """
 
         try:
@@ -333,113 +346,11 @@ class WebSocketMarketFeed:
             # Store instrument registry for expiry detection
             self.instrument_registry = instrument_registry
             
-            # Debug logging for registry structure
-            logger.info(f"Registry attributes → {dir(self.instrument_registry)}")
-            
-            # Detect NIFTY expiry if not already set
-            if not self.current_expiry:
-                self.current_expiry = self.get_nearest_nifty_expiry()
-                logger.info(f"DETECTED NIFTY EXPIRY → {self.current_expiry}")
-
-            # ------------------------------------------------
-            # TASK 4: GET INSTRUMENT KEYS FROM REGISTRY (OPTIONS/FUTURES) + INDEX KEYS
-            # ------------------------------------------------
-            
-            # Use registry to get correct instrument keys
-            instrument_keys = []
-            
-            # TASK 4: ADD INDEX INSTRUMENTS DIRECTLY (NOT IN REGISTRY)
-            # Index instruments are not in the options/futures registry
-            index_instruments = [
-                "NSE_INDEX|Nifty 50",
-                "NSE_INDEX|Nifty Bank"
-            ]
-            
-            for index_key in index_instruments:
-                instrument_keys.append(index_key)
-                logger.info(f"INDEX INSTRUMENT: {index_key}")
-            
-            # ADD OPTION INSTRUMENTS FOR BOTH NIFTY AND BANKNIFTY
-            if self.instrument_registry and self.current_expiry:
-                try:
-                    options_nifty = self.instrument_registry.get_option_instruments("NIFTY")
-                    options_banknifty = self.instrument_registry.get_option_instruments("BANKNIFTY")
-                    
-                    # Filter to keep only strikes near ATM to prevent websocket overload
-                    spot = self.last_index_price
-                    if spot is None:
-                        logger.info("Spot not available yet — skipping ATM filtering")
-                        return
-                    
-                    all_options = options_nifty + options_banknifty
-                    
-                    filtered = [
-                        opt for opt in all_options
-                        if abs(opt["strike"] - spot) <= 1250
-                    ]
-                    
-                    for opt in filtered:
-                        instrument_keys.append(opt["instrument_key"])
-                        logger.info(f"OPTION INSTRUMENT: {opt}")
-                    
-                    logger.info(f"OPTIONS SUBSCRIBED → {len(filtered)} ATM instruments")
-                    
-                except Exception as e:
-                    logger.warning(f"Failed to get option instruments: {e}")
-            
-            # TASK 4: ADD DEFENSIVE CHECK
-            if not instrument_keys:
-                logger.error("NO INSTRUMENT KEYS FOUND")
-                raise Exception("Instrument registry returned zero keys")
-            
-            logger.info("=== INSTRUMENT KEYS FOR SUBSCRIPTION ===")
-            for k in instrument_keys:
-                logger.info(k)
-
-            # ------------------------------------------------
-            # TASK 5: SUBSCRIPTION PAYLOAD WITH CORRECT MODES
-            # ------------------------------------------------
-
-            # INDEX instruments use "ltpc" mode
-            index_payload = {
-                "guid": "strikeiq-feed",
-                "method": "sub",
-                "data": {
-                    "mode": "full",
-                    "instrumentKeys": instrument_keys
-                }
-            }
-            
-            # Store payload for failsafe retry
-            self._subscription_payload = index_payload
-
-            logger.info("=== INDEX SUBSCRIPTION PAYLOAD ===")
-            logger.info(json.dumps(index_payload, indent=2))
-            logger.info(f"INDEX INSTRUMENT COUNT: {len(instrument_keys)}")
-
-            if self.websocket is None:
-                logger.error("WebSocket not initialized")
-                return
-
-            # TASK 5: CRITICAL - ADD 1-SECOND DELAY BEFORE SUBSCRIPTION
-            logger.info("⏳ WAITING 1 SECOND BEFORE SUBSCRIPTION...")
-            await asyncio.sleep(1)
-            
-            if self.websocket:
-                await self.websocket.send(json.dumps(index_payload).encode("utf-8"))
-                logger.info("SUBSCRIPTION SENT — WAITING FOR DATA")
-
-            # Confirm subscription sent
-            logger.info("✅ SUBSCRIPTION SENT - WAITING FOR MARKET DATA")
-            
-            # TASK 6: START FAILSAFE TIMER FOR NO DATA DETECTION — cancel old task first
-            if self._failsafe_task and not self._failsafe_task.done():
-                self._failsafe_task.cancel()
-            self._failsafe_task = asyncio.create_task(self._failsafe_no_data_check())
+            logger.info("Instrument registry initialized - ready for symbol-driven subscriptions")
+            logger.info("SUBSCRIPTION MODE → Symbol-driven (no automatic dual subscription)")
 
         except Exception as e:
-
-            logger.error(f"Subscription failed: {e}")
+            logger.error(f"Registry initialization failed: {e}")
 
     async def subscribe_options(self, instrument_keys, atm=None):
         """Subscribe to option instruments"""
@@ -474,7 +385,16 @@ class WebSocketMarketFeed:
             }
             
             if self.websocket:
-                await self.websocket.send(json.dumps(payload))
+                logger.info("SUBSCRIPTION PAYLOAD → %s", json.dumps(payload, indent=2))
+                # ==================== STRICT PROTECTED SECTION ====================
+                # WARNING: DO NOT MODIFY THIS LINE WITHOUT EXPLICIT REVIEW.
+                # This WebSocket subscription must be sent as UTF-8 encoded bytes.
+                # Changing this to plain json string will break Upstox V3 feed
+                # and result in heartbeat / market_info frames only (no market feeds).
+                # If modification is required, confirm protocol compatibility first.
+                # ==================================================================
+                await self.websocket.send(json.dumps(payload).encode("utf-8"))
+                logger.info("SUBSCRIPTION SENT SUCCESSFULLY")
                 self.current_option_keys = new_keys
                 self.subscribed_instruments.update(new_keys)
                 self.last_subscription_time = time.time()
@@ -514,17 +434,62 @@ class WebSocketMarketFeed:
         logger.warning(f"Invalid expiry format: {expiry}")
         return None
 
-    def get_nearest_nifty_expiry(self):
-        """Get the nearest NIFTY expiry from instrument registry"""
+    async def _check_and_subscribe_options(self, symbol: str, atm: int):
+        """Helper to manage ATM-based option subscriptions for a specific symbol"""
+        if atm != self.current_atms.get(symbol):
+            # Rate limiter: prevent subscription spam, but allow ATM changes
+            if time.time() - self.last_subscription_time < 2 and atm == self.last_atms.get(symbol):
+                return
+            
+            self.current_atms[symbol] = atm
+            expiry = self.active_expiry
+            
+            if not expiry:
+                return
+                
+            option_keys = build_option_keys(
+                symbol=symbol,
+                atm=atm,
+                expiry=expiry
+            )
+            logger.info(f"DEBUG TOTAL OPTION INSTRUMENTS FOR {symbol} → {len(option_keys)}")
+            
+            # Limit subscription to prevent overload
+            if len(option_keys) > 60:
+                option_keys = option_keys[:60]
+            
+            logger.debug(f"SUBSCRIBING OPTIONS AROUND ATM {atm} for {symbol}")
+            logger.debug(f"EXPIRY → {expiry}")
+            
+            payload = {
+                "guid": f"strikeiq-options-{symbol.lower()}",
+                "method": "sub",
+                "data": {
+                    "mode": "full",
+                    "instrumentKeys": option_keys
+                }
+            }
+            
+            if self.websocket:
+                logger.info("SUBSCRIPTION PAYLOAD → %s", json.dumps(payload, indent=2))
+                payload_bytes = json.dumps(payload).encode("utf-8")
+                await self.websocket.send(payload_bytes)
+                logger.info(f"OPTIONS SUBSCRIPTION SENT → {len(option_keys)} instruments for {symbol}")
+            
+            self.last_subscription_time = time.time()
+            self.last_atms[symbol] = atm
+
+    def get_nearest_nifty_expiry(self, symbol: str = "NIFTY"):
+        """Get the nearest expiry for symbol from instrument registry"""
         if not self.instrument_registry:
             logger.error("Instrument registry not loaded")
             return None
 
         expiries = []
-        logger.info("SCANNING REGISTRY FOR NIFTY EXPIRIES")
+        logger.info(f"SCANNING REGISTRY FOR {symbol} EXPIRIES")
 
         # Use registry methods instead of direct data access
-        expiries = self.instrument_registry.get_expiries("NIFTY")
+        expiries = self.instrument_registry.get_expiries(symbol)
 
         valid_expiries = []
 
@@ -535,13 +500,13 @@ class WebSocketMarketFeed:
                 valid_expiries.append((parsed, expiry))
 
         if not valid_expiries:
-            logger.error("No valid NIFTY expiries detected")
+            logger.error(f"No valid {symbol} expiries detected")
             return None
 
         nearest_expiry, nearest_expiry_str = min(valid_expiries, key=lambda x: x[0])
 
-        logger.info(f"AVAILABLE EXPIRIES → {expiries}")
-        logger.info(f"DETECTED NIFTY EXPIRY → {nearest_expiry_str}")
+        logger.debug(f"AVAILABLE EXPIRIES for {symbol} → {expiries}")
+        logger.debug(f"DETECTED {symbol} EXPIRY → {nearest_expiry_str}")
 
         return nearest_expiry_str
 
@@ -560,7 +525,7 @@ class WebSocketMarketFeed:
             }
             
             if self.websocket:
-                await self.websocket.send(json.dumps(payload))
+                await self.websocket.send(json.dumps(payload).encode("utf-8"))
                 logger.info(f"UNSUBSCRIBED {len(self.current_option_keys)} OLD OPTIONS")
                 self.current_option_keys = []
             else:
@@ -568,6 +533,207 @@ class WebSocketMarketFeed:
                 
         except Exception as e:
             logger.error(f"Option unsubscription failed: {e}")
+
+    # PATCH 3: SWITCH SYMBOL FUNCTION
+    async def switch_symbol(self, symbol: str, expiry: str):
+        """Switch subscription to new symbol and expiry"""
+        if symbol == self.active_symbol and expiry == self.active_expiry:
+            logger.debug(f"SYMBOL SWITCH SKIPPED → Already subscribed to {symbol} {expiry}")
+            return
+
+        logger.info(f"Switching subscription → {symbol} {expiry}")
+
+        await self._unsubscribe_all()
+        
+        # Prevent race condition between unsub and sub
+        await asyncio.sleep(0.1)
+        
+        self._clear_option_cache()
+
+        # Get index key for the symbol
+        index_key = None
+        try:
+            index_key = self.instrument_registry.get_index_key(symbol)
+        except Exception as e:
+            logger.error(f"Failed to fetch index key for {symbol}: {e}")
+
+        # Get option instruments for the symbol and expiry
+        option_keys = self._get_option_instruments(symbol, expiry)
+        
+        if option_keys is None:
+            option_keys = []
+        
+        # Combine index and options
+        instruments = []
+        
+        if index_key:
+            instruments.append(index_key)
+        else:
+            logger.error(f"Index key missing for {symbol}")
+        
+        if option_keys:
+            instruments.extend(option_keys)
+
+        await self._subscribe(instruments)
+
+        self.active_symbol = symbol
+        self.active_expiry = expiry
+        
+        logger.info(f"SYMBOL SWITCH COMPLETE → {symbol} {expiry} ({len(instruments)} instruments)")
+
+    def _get_index_key(self, symbol: str) -> Optional[str]:
+        """Get index instrument key for symbol"""
+        if symbol == "NIFTY":
+            return "NSE_INDEX|Nifty 50"
+        elif symbol == "BANKNIFTY":
+            return "NSE_INDEX|Nifty Bank"
+        else:
+            logger.error(f"Unknown symbol for index key: {symbol}")
+            return None
+
+    def _get_option_instruments(self, symbol: str, expiry: str):
+        try:
+            options = self.instrument_registry.get_options(symbol, expiry)
+
+            if not options:
+                logger.error(f"No options found for {symbol}")
+                return []
+
+            spot = self.last_spot_price.get(symbol)
+
+            if spot is None:
+                logger.info("Index tick not received yet — delaying option generation")
+                return []
+            
+            atm = int(spot // 50) * 50
+
+            lower = atm - 500
+            upper = atm + 500
+
+            instrument_keys = []
+
+            if isinstance(options, dict):
+                for strike, key in options.items():
+                    if lower <= strike <= upper:
+                        instrument_keys.append(f"NSE_FO|{key}")
+            elif isinstance(options, list):
+                for key in options[:50]:
+                    instrument_keys.append(f"NSE_FO|{key}")
+
+            if len(instrument_keys) > 50:
+                instrument_keys = instrument_keys[:50]
+
+            logger.info(
+                f"OPTION INSTRUMENTS GENERATED → {symbol} ATM={atm} count={len(instrument_keys)}"
+            )
+
+            return instrument_keys[:40]
+
+        except Exception as e:
+            logger.error(
+                f"Failed to get option instruments for {symbol}: {e}"
+            )
+
+            return []
+
+    # PATCH 4: UNSUBSCRIBE ALL FUNCTION
+    async def _unsubscribe_all(self):
+        """Unsubscribe from all currently subscribed instruments"""
+        if not self.subscribed_instruments:
+            return
+
+        payload = {
+            "method": "unsub",
+            "data": {
+                "instrumentKeys": list(self.subscribed_instruments)
+            }
+        }
+
+        try:
+            if self.websocket:
+                await self.websocket.send(json.dumps(payload).encode("utf-8"))
+                logger.info(f"UNSUBSCRIBED OLD INSTRUMENTS → {len(self.subscribed_instruments)} instruments")
+            else:
+                logger.warning("Cannot unsubscribe - WebSocket not connected")
+        except Exception as e:
+            logger.error(f"Unsubscribe failed: {e}")
+
+        self.subscribed_instruments.clear()
+
+    # PATCH 5: OPTION CACHE CLEAR FUNCTION
+    def _clear_option_cache(self):
+        """Clear option chain cache"""
+        try:
+            from app.services.option_chain_builder import option_chain_builder
+            option_chain_builder.chains.clear()
+            logger.info("OPTION CHAIN CACHE CLEARED")
+        except Exception as e:
+            logger.error(f"Failed to clear option cache: {e}")
+
+    async def _subscribe(self, instruments: List[str]):
+        """Subscribe to list of instruments"""
+        if not instruments:
+            logger.warning("No instruments to subscribe")
+            return
+
+        payload = {
+            "guid": "strikeiq-feed",
+            "method": "sub",
+            "data": {
+                "mode": "full",
+                "instrumentKeys": instruments
+            }
+        }
+
+        try:
+            new_instruments = [
+                key for key in instruments
+                if key not in self.subscribed_instruments
+            ]
+
+            if not new_instruments:
+                logger.debug("Skipping duplicate subscription")
+                return
+
+            instruments = new_instruments
+                
+            if self.websocket:
+                await self.websocket.send(json.dumps(payload).encode("utf-8"))
+                logger.info(f"SUBSCRIBED → {len(instruments)} instruments")
+                self.subscribed_instruments.update(instruments)
+            else:
+                logger.warning("WS not ready - delaying subscription")
+                
+                # retry after websocket stabilizes
+                asyncio.create_task(self._delayed_subscribe(instruments))
+                return
+        except Exception as e:
+            logger.error(f"Subscribe failed: {e}")
+
+    async def _delayed_subscribe(self, instruments):
+        """Retry subscription after WebSocket stabilizes"""
+        await asyncio.sleep(2)
+        
+        if not self.websocket:
+            logger.error("Delayed subscribe failed - WS still not connected")
+            return
+            
+        # Retry subscription with same payload
+        payload = {
+            "guid": "strikeiq-feed",
+            "method": "sub",
+            "data": {
+                "mode": "full",
+                "instrumentKeys": instruments
+            }
+        }
+        
+        try:
+            await self.websocket.send(json.dumps(payload).encode("utf-8"))
+            logger.info(f"SUBSCRIBED → {len(instruments)} instruments (delayed)")
+            self.subscribed_instruments.update(instruments)
+        except Exception as e:
+            logger.error(f"Delayed subscribe failed: {e}")
 
     async def maintain_connection(self):
         """Maintain WebSocket connection with reconnect loop"""
@@ -604,7 +770,13 @@ class WebSocketMarketFeed:
             _recv_loop → _handle_message → _message_queue → _process_loop → message_router
         """
         try:
-            ticks = await decode_protobuf_message(raw)
+            logger.debug("DEBUG PARSER INPUT SIZE → %d", len(raw))
+            res = await decode_protobuf_message(raw)
+            if res is not None:
+                self.feeds_received_count += 1
+                ticks = res
+            else:
+                ticks = []
 
             if not ticks:
                 return
@@ -640,6 +812,9 @@ class WebSocketMarketFeed:
                         continue
 
                     raw = await self.websocket.recv()
+                    logger.debug("DEBUG RAW FRAME SIZE → %d", len(raw) if raw else 0)
+                    if isinstance(raw, (bytes, bytearray)):
+                        logger.info("DEBUG FRAME TYPE → binary")
 
                     if getattr(self, "_debug_ws", False):
                         logger.debug(f"WS FRAME SIZE = {len(raw) if raw else 0}")
@@ -846,16 +1021,43 @@ class WebSocketMarketFeed:
             symbol = message.get("symbol")
             
             if message_type == "index_tick":
+                instrument_key = message.get("instrument_key")
+                logger.debug("DEBUG INDEX TICK ROUTED → %s", instrument_key)
+                
                 # Update option chain builder with new spot price
                 data = message.get("data", {})
                 ltp = data.get("ltp")
+                if ltp:
+                    logger.info("DEBUG SPOT PRICE DETECTED → %s", ltp)
+                    # Store last spot price for ATM calculation
+                    self.last_spot_price[symbol] = ltp
+                    
+                    # PATCH 6: Safe ATM shift detector
+                    new_atm = int(ltp // 50) * 50
+                    
+                    if self.current_atm is None:
+                        self.current_atm = new_atm
+                    elif abs(new_atm - self.current_atm) >= 200 and new_atm != self.current_atm:
+                        logger.info(f"ATM SHIFT DETECTED → {self.current_atm} → {new_atm}")
+                        self.current_atm = new_atm
+                        
+                        if self.active_symbol and self.active_expiry:
+                            try:
+                                loop = asyncio.get_running_loop()
+                                loop.create_task(
+                                    self.switch_symbol(self.active_symbol, self.active_expiry)
+                                )
+                            except RuntimeError:
+                                logger.warning(
+                                    "No running event loop — skipping ATM resubscribe"
+                                )
                 
                 if not ltp:
                     return  # Skip malformed ticks
                 
-                # Update last_index_price for NIFTY
-                if symbol == "NIFTY":
-                    self.last_index_price = ltp
+                # Update tracked index price for ATM calculation and filtering
+                if symbol in ["NIFTY", "BANKNIFTY"]:
+                    self.last_index_prices[symbol] = ltp
                 
                 # AUDIT METRICS - STEP 3: Option Chain Builder CPU Time
                 start = time.time()
@@ -872,49 +1074,15 @@ class WebSocketMarketFeed:
                 
                 self.max_option_builder_time = max(self.max_option_builder_time, elapsed)
                 
-                # Detect ATM and subscribe to options for NIFTY
-                if symbol == "NIFTY":
-                    atm = get_atm_strike(ltp)
-                    
-                    if atm != self.current_atm:
-                        # Rate limiter: prevent subscription spam, but allow ATM changes
-                        if time.time() - self.last_subscription_time < 2 and atm == self.last_atm:
-                            return
-                        
-                        self.current_atm = atm
-                        
-                        option_keys = build_option_keys(
-                            symbol="NIFTY",
-                            atm=atm,
-                            expiry=self.current_expiry
-                        )
-                        
-                        # Limit subscription to prevent overload
-                        if len(option_keys) > 60:
-                            option_keys = option_keys[:60]
-                        
-                        logger.debug(f"SUBSCRIBING OPTIONS AROUND ATM {atm}")
-                        logger.debug(f"EXPIRY → {self.current_expiry}")
-                        logger.debug(f"TOTAL OPTIONS → {len(option_keys)}")
-                        
-                        payload = {
-                            "guid": "strikeiq-options",
-                            "method": "sub",
-                            "data": {
-                                "mode": "full",
-                                "instrumentKeys": option_keys
-                            }
-                        }
-                        
-                        if self.websocket:
-                            await self.websocket.send(json.dumps(payload).encode("utf-8"))
-                            logger.info(f"OPTIONS SUBSCRIPTION SENT → {len(option_keys)} instruments")
-                        self.last_subscription_time = time.time()
-                        self.last_atm = atm
-                        logger.debug(f"OPTIONS SUBSCRIBED → {len(option_keys)} instruments")
+                # Detect ATM and subscribe to options
+                if symbol in ["NIFTY", "BANKNIFTY"]:
+                    logger.info("DEBUG ATM CALCULATION INPUT SPOT → %s", ltp)
+                    step = 50 if symbol == "NIFTY" else 100
+                    atm = get_atm_strike(ltp, step=step)
+                    asyncio.create_task(self._check_and_subscribe_options(symbol, atm))
                 
                 # Broadcast index tick immediately - AUDIT METRICS - STEP 8: WebSocket Broadcast Latency
-                await self._monitor_broadcast("index_tick", manager.broadcast, message)
+                asyncio.create_task(self._monitor_broadcast("index_tick", manager.broadcast, message))
                 
             elif message_type == "option_tick":
                 # Update option chain builder with option data
@@ -1005,19 +1173,25 @@ class WebSocketMarketFeed:
         logger.info("⏱️ STARTING 10-SECOND FAILSAFE TIMER...")
         await asyncio.sleep(10)
         
-        logger.warning("NO MARKET DATA RECEIVED — RESUBSCRIBING")
-        
-        if self.websocket and hasattr(self, '_subscription_payload'):
-            await self.websocket.send(json.dumps(self._subscription_payload))
-        
-        logger.warning("⚠️ FAILSAFE TIMER EXPIRED")
-        logger.warning("   Check instrument keys and subscription mode")
-        logger.warning("   Verify Upstox V3 WebSocket feed is active")
+        # Only resubscribe if no feeds were received at all
+        if self.feeds_received_count == 0:
+            logger.warning("NO FEEDS RECEIVED — RESUBSCRIBING")
+            
+            if self.websocket and hasattr(self, '_subscription_payload'):
+                logger.info("SUBSCRIPTION PAYLOAD → %s", json.dumps(self._subscription_payload, indent=2))
+                payload_bytes = json.dumps(self._subscription_payload).encode("utf-8")
+                await self.websocket.send(payload_bytes)
+                logger.info("SUBSCRIPTION SENT SUCCESSFULLY")
+            return
+
+        if self.feeds_received_count > 0:
+            logger.info("Market feed active — waiting for LTPC values")
+            return
 
     async def _route_tick_to_builders(self, symbol, instrument_key, tick_data):
 
         active_keys = [
-            key for key in manager.active_connections.keys()
+            key for key in manager.active_connections
             if key.startswith(f"{symbol}:")
         ]
 
@@ -1178,3 +1352,10 @@ async def stop_market_feed():
             logger.error(f"stop_market_feed error: {e}")
         finally:
             market_feed_instance = None
+
+
+def get_live_structural_engine():
+    """Access the AI engine from the global market feed instance."""
+    if market_feed_instance:
+        return market_feed_instance.ai_engine
+    return None

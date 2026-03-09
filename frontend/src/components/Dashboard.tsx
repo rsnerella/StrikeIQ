@@ -7,10 +7,20 @@ import { useExpirySelector } from '../hooks/useExpirySelector';
 import { useMarketStore } from '../stores/marketStore';
 import { useModeGuard, useEffectiveSpot } from './SafeModeGuard';
 import SymbolSelector from './SymbolSelector';
-import AIInterpretationPanel from './AIInterpretationPanel';
-import AICommandCenter from './AICommandCenter';
-import OIHeatmap from './OIHeatmap';
-import AlertPanelFinal from './intelligence/AlertPanelFinal';
+import dynamic from 'next/dynamic';
+const LoadingPlaceholder = () => (
+  <div className="animate-pulse flex flex-col gap-4 p-4 grayscale opacity-50">
+    <div className="h-4 bg-slate-700 rounded w-1/4"></div>
+    <div className="h-20 bg-slate-700 rounded"></div>
+  </div>
+);
+
+// ── Lazy load heavy panels (Task 10) ──────────────────────────────────────────
+const OIHeatmap = dynamic(() => import('./OIHeatmap'), { ssr: false, loading: () => <LoadingPlaceholder /> });
+const AIInterpretationPanel = dynamic(() => import('./AIInterpretationPanel'), { ssr: false, loading: () => <LoadingPlaceholder /> });
+const AlertPanelFinal = dynamic(() => import('./intelligence/AlertPanelFinal'), { ssr: false, loading: () => <LoadingPlaceholder /> });
+const AICommandCenter = dynamic(() => import('./AICommandCenter'), { ssr: false, loading: () => <LoadingPlaceholder /> });
+const StrategyPlanPanel = dynamic(() => import('./intelligence/StrategyPlanPanel'), { ssr: false, loading: () => <LoadingPlaceholder /> });
 
 // ── Dashboard sub-components ─────────────────────────────────────────────────
 import { LoadingBlock, SnapshotReadyBlock, ErrorBlock } from './dashboard/DashboardBlocks';
@@ -28,15 +38,15 @@ import { LiquidityVacuumPanel } from './dashboard/LiquidityVacuumPanel';
 import { ExpiryMagnetPanel } from './dashboard/ExpiryMagnetPanel';
 import { BiasPanel, ExpectedMovePanel } from './dashboard/BiasAndMove';
 import { SmartMoneyPanel, LiquidityPanel } from './dashboard/SmartMoneyAndLiquidity';
-import { CARD, CARD_HOVER_BORDER } from './dashboard/DashboardTypes';
-import { SectionLabel } from './dashboard/StatCards';
+import { CARD } from './dashboard/DashboardTypes';
 import type { LiveMarketData } from '../hooks/useLiveMarketData';
 
-// ── Memoized heavy panels ─────────────────────────────────────────────────────
+// ── Memoized heavy panels (Task 10) ─────────────────────────────────────────────
 const MemoizedOIHeatmap = memo(OIHeatmap);
 const MemoizedAIPanel = memo(AIInterpretationPanel);
 const MemoizedAlerts = memo(AlertPanelFinal);
 const MemoizedAICommandCenter = memo(AICommandCenter);
+const MemoizedStrategyPlan = memo(StrategyPlanPanel);
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface DashboardProps { initialSymbol?: string; }
@@ -339,7 +349,14 @@ export default function Dashboard({ initialSymbol = 'NIFTY' }: DashboardProps) {
             <ExpiryMagnetPanel data={data} />
           </div>
 
-          {/* ROW 11 — AI Interpretation Panel (full width) */}
+          {/* ROW 11 — Strategy Plan (Full Width) */}
+          <div className="col-12">
+            <div className="trading-panel">
+              <MemoizedStrategyPlan symbol={currentSymbol} />
+            </div>
+          </div>
+
+          {/* ROW 12 — AI Interpretation Panel (full width) */}
           <div className="col-12">
             <div className="trading-panel">
               <div id="section-ai" className="scroll-mt-20" />
@@ -347,7 +364,7 @@ export default function Dashboard({ initialSymbol = 'NIFTY' }: DashboardProps) {
             </div>
           </div>
 
-          {/* ROW 12 — AI Command Center (full width) */}
+          {/* ROW 13 — AI Command Center (full width) */}
           <div className="col-12">
             <div className="trading-panel">
               <MemoizedAICommandCenter />

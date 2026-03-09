@@ -9,6 +9,7 @@ let intentionalClose = false  // BUG 10 FIX: guard against reconnect on intentio
 let reconnectAttempts = 0
 let visibilityListenerAdded = false
 let reconnectTimer: any = null
+let lastVisibilityReconnect = 0  // MOBILE FIX: throttle visibility reconnects
 
 const MAX_RECONNECTS = 10
 declare global {
@@ -149,9 +150,16 @@ export function connectMarketWS() {
           return
         }
 
+        // MOBILE FIX: Add throttling to prevent rapid reconnects on mobile
         if (!socket || socket.readyState !== WebSocket.OPEN) {
-          console.log("TAB ACTIVE – reconnecting WS")
-          connectMarketWS()
+          const now = Date.now()
+          if (now - lastVisibilityReconnect > 5000) {
+            console.log("TAB ACTIVE – reconnecting WS (throttled)")
+            lastVisibilityReconnect = now
+            connectMarketWS()
+          } else {
+            console.log("TAB ACTIVE – reconnect throttled (recent attempt)")
+          }
         }
       })
 

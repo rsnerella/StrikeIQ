@@ -2,8 +2,10 @@ import logging
 import os
 import pickle
 import pandas as pd
+import asyncio
 from sqlalchemy import text
 from app.models.database import engine
+from app.core.async_db import get_db_pool
 
 logger = logging.getLogger(__name__)
 
@@ -69,14 +71,21 @@ class ProbabilityEngine:
             # Use max probability as the primary prediction confidence
             probability = max(buy_prob, sell_prob)
             
-            # Log into ai_predictions
+            # Log into ai_predictions asynchronously
             from datetime import datetime
-            with engine.connect() as conn:
-                conn.execute(
-                    text("INSERT INTO ai_predictions (symbol, timestamp, probability, signal, target, stop) VALUES (:sym, :t, :p, :s, :tgt, :stp)"),
-                    {"sym": symbol, "t": datetime.now(), "p": probability, "s": signal, "tgt": target, "stp": stop}
-                )
-                conn.commit()
+            try:
+                async def store_prediction():
+                    pool = get_db_pool()
+                    async with pool.acquire() as conn:
+                        await conn.execute(
+                            "INSERT INTO ai_predictions (symbol, timestamp, probability, signal, target, stop) VALUES ($1, $2, $3, $4, $5, $6)",
+                            symbol, datetime.now(), probability, signal, target, stop
+                        )
+                
+                # Fire and forget to avoid blocking analytics pipeline
+                asyncio.create_task(store_prediction())
+            except Exception as e:
+                logger.error(f"Failed to store AI prediction: {e}")
 
             return {
                 "type": "ai_prediction",

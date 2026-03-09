@@ -3,6 +3,7 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy import text
 from ..core.config import settings
 import logging
+import ssl
 
 logger = logging.getLogger(__name__)
 
@@ -12,11 +13,16 @@ SQLALCHEMY_DATABASE_URL = settings.DATABASE_URL
 if not SQLALCHEMY_DATABASE_URL.startswith("postgresql+asyncpg://"):
     raise ValueError("DATABASE_URL must use postgresql+asyncpg:// driver for async FastAPI")
 
+ssl_context = ssl.create_default_context()
+ssl_context.check_hostname = False
+ssl_context.verify_mode = ssl.CERT_NONE
+
 engine = create_async_engine(
     SQLALCHEMY_DATABASE_URL,
     pool_size=10,
     max_overflow=20,
-    pool_pre_ping=True
+    pool_pre_ping=True,
+    connect_args={"ssl": ssl_context}
 )
 
 AsyncSessionLocal = async_sessionmaker(
@@ -34,23 +40,34 @@ async def get_db():
         finally:
             await session.close()
 
-async def test_db_connection():
-    """Test Supabase PostgreSQL connection"""
-    try:
-        logger.info("Checking database connectivity...")
-        
-        # Test connection with simple query
-        async with engine.begin() as conn:
-            result = await conn.execute(text("SELECT 1 as test"))
-            test_value = result.scalar()
+import asyncio
+
+async def test_db_connection(max_retries: int = 3, delay: int = 5):
+    """Test Supabase PostgreSQL connection with retry logic (Task 6)"""
+    last_error = None
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(f"Checking database connectivity (Attempt {attempt}/{max_retries})...")
             
-        if test_value == 1:
-            logger.info("✅ Database connection successful")
-            return True
-        else:
-            logger.error("❌ Database test query failed")
-            return False
+            # Test connection with simple query
+            async with engine.begin() as conn:
+                result = await conn.execute(text("SELECT 1 as test"))
+                test_value = result.scalar()
+                
+            if test_value == 1:
+                logger.info("✅ Database connection successful")
+                return True
+            else:
+                logger.error(f"❌ Database test query failed (Attempt {attempt})")
+                
+        except Exception as e:
+            last_error = e
+            logger.error(f"❌ Database connection failed (Attempt {attempt}): {e}")
             
-    except Exception as e:
-        logger.error(f"❌ Database connection failed: {e}")
-        return False
+            if attempt < max_retries:
+                logger.info(f"Retrying in {delay} seconds...")
+                await asyncio.sleep(delay)
+    
+    logger.critical(f"❌ Database connection fatally failed after {max_retries} attempts")
+    return False

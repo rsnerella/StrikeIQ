@@ -35,22 +35,32 @@ class StrategyEngine:
             "Strangle": self._strangle_conditions
         }
     
-    def select_strategy(self, formula_signals: Dict[str, FormulaSignal]) -> StrategyChoice:
+    async def select_strategy(self, formula_signals: Dict[str, FormulaSignal]) -> StrategyChoice:
         """
-        Analyze formula signals and select optimal strategy
+        Analyze formula signals and select optimal strategy.
+        Adjusted by historical performance scores from Redis (Step 8).
         """
         try:
             # Calculate overall market bias
             market_bias = self._determine_market_bias(formula_signals)
             
+            # Load scores from Redis (Step 8)
+            from app.services.cache_service import cache_service
+            scores = await cache_service.get("ai:strategy_scores") or {}
+            
             # Evaluate each strategy
             strategy_scores = []
             for strategy_name, condition_func in self.strategies.items():
-                score, reasoning = condition_func(formula_signals, market_bias)
-                if score > 0:
-                    strategy_scores.append((strategy_name, score, reasoning))
+                base_score, reasoning = condition_func(formula_signals, market_bias)
+                if base_score > 0:
+                    # Step 8: Only adjust weighting, prefer strategies with higher score
+                    learning_weight = scores.get(strategy_name, 0.5)
+                    weight_factor = 0.8 + (0.4 * learning_weight)
+                    weighted_score = base_score * weight_factor
+                    
+                    strategy_scores.append((strategy_name, weighted_score, reasoning))
             
-            # Sort by confidence score
+            # Sort by weighted score
             strategy_scores.sort(key=lambda x: x[1], reverse=True)
             
             if strategy_scores:

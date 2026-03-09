@@ -1,0 +1,20 @@
+Traceback (most recent call last):
+  File "D:\StrikeIQ\backend\scripts\create_ai_trade_history.py", line 8, in <module>
+    from db.database import engine
+  File "D:\StrikeIQ\backend\db\database.py", line 6, in <module>
+    engine = create_async_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+    )
+  File "C:\Users\HP\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\sqlalchemy\ext\asyncio\engine.py", line 120, in create_async_engine
+    sync_engine = _create_engine(url, **kw)
+  File "<string>", line 2, in create_engine
+  File "C:\Users\HP\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\sqlalchemy\util\deprecations.py", line 281, in warned
+    return fn(*args, **kwargs)  # type: ignore[no-any-return]
+  File "C:\Users\HP\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\sqlalchemy\engine\create.py", line 564, in create_engine
+    u = _url.make_url(url)
+  File "C:\Users\HP\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\sqlalchemy\engine\url.py", line 860, in make_url
+    raise exc.ArgumentError(
+        f"Expected string or URL object, got {name_or_url!r}"
+    )
+sqlalchemy.exc.ArgumentError: Expected string or URL object, got None

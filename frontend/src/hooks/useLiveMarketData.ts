@@ -74,6 +74,14 @@ export function useLiveMarketData(symbol: string, expiry: string | null) {
     // Transform store data → UI data
     const safeAnalytics = analytics || {}
     
+    // PATCH 1: Prevent symbol mismatch from analytics
+    if (analytics?.symbol !== symbol) {
+      return
+    }
+    
+    // PATCH 4: Add defensive null guard
+    if (!analytics) return
+    
     if (process.env.NODE_ENV === "development") {
       console.log("🔗 ANALYTICS FROM STORE:", safeAnalytics)
     }
@@ -136,7 +144,7 @@ export function useLiveMarketData(symbol: string, expiry: string | null) {
       setMode("live")
       setLoading(false)
     }
-  }, [connected, data])
+  }, [connected])
 
   // Cleanup throttle on unmount to prevent memory leaks
   useEffect(() => {

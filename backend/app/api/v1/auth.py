@@ -4,6 +4,7 @@ from pydantic import BaseModel
 import logging
 from app.services.upstox_auth_service import get_upstox_auth_service
 from app.services.token_manager import token_manager
+from app.core.config import settings
 from core.logger import auth_logger, start_trace, get_trace_id, clear_trace
 
 logger = logging.getLogger(__name__)
@@ -136,7 +137,10 @@ async def callback(code: str = Query(None), request: Request = None):
             logger.warning(f"OAUTH MARKET FEED AUTO-START FAILED: {e}")
         
         # Log redirect to frontend
-        redirect_url = "http://localhost:3000/auth/success?broker=upstox"
+        frontend_url = settings.FRONTEND_URL.rstrip('/')
+        success_path = "/auth/success?broker=upstox"
+        redirect_url = f"{frontend_url}{success_path}"
+        
         auth_logger.info(f"OAUTH REDIRECT TO FRONTEND", { 
             "trace_id": trace_id,
             "redirect_url": redirect_url,
@@ -163,7 +167,10 @@ async def callback(code: str = Query(None), request: Request = None):
         logger.error(f"Token exchange failed: {str(e)}")
         
         # Log redirect to frontend error page
-        error_redirect_url = "http://localhost:3000/auth/error?message=authentication_failed"
+        frontend_url = settings.FRONTEND_URL.rstrip('/')
+        error_path = "/auth/error?message=authentication_failed"
+        error_redirect_url = f"{frontend_url}{error_path}"
+        
         auth_logger.info(f"OAUTH REDIRECT TO FRONTEND", { 
             "trace_id": trace_id,
             "redirect_url": error_redirect_url,

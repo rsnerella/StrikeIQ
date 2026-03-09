@@ -254,6 +254,9 @@ class PaperTradeEngine:
             if success:
                 logger.debug(f"Paper trade closed: ID {trade['id']}, PnL: {pnl:.2f}")
                 
+                # Update ai_trade_history
+                self._update_ai_trade_history(trade, exit_price, pnl)
+
                 # Log AI event
                 self.log_ai_event(
                     event_type="PAPER_TRADE_CLOSED",
@@ -268,6 +271,33 @@ class PaperTradeEngine:
         except Exception as e:
             logger.error(f"Error exiting paper trade: {e}")
             return False
+
+    def _update_ai_trade_history(self, trade: Dict, exit_price: float, pnl: float):
+        """Update ai_trade_history when a trade closes"""
+        try:
+            result = "WIN" if pnl > 0 else "LOSS"
+            
+            # Update the latest open matching trade
+            update_query = """
+                UPDATE ai_trade_history
+                SET exit_price = %s, pnl = %s, result = %s, closed_at = %s
+                WHERE symbol = %s AND strike = %s AND closed_at IS NULL
+            """
+            
+            params = (
+                exit_price, 
+                pnl, 
+                result, 
+                datetime.now(), 
+                trade['symbol'], 
+                trade['strike_price']
+            )
+            
+            self.db.execute_query(update_query, params)
+            logger.info(f"Updated ai_trade_history for {trade['symbol']} {trade['strike_price']}")
+            
+        except Exception as e:
+            logger.error(f"Error updating ai_trade_history: {e}")
     
     def monitor_open_trades(self) -> int:
         """

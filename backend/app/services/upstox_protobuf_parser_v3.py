@@ -24,18 +24,36 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
 
         response = FeedResponse()
         response.ParseFromString(message)
-
-        if not response.feeds:
-            logger.warning("PROTOBUF MESSAGE HAS NO FEEDS - IGNORING FRAME")
-            return []
+        logger.info("DEBUG PARSED MESSAGE → %s", response)
 
         feeds = response.feeds
-        logger.info(f"VALID FEED FRAME RECEIVED count={len(feeds)}")
+        
+        # Handle feeds as a map (standard for Upstox V3) or fallback to list
+        if hasattr(feeds, "items"):
+            feed_items = feeds.items()
+            feed_keys = list(feeds.keys())
+        else:
+            # Fallback for unexpected repeated field structure
+            feed_items = []
+            for entry in feeds:
+                k = getattr(entry, "key", None)
+                v = getattr(entry, "value", entry)
+                if k:
+                    feed_items.append((k, v))
+            feed_keys = [k for k, v in feed_items]
 
-        for entry in feeds:
+        logger.info("PROTOBUF FEEDS STATUS → count=%d keys=%s", len(feed_items), feed_keys)
+        
+        if not feed_items:
+            # logger.warning("DEBUG PARSED MESSAGE HAS NO FEEDS OR EMPTY LIST")
+            return None
 
-            instrument_key = entry.key
-            feed = entry.value
+        for instrument_key, feed in feed_items:
+
+            if not instrument_key:
+                continue
+
+            logger.info("DEBUG PROCESSING TICK → %s", instrument_key)
 
             if not instrument_key:
                 continue
@@ -52,7 +70,9 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
 
             try:
                 if feed.HasField("ltpc"):
-                    ltp = float(feed.ltpc.ltp)
+                    val = getattr(feed.ltpc, "ltp", None)
+                    if val:
+                        ltp = float(val)
             except Exception:
                 pass
 
@@ -68,7 +88,9 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
                     # index feed
                     index_ff = getattr(ff, "indexFF", None)
                     if index_ff and index_ff.HasField("ltpc"):
-                        ltp = float(index_ff.ltpc.ltp)
+                        val = getattr(index_ff.ltpc, "ltp", None)
+                        if val:
+                            ltp = float(val)
 
                     # market feed
                     market_ff = getattr(ff, "marketFF", None)
@@ -76,12 +98,16 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
                     if market_ff:
 
                         if market_ff.HasField("ltpc"):
-                            ltp = float(market_ff.ltpc.ltp)
+                            val = getattr(market_ff.ltpc, "ltp", None)
+                            if val:
+                                ltp = float(val)
 
                         # nested fullFeed structure
                         full = getattr(market_ff, "fullFeed", None)
                         if full and full.HasField("ltpc"):
-                            ltp = float(full.ltpc.ltp)
+                            val = getattr(full.ltpc, "ltp", None)
+                            if val:
+                                ltp = float(val)
 
                         # volume and OI extraction from eFeedDetails
                         try:
@@ -117,6 +143,9 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
             if ltp is None or ltp <= 0:
                 continue
 
+            # Normalized Tick Logging
+            logger.info("[%s] LTP DETECTED → %s OI=%s", segment, ltp, oi)
+
             tick = {
                 "instrument_key": instrument_key,
                 "ltp": float(ltp),
@@ -132,8 +161,8 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
             # -------------------------------------------------
 
             if segment == "NSE_FO":
-                logger.debug(
-                    f"OPTION TICK → {instrument_key} LTP={ltp} OI={oi} VOL={volume}"
+                logger.info(
+                    f"OPTION TICK PARSED → {instrument_key} LTP={ltp} OI={oi} VOL={volume}"
                 )
             else:
                 logger.debug(
@@ -175,11 +204,15 @@ def extract_index_price(feed) -> Optional[float]:
 
             index_ff = getattr(ff, "indexFF", None)
             if index_ff and index_ff.HasField("ltpc"):
-                return float(index_ff.ltpc.ltp)
+                val = getattr(index_ff.ltpc, "ltp", None)
+                if val:
+                    return float(val)
 
             market_ff = getattr(ff, "marketFF", None)
             if market_ff and market_ff.HasField("ltpc"):
-                return float(market_ff.ltpc.ltp)
+                val = getattr(market_ff.ltpc, "ltp", None)
+                if val:
+                    return float(val)
 
     except Exception:
         pass
