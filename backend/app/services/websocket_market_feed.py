@@ -551,11 +551,13 @@ class WebSocketMarketFeed:
         self._clear_option_cache()
 
         # Get index key for the symbol
-        index_key = None
-        try:
-            index_key = self.instrument_registry.get_index_key(symbol)
-        except Exception as e:
-            logger.error(f"Failed to fetch index key for {symbol}: {e}")
+        if symbol == "NIFTY":
+            index_key = "NSE_INDEX|Nifty 50"
+        elif symbol == "BANKNIFTY":
+            index_key = "NSE_INDEX|Nifty Bank"
+        else:
+            logger.error(f"Unsupported symbol: {symbol}")
+            index_key = None
 
         # Get option instruments for the symbol and expiry
         option_keys = self._get_option_instruments(symbol, expiry)
