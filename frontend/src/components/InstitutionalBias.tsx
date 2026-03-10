@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { TrendingUp, TrendingDown, Target, Shield, Activity, BarChart3, Info, AlertTriangle, Zap } from 'lucide-react';
 
 interface InstitutionalBiasProps {
@@ -32,7 +32,7 @@ interface InstitutionalBiasProps {
   marketChangePercent?: number;
 }
 
-export default function InstitutionalBias({ intelligence, spotPrice, marketStatus, marketChange, marketChangePercent }: InstitutionalBiasProps) {
+export default memo(function InstitutionalBias({ intelligence, spotPrice, marketStatus, marketChange, marketChangePercent }: InstitutionalBiasProps) {
   if (!intelligence || !intelligence.bias) {
     return (
       <div className="bg-[#111827] rounded-xl p-5 border border-[#1F2937] h-full flex flex-col items-center justify-center space-y-4">
@@ -183,4 +183,4 @@ export default function InstitutionalBias({ intelligence, spotPrice, marketStatu
       </div>
     </div>
   );
-}
+});

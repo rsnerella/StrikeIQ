@@ -1,11 +1,12 @@
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 import logging
+import asyncio
+
 from app.services.upstox_auth_service import get_upstox_auth_service
 from app.services.token_manager import token_manager
-from app.core.config import settings
-from core.logger import auth_logger, start_trace, get_trace_id, clear_trace
+from core.logger import auth_logger, start_trace, clear_trace
 
 logger = logging.getLogger(__name__)
 
@@ -16,44 +17,44 @@ class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
 
+# ================= AUTH STATUS =================
+
 @router.get("/status")
 async def auth_status():
     """
-    Production-grade authentication status check
-    Returns authentication status based on Redis token availability
+    Check if Upstox token exists in Redis
     """
+
     try:
-        # Check if token exists in Redis
-        from app.services.token_manager import token_manager
         auth_state = token_manager.get_auth_state()
-        
+
         if auth_state["token_available"]:
             return {
                 "authenticated": True,
                 "login_url": None
             }
-        else:
-            # No token available - return login URL
-            auth_service = get_upstox_auth_service()
-            login_url = auth_service.get_authorization_url()
-            
-            return {
-                "authenticated": False,
-                "login_url": login_url
-            }
-            
-    except Exception as e:
-        logger.error(f"Auth status check failed: {str(e)}")
-        
-        # Treat any unexpected error as authentication failure
+
         auth_service = get_upstox_auth_service()
         login_url = auth_service.get_authorization_url()
-        
+
         return {
             "authenticated": False,
             "login_url": login_url
         }
 
+    except Exception as e:
+        logger.error(f"Auth status failed: {e}")
+
+        auth_service = get_upstox_auth_service()
+        login_url = auth_service.get_authorization_url()
+
+        return {
+            "authenticated": False,
+            "login_url": login_url
+        }
+
+
+# ================= LOGIN =================
 
 @router.get("/upstox")
 def login():
@@ -64,137 +65,80 @@ def login():
     return RedirectResponse(auth_url)
 
 
+# ================= CALLBACK =================
+
 @router.get("/upstox/callback")
 async def callback(code: str = Query(None), request: Request = None):
-    # Start trace for OAuth callback
+
     trace_id = start_trace()
-    
-    # Log when callback endpoint is hit
-    auth_logger.info(f"OAUTH CALLBACK HIT", { 
-        "trace_id": trace_id,
-        "method": request.method if request else "UNKNOWN",
-        "url": str(request.url) if request else "UNKNOWN",
-        "user_agent": request.headers.get("user-agent") if request else "UNKNOWN"
-    })
-    
-    # Log query parameters
-    query_params = dict(request.query_params) if request else {}
-    auth_logger.info(f"OAUTH CALLBACK QUERY PARAMS", { 
-        "trace_id": trace_id,
-        "params": query_params,
-        "param_count": len(query_params)
-    })
-    
-    # Log received authorization code
-    if code:
-        auth_logger.info(f"OAUTH AUTHORIZATION CODE RECEIVED", { 
+
+    auth_logger.info(
+        "OAUTH CALLBACK HIT",
+        {
             "trace_id": trace_id,
-            "code_length": len(code),
-            "code_prefix": code[:10] + "..." if len(code) > 10 else code,
-            "has_code": True
-        })
-    else:
-        auth_logger.warning(f"OAUTH AUTHORIZATION CODE MISSING", { 
-            "trace_id": trace_id,
-            "has_code": False
-        })
+            "url": str(request.url) if request else None,
+            "method": request.method if request else None
+        }
+    )
+
+    if not code:
         clear_trace()
         raise HTTPException(status_code=400, detail="Authorization code missing")
 
     try:
-        # Log token exchange request
-        auth_logger.info(f"OAUTH TOKEN EXCHANGE START", { 
-            "trace_id": trace_id,
-            "code_length": len(code),
-            "exchange_type": "authorization_code"
-        })
-        
+
+        # Exchange code → access token
         token_data = await token_manager.login(code)
-        
-        # Log full Upstox token response
-        auth_logger.info(f"OAUTH TOKEN EXCHANGE SUCCESS", { 
-            "trace_id": trace_id,
-            "access_token_length": len(token_data.get("access_token", "")),
-            "access_token_prefix": token_data.get("access_token", "")[:10] + "..." if token_data.get("access_token") else "NONE",
-            "refresh_token_length": len(token_data.get("refresh_token", "")),
-            "refresh_token_prefix": token_data.get("refresh_token", "")[:10] + "..." if token_data.get("refresh_token") else "NONE",
-            "token_type": token_data.get("token_type"),
-            "expires_in": token_data.get("expires_in"),
-            "scope": token_data.get("scope"),
-            "response_keys": list(token_data.keys())
-        })
-        
-        logger.info("Upstox connected successfully")
-        
-        # Auto-start market feed after successful login
-        try:
-            import asyncio
-            from app.services.websocket_market_feed import start_market_feed
-            logger.info("STARTING UPSTOX MARKET FEED AFTER OAUTH")
-            asyncio.create_task(start_market_feed())
-            logger.info("OAUTH MARKET FEED STARTED")
-        except Exception as e:
-            logger.warning(f"OAUTH MARKET FEED AUTO-START FAILED: {e}")
-        
-        # Log redirect to frontend
-        frontend_url = settings.FRONTEND_URL.rstrip('/')
-        success_path = "/auth/success?broker=upstox"
-        redirect_url = f"{frontend_url}{success_path}"
-        
-        auth_logger.info(f"OAUTH REDIRECT TO FRONTEND", { 
-            "trace_id": trace_id,
-            "redirect_url": redirect_url,
-            "status_code": 302,
-            "redirect_type": "success"
-        })
-        
-        # Redirect to frontend success page - token stays server-side
-        clear_trace()
-        return RedirectResponse(
-            url=redirect_url,
-            status_code=302
+
+        auth_logger.info(
+            "OAUTH TOKEN EXCHANGE SUCCESS",
+            {
+                "trace_id": trace_id,
+                "access_token_len": len(token_data.get("access_token", "")),
+                "expires_in": token_data.get("expires_in")
+            }
         )
-        
-    except Exception as e:
-        # Log token exchange failure
-        auth_logger.error(f"OAUTH TOKEN EXCHANGE FAILED", { 
-            "trace_id": trace_id,
-            "error": str(e),
-            "error_type": type(e).__name__,
-            "code_length": len(code) if code else 0
-        })
-        
-        logger.error(f"Token exchange failed: {str(e)}")
-        
-        # Log redirect to frontend error page
-        frontend_url = settings.FRONTEND_URL.rstrip('/')
-        error_path = "/auth/error?message=authentication_failed"
-        error_redirect_url = f"{frontend_url}{error_path}"
-        
-        auth_logger.info(f"OAUTH REDIRECT TO FRONTEND", { 
-            "trace_id": trace_id,
-            "redirect_url": error_redirect_url,
-            "status_code": 302,
-            "redirect_type": "error",
-            "error_message": "authentication_failed"
-        })
-        
+
+        logger.info("Upstox authentication successful")
+
+        # Start market feed asynchronously
+        try:
+            from app.services.websocket_market_feed import start_market_feed
+
+            asyncio.create_task(start_market_feed())
+            logger.info("Market feed start task scheduled")
+
+        except Exception as feed_error:
+            logger.warning(f"Market feed auto start failed: {feed_error}")
+
         clear_trace()
-        # Redirect to frontend error page
+
+        # STRICT redirect (user never sees callback URL)
         return RedirectResponse(
-            url=error_redirect_url,
+            url="http://localhost:3000?upstox=success",
             status_code=302
         )
 
+    except Exception as e:
+
+        logger.error(f"Upstox auth failed: {e}")
+
+        clear_trace()
+
+        return RedirectResponse(
+            url="http://localhost:3000?upstox=failed",
+            status_code=302
+        )
+
+
+# ================= REFRESH TOKEN =================
 
 @router.post("/refresh")
 async def refresh_token(request: RefreshTokenRequest):
-    """
-    Refresh access token using refresh token
-    NOTE: Upstox does not support automatic token refresh
-    """
-    logger.warning("Token refresh requested - not supported by Upstox")
+
+    logger.warning("Token refresh requested but Upstox does not support it")
+
     raise HTTPException(
         status_code=400,
-        detail="Token refresh not supported - please regenerate access token via OAuth"
+        detail="Token refresh not supported by Upstox. Please login again."
     )

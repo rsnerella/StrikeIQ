@@ -1,4 +1,0 @@
-  File "<string>", line 9
-    print(f'{t} exists: {[c.get(\
-                               ^
-SyntaxError: '(' was never closed

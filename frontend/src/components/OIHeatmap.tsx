@@ -1,4 +1,5 @@
 import React, { memo, useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useShallow } from "zustand/shallow";
 import { BarChart3, TrendingUp, TrendingDown } from 'lucide-react';
 import api from '../lib/api';
 import { useWSStore } from '../core/ws/wsStore';
@@ -30,6 +31,10 @@ interface OIHeatmapProps {
 
 
 const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
+  // PERFORMANCE: Render profiling moved to useEffect
+  useEffect(() => {
+    console.count("OIHeatmap render")
+  })
 
   // Use expiry selector hook
   const {
@@ -49,14 +54,20 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
   const [spotPrice, setSpotPrice] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Read from Zustand stores for fallback
-  const { liveData: wsLiveData, optionChainSnapshot, spot } = useWSStore();
+  // Read from Zustand stores for fallback with grouped selectors
+  const { liveData, optionChainSnapshot, spot } = useWSStore(
+    useShallow(state => ({
+      liveData: state.liveData,
+      optionChainSnapshot: state.optionChainSnapshot,
+      spot: state.spot
+    }))
+  )
   const { optionChainData } = useOptionChainStore();
 
   // Use structured data from global store, fallback to option chain store, then legacy data
   const actualLiveData = calls.length > 0 || puts.length > 0
     ? { calls, puts, spot }
-    : optionChainData || wsLiveData || optionChainSnapshot;
+    : optionChainData || liveData || optionChainSnapshot;
 
   // 🔥 PCR FALLBACK CALCULATION (FRONTEND-ONLY FIX)
   const calculatePCR = useCallback((data: any) => {

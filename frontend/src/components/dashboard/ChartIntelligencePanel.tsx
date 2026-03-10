@@ -8,6 +8,7 @@ import { TrendingUp, TrendingDown, Minus, Activity, Layers, Target, Shield, Zap 
 import { CARD, CARD_HOVER_BORDER } from './DashboardTypes';
 import { SectionLabel } from './StatCards';
 import { useWSStore } from '../../core/ws/wsStore';
+import StrikeIQChart from '../charts/StrikeIQChart';
 
 // ── Colours ────────────────────────────────────────────────────────────────────
 const BULL = '#4ade80';
@@ -131,6 +132,11 @@ export function ChartIntelligencePanel() {
             onMouseEnter={e => { e.currentTarget.style.borderColor = CARD_HOVER_BORDER; }}
             onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)'; }}
         >
+            {/* Chart Section */}
+            <div style={{ marginBottom: 16 }}>
+                <StrikeIQChart />
+            </div>
+
             {/* Header */}
             <div className="flex items-center justify-between mb-4">
                 <SectionLabel>Chart Intelligence</SectionLabel>

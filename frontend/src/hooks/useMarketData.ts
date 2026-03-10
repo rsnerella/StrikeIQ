@@ -4,16 +4,25 @@
  */
 
 import { useWSStore } from '../core/ws/wsStore';
+import { useShallow } from 'zustand/shallow';
 
 export function useMarketData() {
-  const marketData = useWSStore((state) => state.marketData);
-  const connected = useWSStore((state) => state.connected);
-  const error = useWSStore((state) => state.error);
+  // PERFORMANCE: Use grouped selectors to prevent unnecessary re-renders
+  const { marketData, connected, error } = useWSStore(
+    useShallow(state => ({
+      marketData: state.marketData,
+      connected: state.connected,
+      error: state.error
+    }))
+  );
+
+  const calls = marketData?.calls ?? []
+  const puts = marketData?.puts ?? []
 
   return {
-    data: marketData,
-    isConnected: connected,
-    error,
-    loading: !marketData && connected
-  };
+    spot: marketData?.spot ?? 0,
+    calls,
+    puts,
+    connected
+  }
 }

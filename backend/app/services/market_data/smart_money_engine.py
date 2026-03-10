@@ -7,6 +7,8 @@ from sqlalchemy import func, desc, and_
 from ...models.market_data import OptionChainSnapshot, MarketSnapshot
 import numpy as np
 from collections import defaultdict
+from app.core.diagnostics import diag
+from app.core.ai_health_state import mark_health
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,9 @@ class SmartMoneyEngine:
             
             # Cache result
             self._cache_result(cache_key, result)
+            
+            # Mark flow engine as healthy
+            mark_health("flow")
             
             logger.info(f"Generated smart money signal for {symbol}: {bias} (confidence: {confidence:.1f})")
             return result
@@ -189,6 +194,14 @@ class SmartMoneyEngine:
         # Total OI
         total_call_oi = sum(s.oi for s in calls)
         total_put_oi = sum(s.oi for s in puts)
+        
+        # Total Volume
+        total_call_volume = sum(s.volume for s in calls)
+        total_put_volume = sum(s.volume for s in puts)
+        
+        # Add diagnostic logging for volume analysis
+        diag("AI_TEST", f"Call volume: {total_call_volume}")
+        diag("AI_TEST", f"Put volume: {total_put_volume}")
         
         # PCR
         pcr = total_put_oi / total_call_oi if total_call_oi > 0 else 0

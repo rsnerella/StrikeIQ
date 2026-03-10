@@ -15,6 +15,7 @@ const MAX_RECONNECTS = 10
 declare global {
   interface Window {
     __WS_CONNECTED__?: boolean;
+    __wsRateTracker?: { count: number; startTime: number };
   }
 }
 const getWsUrl = () => {
@@ -173,6 +174,24 @@ export function connectMarketWS() {
   socket.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data)
+      
+      // PERFORMANCE: Count message rate to detect performance issues
+      console.count("WS_MESSAGE")
+      
+      // PERFORMANCE: Calculate average rate per second
+      if (!window.__wsRateTracker) {
+        window.__wsRateTracker = { count: 0, startTime: Date.now() }
+      }
+      window.__wsRateTracker.count++
+      const elapsed = (Date.now() - window.__wsRateTracker.startTime) / 1000
+      if (elapsed >= 5) {
+        const rate = Math.round(window.__wsRateTracker.count / elapsed)
+        console.log(`WS MESSAGE RATE: ${rate}/sec (average over ${elapsed.toFixed(1)}s)`)
+        window.__wsRateTracker = { count: 0, startTime: Date.now() }
+      }
+      
+      // STEP 3: Add WS message debug
+      console.log("WS MESSAGE RECEIVED", data);
 
       // Route analytics to handleAnalytics
       if (data.type === "analytics") {

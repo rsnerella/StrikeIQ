@@ -75,6 +75,9 @@ class WSManager:
             connections = self.active_connections.copy()
             subscriptions = self.client_subscriptions.copy()
 
+        # STEP 4: VERIFY CLIENTS
+        logger.info(f"WS CLIENT COUNT → {len(connections)}")
+
         if not connections:
             return
 

@@ -28,6 +28,7 @@ from app.services.instrument_registry import get_instrument_registry
 from app.services.live_structural_engine import LiveStructuralEngine
 from app.core.live_market_state import get_market_state_manager
 from app.core.logging_config import TICK_DEBUG
+from app.core.diagnostics import diag, increment_counter
 
 # Global market feed instance
 market_feed_instance = None
@@ -116,10 +117,11 @@ class WebSocketMarketFeed:
         self._recv_task: Optional[asyncio.Task] = None
         self._process_task: Optional[asyncio.Task] = None
         self._heartbeat_task: Optional[asyncio.Task] = None
+        self._metrics_task: Optional[asyncio.Task] = None
 
         self._client = httpx.AsyncClient(timeout=30)
         
-        # Option subscription tracking
+        # Option subscription tracking - CONSOLIDATED
         self.current_atms = {"NIFTY": None, "BANKNIFTY": None}
         self.current_expiries = {"NIFTY": None, "BANKNIFTY": None}
         self.current_option_keys = []
@@ -130,11 +132,12 @@ class WebSocketMarketFeed:
         self.last_queue_warning = 0
         self.max_tick_latency = 0
         self.tick_counter = 0
-        self.last_atms = {"NIFTY": None, "BANKNIFTY": None}
         self.instrument_registry = get_instrument_registry()
         self.last_index_prices = {"NIFTY": None, "BANKNIFTY": None}
         self._failsafe_task: Optional[asyncio.Task] = None  # P5: track to prevent leaks
         self._disconnect_task: Optional[asyncio.Task] = None  # P1: track to prevent duplicate reconnects
+        self._atm_shift_task: Optional[asyncio.Task] = None  # P3: track ATM shift tasks
+        self._option_sub_task: Optional[asyncio.Task] = None  # P3: track option subscription tasks
         
         # AUDIT METRICS - STEP 1: Queue Consumer Lag Detection
         self.max_queue_size = 0
@@ -174,9 +177,14 @@ class WebSocketMarketFeed:
         # PATCH 2: Symbol-driven subscription state
         self.active_symbol = None
         self.active_expiry = None
-        self.subscribed_instruments = set()
         self.last_spot_price = {}
         self.current_atm = None
+        self._subscription_lock = asyncio.Lock()  # P4: prevent subscription race conditions
+
+    async def stop(self):
+        """Stop the WebSocket market feed"""
+        if hasattr(self, "websocket") and self.websocket:
+            await self.websocket.close()
 
     async def start(self):
 
@@ -242,7 +250,10 @@ class WebSocketMarketFeed:
             self._heartbeat_task, 
             self._metrics_task,
             getattr(self, "_profile_task", None),
-            getattr(self, "_throughput_task", None)
+            getattr(self, "_throughput_task", None),
+            self._atm_shift_task,  # P3: Cancel ATM shift task
+            self._option_sub_task,  # P3: Cancel option subscription task
+            self._failsafe_task     # P3: Cancel failsafe task
         ]
         
         # Cancel all tasks safely
@@ -298,10 +309,25 @@ class WebSocketMarketFeed:
         logger.info("READY TO SEND SUBSCRIPTION")
         
         await self.subscribe_indices()
+        
+        # PATCH: Auto-trigger default subscription for initial data flow
+        try:
+            instrument_registry = get_instrument_registry()
+            expiries = instrument_registry.get_expiries("NIFTY")
+            if expiries:
+                # Select nearest expiry (sorted by date)
+                from datetime import datetime
+                nearest_expiry = sorted(expiries, key=lambda x: datetime.strptime(x, '%Y-%m-%d'))[0]
+                logger.info(f"AUTO-SUBSCRIPTION TRIGGER → NIFTY {nearest_expiry}")
+                await self.switch_symbol("NIFTY", nearest_expiry)
+            else:
+                logger.warning("No NIFTY expiries available for auto-subscription")
+        except Exception as e:
+            logger.error(f"Auto-subscription failed: {e}")
 
     async def connect(self):
         """Public connection method - deprecated, use ensure_connection"""
-        token = await token_manager.get_valid_token()
+        token = await token_manager.get_token()
         await self._connect(token)
     
     async def ensure_connection(self):
@@ -315,7 +341,7 @@ class WebSocketMarketFeed:
             if self.is_connected:
                 return True
 
-            token = await token_manager.get_valid_token()
+            token = await token_manager.get_token()
 
             if not token:
                 logger.warning("⚠️ No Upstox token available")
@@ -365,11 +391,12 @@ class WebSocketMarketFeed:
             # Unsubscribe from old options first
             await self.unsubscribe_options()
             
-            # Filter out already subscribed instruments
-            new_keys = []
-            for k in instrument_keys:
-                if k not in self.subscribed_instruments:
-                    new_keys.append(k)
+            # Filter out already subscribed instruments with thread safety
+            async with self._subscription_lock:
+                new_keys = []
+                for k in instrument_keys:
+                    if k not in self.subscribed_instruments:
+                        new_keys.append(k)
             
             if not new_keys:
                 logger.info("No new option instruments to subscribe")
@@ -538,8 +565,13 @@ class WebSocketMarketFeed:
     async def switch_symbol(self, symbol: str, expiry: str):
         """Switch subscription to new symbol and expiry"""
         if symbol == self.active_symbol and expiry == self.active_expiry:
-            logger.debug(f"SYMBOL SWITCH SKIPPED → Already subscribed to {symbol} {expiry}")
-            return
+            # SAFEGUARD: Ensure we have active subscriptions even if symbol matches
+            if not self.subscribed_instruments:
+                logger.info(f"SYMBOL SWITCH RESUBSCRIBING → No active instruments for {symbol} {expiry}")
+                # Continue with subscription process
+            else:
+                logger.debug(f"SYMBOL SWITCH SKIPPED → Already subscribed to {symbol} {expiry}")
+                return
 
         logger.info(f"Switching subscription → {symbol} {expiry}")
 
@@ -617,10 +649,10 @@ class WebSocketMarketFeed:
             if isinstance(options, dict):
                 for strike, key in options.items():
                     if lower <= strike <= upper:
-                        instrument_keys.append(f"NSE_FO|{key}")
+                        instrument_keys.append(key)
             elif isinstance(options, list):
                 for key in options[:50]:
-                    instrument_keys.append(f"NSE_FO|{key}")
+                    instrument_keys.append(key)
 
             if len(instrument_keys) > 50:
                 instrument_keys = instrument_keys[:50]
@@ -661,6 +693,8 @@ class WebSocketMarketFeed:
             logger.error(f"Unsubscribe failed: {e}")
 
         self.subscribed_instruments.clear()
+        # P4: Clear subscription lock state
+        self._subscription_lock = asyncio.Lock()
 
     # PATCH 5: OPTION CACHE CLEAR FUNCTION
     def _clear_option_cache(self):
@@ -702,7 +736,10 @@ class WebSocketMarketFeed:
             if self.websocket:
                 await self.websocket.send(json.dumps(payload).encode("utf-8"))
                 logger.info(f"SUBSCRIBED → {len(instruments)} instruments")
-                self.subscribed_instruments.update(instruments)
+                # P4: Update subscribed_instruments with thread safety
+                async with self._subscription_lock:
+                    self.subscribed_instruments.update(instruments)
+                diag("FEED", f"Subscribed instruments count: {len(self.subscribed_instruments)}")
             else:
                 logger.warning("WS not ready - delaying subscription")
                 
@@ -733,7 +770,9 @@ class WebSocketMarketFeed:
         try:
             await self.websocket.send(json.dumps(payload).encode("utf-8"))
             logger.info(f"SUBSCRIBED → {len(instruments)} instruments (delayed)")
-            self.subscribed_instruments.update(instruments)
+            # P4: Update subscribed_instruments with thread safety
+            async with self._subscription_lock:
+                self.subscribed_instruments.update(instruments)
         except Exception as e:
             logger.error(f"Delayed subscribe failed: {e}")
 
@@ -799,6 +838,8 @@ class WebSocketMarketFeed:
                             self._message_queue.qsize(),
                         )
                         self.last_queue_warning = now2
+                        # P5: Apply backpressure - pause briefly when queue is full
+                        await asyncio.sleep(0.001)
 
         except Exception as e:
             logger.error("_handle_message error: %s", e, exc_info=True)
@@ -864,6 +905,16 @@ class WebSocketMarketFeed:
                 
                 instrument = tick.get("instrument_key")
                 
+                # Add diagnostic logging for tick flow
+                diag("FEED", f"Tick received for {instrument}")
+                diag("UPSTOX_TICK", f"Tick received {instrument}")
+                
+                # Add tick counter
+                increment_counter("ticks_received")
+                self.tick_counter += 1
+                if self.tick_counter % 100 == 0:
+                    diag("UPSTOX_TICK", f"Processed {self.tick_counter} ticks")
+                
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug("PROCESSING → %s", instrument)
                 
@@ -871,6 +922,7 @@ class WebSocketMarketFeed:
                     continue  # Skip malformed ticks
                 # Route tick to appropriate processor
                 message = message_router.route_tick(tick)
+                logger.info(f"ROUTED MESSAGE → {message}")
                 
                 if message:
                     # Handle different message types - AUDIT METRICS - STEP 4: Message Router Latency
@@ -1029,8 +1081,15 @@ class WebSocketMarketFeed:
                 # Update option chain builder with new spot price
                 data = message.get("data", {})
                 ltp = data.get("ltp")
-                if ltp:
-                    logger.info("DEBUG SPOT PRICE DETECTED → %s", ltp)
+                
+                if ltp is not None:
+                    logger.info(f"DEBUG SPOT PRICE DETECTED → {ltp}")
+                    
+                    option_chain_builder.update_index_price(
+                        symbol,
+                        float(ltp)
+                    )
+                    
                     # Store last spot price for ATM calculation
                     self.last_spot_price[symbol] = ltp
                     
@@ -1043,48 +1102,56 @@ class WebSocketMarketFeed:
                         logger.info(f"ATM SHIFT DETECTED → {self.current_atm} → {new_atm}")
                         self.current_atm = new_atm
                         
+                        # P3: Cancel existing ATM shift task before creating new one
+                        if self._atm_shift_task and not self._atm_shift_task.done():
+                            self._atm_shift_task.cancel()
+                            try:
+                                await self._atm_shift_task
+                            except asyncio.CancelledError:
+                                pass
+                        
                         if self.active_symbol and self.active_expiry:
                             try:
                                 loop = asyncio.get_running_loop()
-                                loop.create_task(
+                                self._atm_shift_task = loop.create_task(
                                     self.switch_symbol(self.active_symbol, self.active_expiry)
                                 )
                             except RuntimeError:
                                 logger.warning(
                                     "No running event loop — skipping ATM resubscribe"
                                 )
-                
-                if not ltp:
+                    
+                    # Update tracked index price for ATM calculation and filtering
+                    if symbol in ["NIFTY", "BANKNIFTY"]:
+                        self.last_index_prices[symbol] = ltp
+                    
+                    # Detect ATM and subscribe to options
+                    if symbol in ["NIFTY", "BANKNIFTY"]:
+                        logger.info("DEBUG ATM CALCULATION INPUT SPOT → %s", ltp)
+                        step = 50 if symbol == "NIFTY" else 100
+                        atm = get_atm_strike(ltp, step=step)
+                        if time.time() - self.last_subscription_time > 2:
+                            # P3: Cancel existing option subscription task before creating new one
+                            if self._option_sub_task and not self._option_sub_task.done():
+                                self._option_sub_task.cancel()
+                                try:
+                                    await self._option_sub_task
+                                except asyncio.CancelledError:
+                                    pass
+                            
+                            loop = asyncio.get_running_loop()
+                            self._option_sub_task = loop.create_task(
+                                self._check_and_subscribe_options(symbol, atm)
+                            )
+                    
+                    # Broadcast index tick immediately - AUDIT METRICS - STEP 8: WebSocket Broadcast Latency
+                    await self._monitor_broadcast(
+                        "index_tick",
+                        manager.broadcast,
+                        message
+                    )
+                else:
                     return  # Skip malformed ticks
-                
-                # Update tracked index price for ATM calculation and filtering
-                if symbol in ["NIFTY", "BANKNIFTY"]:
-                    self.last_index_prices[symbol] = ltp
-                
-                # AUDIT METRICS - STEP 3: Option Chain Builder CPU Time
-                start = time.time()
-                option_chain_builder.update_index_price(symbol, ltp)
-                elapsed = time.time() - start
-                
-                if elapsed > 0.02:
-                    self.slow_option_builder_count += 1
-                    loop_now = time.time()
-
-                    if loop_now - getattr(self, "last_option_warning", 0) > 5:
-                        logger.warning(f"OPTION_BUILDER_SLOW {elapsed:.4f}s")
-                        self.last_option_warning = loop_now
-                
-                self.max_option_builder_time = max(self.max_option_builder_time, elapsed)
-                
-                # Detect ATM and subscribe to options
-                if symbol in ["NIFTY", "BANKNIFTY"]:
-                    logger.info("DEBUG ATM CALCULATION INPUT SPOT → %s", ltp)
-                    step = 50 if symbol == "NIFTY" else 100
-                    atm = get_atm_strike(ltp, step=step)
-                    asyncio.create_task(self._check_and_subscribe_options(symbol, atm))
-                
-                # Broadcast index tick immediately - AUDIT METRICS - STEP 8: WebSocket Broadcast Latency
-                asyncio.create_task(self._monitor_broadcast("index_tick", manager.broadcast, message))
                 
             elif message_type == "option_tick":
                 # Update option chain builder with option data
@@ -1098,7 +1165,17 @@ class WebSocketMarketFeed:
                 
                 # AUDIT METRICS - STEP 3: Option Chain Builder CPU Time
                 start = time.time()
-                option_chain_builder.update_option_tick(symbol, strike, right, ltp)
+                oi = data.get("oi", 0)
+                volume = data.get("volume", 0)
+
+                option_chain_builder.update_option_tick(
+                    symbol,
+                    strike,
+                    right,
+                    ltp,
+                    oi,
+                    volume
+                )
                 elapsed = time.time() - start
                 
                 if elapsed > 0.02:
@@ -1175,6 +1252,9 @@ class WebSocketMarketFeed:
         logger.info("⏱️ STARTING 10-SECOND FAILSAFE TIMER...")
         await asyncio.sleep(10)
         
+        # P3: Track and cancel failsafe task on cleanup
+        self._failsafe_task = None
+        
         # Only resubscribe if no feeds were received at all
         if self.feeds_received_count == 0:
             logger.warning("NO FEEDS RECEIVED — RESUBSCRIBING")
@@ -1208,10 +1288,14 @@ class WebSocketMarketFeed:
                 builder = await chain_manager.get_builder(symbol, expiry_date)
 
                 if builder:
+                    # P2: Create task with proper cleanup
                     task = asyncio.create_task(
                         builder.handle_tick(symbol, instrument_key, tick_data)
                     )
-                    task.add_done_callback(lambda t: logger.error(f"Task failed: {t.exception()}") if t.exception() else None)
+                    # Add cleanup callback to prevent task leaks
+                    task.add_done_callback(
+                        lambda t: logger.error(f"Task failed: {t.exception()}") if t.exception() and not t.cancelled() else None
+                    )
 
             except Exception as e:
 

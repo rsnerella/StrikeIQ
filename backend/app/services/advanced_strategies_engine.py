@@ -16,6 +16,9 @@ import time
 from typing import Any, Dict, List, Tuple
 from datetime import datetime, timezone, timedelta
 from collections import deque
+from app.core.diagnostics import diag
+from app.core.ai_diagnostics import validate_advanced_strategy
+from app.core.ai_health_state import mark_health
 
 logger = logging.getLogger(__name__)
 
@@ -681,15 +684,34 @@ def run_advanced_strategies(symbol: str, chain_data: Dict[str, Any]) -> Dict[str
     Called by analytics_broadcaster every cycle.
     """
     try:
-        return {
+        smc_result = detect_smc(symbol, chain_data)
+        ict_result = detect_ict(symbol, chain_data)
+        crt_result = detect_crt(symbol, chain_data)
+        msnr_result = detect_msnr(symbol, chain_data)
+        
+        # Validate each strategy result
+        validate_advanced_strategy(smc_result)
+        validate_advanced_strategy(ict_result)
+        validate_advanced_strategy(crt_result)
+        validate_advanced_strategy(msnr_result)
+        
+        result = {
             "type": "advanced_strategies",
             "symbol": symbol,
             "timestamp": int(time.time()),   # P2: int cheaper than ISO string
-            "smc": detect_smc(symbol, chain_data),
-            "ict": detect_ict(symbol, chain_data),
-            "crt": detect_crt(symbol, chain_data),
-            "msnr": detect_msnr(symbol, chain_data),
+            "smc": smc_result,
+            "ict": ict_result,
+            "crt": crt_result,
+            "msnr": msnr_result,
         }
+        
+        # Log strategy generation summary
+        diag("AI_TEST", f"Advanced strategies generated for {symbol}")
+        
+        # Mark strategy engine as healthy
+        mark_health("strategy")
+        
+        return result
     except Exception as e:
         logger.error(f"Advanced strategies error for {symbol}: {e}")
         return {"type": "advanced_strategies", "symbol": symbol, "error": str(e)}

@@ -61,10 +61,10 @@ const KeyLevels = memo(({ key_levels }: { key_levels: any }) => {
             <span className="text-[10px] font-bold text-[#FF4D4F] uppercase tracking-wider">Resistance</span>
           </div>
           <div className="space-y-2">
-            {key_levels.resistance.map((level: string, index: number) => (
-              <div key={index} className="flex items-center justify-between text-xs font-mono font-bold">
+            {key_levels.resistance.map((level: string) => (
+              <div key={`resistance-${level}`} className="flex items-center justify-between text-xs font-mono font-bold">
                 <span className="text-gray-300">{level}</span>
-                <span className="text-[#FF4D4F]">R{index + 1}</span>
+                <span className="text-[#FF4D4F]">R</span>
               </div>
             ))}
           </div>
@@ -76,10 +76,10 @@ const KeyLevels = memo(({ key_levels }: { key_levels: any }) => {
             <span className="text-[10px] font-bold text-[#00FF9F] uppercase tracking-wider">Support</span>
           </div>
           <div className="space-y-2">
-            {key_levels.support.map((level: string, index: number) => (
-              <div key={index} className="flex items-center justify-between text-xs font-mono font-bold">
+            {key_levels.support.map((level: string) => (
+              <div key={`support-${level}`} className="flex items-center justify-between text-xs font-mono font-bold">
                 <span className="text-gray-300">{level}</span>
-                <span className="text-[#00FF9F]">S{index + 1}</span>
+                <span className="text-[#00FF9F]">S</span>
               </div>
             ))}
           </div>
@@ -104,8 +104,8 @@ const TopStrikes = memo(({ top_strikes }: { top_strikes: any[] }) => {
     <div>
       <h4 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">OI Concentration</h4>
       <div className="space-y-2">
-        {top_strikes.slice(0, 3).map((strike, index) => (
-          <div key={index} className="bg-black/20 rounded-xl p-4 border border-gray-800">
+        {top_strikes.slice(0, 3).map((strike) => (
+          <div key={`strike-${strike.strike}`} className="bg-black/20 rounded-xl p-4 border border-gray-800">
             <div className="flex items-center justify-between mb-3">
               <div className="text-sm font-bold text-white font-mono">{strike.strike}</div>
               <div className="text-[10px] text-gray-500 font-mono font-bold">

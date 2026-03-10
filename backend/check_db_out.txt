@@ -1,6 +1,0 @@
-['market_snapshot', 'ai_event_log', 'prediction_log', 'paper_trade_log', 'outcome_log', 'formula_master', 'ai_signal_logs', 'formula_experience', 'signal_outcomes', 'ai_features', 'ai_models', 'ai_predictions']
-ai_signal_logs exists: ['id', 'symbol', 'timestamp', 'signal_type', 'confidence', 'price', 'wave', 'trend', 'pcr', 'gamma', 'oi_velocity', 'created_at']
-signal_outcomes exists: ['id', 'signal_id', 'price_after_5m', 'price_after_15m', 'price_after_30m', 'result', 'evaluated_at']
-ai_features exists: ['id', 'signal_id', 'price', 'pcr', 'gamma_exposure', 'oi_velocity', 'wave', 'momentum', 'volatility', 'trend', 'label']
-ai_models exists: ['id', 'model_name', 'version', 'accuracy', 'trained_on', 'dataset_size']
-ai_predictions exists: ['id', 'symbol', 'timestamp', 'probability', 'signal', 'target', 'stop']

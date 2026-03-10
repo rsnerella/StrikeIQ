@@ -26,7 +26,13 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
         response.ParseFromString(message)
         logger.info("DEBUG PARSED MESSAGE → %s", response)
 
-        feeds = response.feeds
+        if not hasattr(response, "feeds"):
+            return []
+
+        feeds = getattr(response, "feeds", None)
+        
+        if not feeds:
+            return []
         
         # Handle feeds as a map (standard for Upstox V3) or fallback to list
         if hasattr(feeds, "items"):
@@ -43,12 +49,10 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
             feed_keys = [k for k, v in feed_items]
 
         logger.info("PROTOBUF FEEDS STATUS → count=%d keys=%s", len(feed_items), feed_keys)
-        
-        if not feed_items:
-            # logger.warning("DEBUG PARSED MESSAGE HAS NO FEEDS OR EMPTY LIST")
-            return None
 
         for instrument_key, feed in feed_items:
+
+            logger.info(f"DEBUG FEED LOOP → {instrument_key}")
 
             if not instrument_key:
                 continue
@@ -57,6 +61,10 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
 
             if not instrument_key:
                 continue
+
+            # STEP 1: Detect instrument type
+            instrument_key = instrument_key.upper()
+            is_index = instrument_key.startswith("NSE_INDEX")
 
             segment = instrument_key.split("|")[0]
 
@@ -81,60 +89,77 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
             # =================================================
 
             try:
+                # STEP 2: Fix feed type routing using WhichOneof
                 ff = getattr(feed, "ff", None)
-
+                
                 if ff:
-
-                    # index feed
-                    index_ff = getattr(ff, "indexFF", None)
-                    if index_ff and index_ff.HasField("ltpc"):
-                        val = getattr(index_ff.ltpc, "ltp", None)
-                        if val:
-                            ltp = float(val)
-
-                    # market feed
-                    market_ff = getattr(ff, "marketFF", None)
+                    # Determine feed type using WhichOneof
+                    feed_type = ff.WhichOneof("feedUnion")
+                    
+                    if feed_type == "marketFF":
+                        market_ff = ff.marketFF
+                        index_ff = None
+                        
+                    elif feed_type == "indexFF":
+                        index_ff = ff.indexFF
+                        market_ff = None
+                    else:
+                        # Unknown feed type, skip
+                        continue
 
                     if market_ff:
+                        # STEP 2: Handle marketFF safely with instrument type detection
+                        if market_ff.ltpc:
+                            ltp = market_ff.ltpc.ltp
 
-                        if market_ff.HasField("ltpc"):
-                            val = getattr(market_ff.ltpc, "ltp", None)
-                            if val:
-                                ltp = float(val)
+                            logger.info(f"TICK PARSED → {instrument_key} LTP={ltp}")
 
-                        # nested fullFeed structure
-                        full = getattr(market_ff, "fullFeed", None)
-                        if full and full.HasField("ltpc"):
-                            val = getattr(full.ltpc, "ltp", None)
-                            if val:
-                                ltp = float(val)
+                        # Only options/equities contain OI
+                        if not is_index and market_ff.optionGreeks:
+                            oi = market_ff.optionGreeks.oi
 
-                        # volume and OI extraction from eFeedDetails
-                        try:
-                            if market_ff.HasField("eFeedDetails"):
+                        if not is_index and market_ff.marketOHLC:
+                            volume = market_ff.marketOHLC.volume
 
-                                details = market_ff.eFeedDetails
+                        # MARKETFF INDEX TICK HANDLING - SAFE EXTRACTION
+                        if is_index and hasattr(feed, "ff") and feed.ff:
+                            market_ff = getattr(feed.ff, "marketFF", None)
 
-                                if hasattr(details, "vtt"):
-                                    volume = int(details.vtt)
+                            if market_ff and market_ff.ltpc and market_ff.ltpc.ltp:
+                                ltp = market_ff.ltpc.ltp
 
-                                if hasattr(details, "oi"):
-                                    oi = int(details.oi)
-                        except Exception:
-                            pass
+                                tick = {
+                                    "instrument_key": instrument_key,
+                                    "ltp": float(ltp),
+                                    "oi": 0,
+                                    "volume": 0,
+                                    "timestamp": time.time()
+                                }
+
+                                ticks.append(tick)
+
+                    elif index_ff:
+                        # STEP 3: Keep indexFF support for compatibility
+                        logger.info(f"DEBUG INDEX BLOCK ENTERED → {instrument_key}")
+                        
+                        if index_ff.ltpc:
+                            ltp = index_ff.ltpc.ltp
+                            logger.info(f"TICK PARSED → {instrument_key} LTP={ltp}")
+                            logger.info(f"DEBUG LTP EXTRACTED → {instrument_key} {ltp}")
+
 
             except Exception:
                 pass
 
             # =================================================
-            # OI EXTRACTION
+            # ROUTE INDEX TICKS IMMEDIATELY AFTER LTP EXTRACTION
             # =================================================
 
-            try:
-                if feed.HasField("optionGreeks"):
-                    oi = int(feed.optionGreeks.oi)
-            except Exception:
-                pass
+            if ltp is not None:
+                logger.info(f"TICK PARSED → {instrument_key} LTP={ltp}")
+
+                logger.info(f"DEBUG ROUTING CHECK → {instrument_key}")
+
 
             # =================================================
             # DROP INVALID TICKS
@@ -143,12 +168,10 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
             if ltp is None or ltp <= 0:
                 continue
 
-            # Normalized Tick Logging
-            logger.info("[%s] LTP DETECTED → %s OI=%s", segment, ltp, oi)
-
+            # STEP 5: Output structure with safe float conversion
             tick = {
                 "instrument_key": instrument_key,
-                "ltp": float(ltp),
+                "ltp": float(ltp) if ltp else None,
                 "oi": oi,
                 "volume": volume,
                 "timestamp": time.time()
@@ -157,17 +180,17 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
             ticks.append(tick)
 
             # -------------------------------------------------
-            # LOGGING
+            # LOGGING - STEP 6: Add unified debug logging
             # -------------------------------------------------
 
-            if segment == "NSE_FO":
-                logger.info(
-                    f"OPTION TICK PARSED → {instrument_key} LTP={ltp} OI={oi} VOL={volume}"
-                )
-            else:
-                logger.debug(
-                    f"INDEX TICK → {instrument_key} LTP={ltp}"
-                )
+            logger.info(
+                f"TICK PARSED → {instrument_key} LTP={ltp} OI={oi} VOL={volume}"
+            )
+
+            # -------------------------------------------------
+            # INDEX TICK ROUTING
+            # -------------------------------------------------
+
 
             # -------------------------------------------------
             # QUEUE PUSH
@@ -201,18 +224,18 @@ def extract_index_price(feed) -> Optional[float]:
         ff = getattr(feed, "ff", None)
 
         if ff:
-
-            index_ff = getattr(ff, "indexFF", None)
-            if index_ff and index_ff.HasField("ltpc"):
-                val = getattr(index_ff.ltpc, "ltp", None)
-                if val:
-                    return float(val)
-
-            market_ff = getattr(ff, "marketFF", None)
-            if market_ff and market_ff.HasField("ltpc"):
-                val = getattr(market_ff.ltpc, "ltp", None)
-                if val:
-                    return float(val)
+            # Use WhichOneof for feed type determination
+            feed_type = ff.WhichOneof("feedUnion")
+            
+            if feed_type == "indexFF":
+                index_ff = ff.indexFF
+                if hasattr(index_ff, "ltpc") and index_ff.ltpc:
+                    return float(index_ff.ltpc.ltp)
+                    
+            elif feed_type == "marketFF":
+                market_ff = ff.marketFF
+                if hasattr(market_ff, "ltpc") and market_ff.ltpc:
+                    return float(market_ff.ltpc.ltp)
 
     except Exception:
         pass

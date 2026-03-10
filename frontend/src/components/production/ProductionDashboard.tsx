@@ -6,9 +6,17 @@
 import React, { useState, useEffect } from 'react';
 import MarketStatus from './MarketStatus';
 import { useWSStore } from '../../core/ws/wsStore';
+import { useShallow } from 'zustand/shallow';
 
 const ProductionDashboard: React.FC = () => {
-  const { connected, marketOpen, lastMessage } = useWSStore();
+  // PERFORMANCE: Use grouped selectors to prevent unnecessary re-renders
+  const { connected, marketOpen, lastMessage } = useWSStore(
+    useShallow(state => ({
+      connected: state.connected,
+      marketOpen: state.marketOpen,
+      lastMessage: state.lastMessage
+    }))
+  )
 
   // Default market state (stable even without WebSocket)
   const displayMarketOpen = marketOpen;

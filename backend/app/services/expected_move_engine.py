@@ -8,6 +8,8 @@ from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 import numpy as np
 from ..exceptions.data_unavailable_error import DataUnavailableError, MissingATMError, MissingPremiumError
+from app.core.diagnostics import diag
+from app.core.ai_health_state import mark_health
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +120,13 @@ class ExpectedMoveEngine:
                 time_to_expiry=time_to_expiry,
                 timestamp=data.get("timestamp", "")
             )
+            
+            # Add diagnostic logging for volatility and expected move
+            diag("AI_TEST", f"ATM IV: {implied_vol}")
+            diag("AI_TEST", f"Expected move: {expected_move_1sd}")
+            
+            # Mark volatility engine as healthy
+            mark_health("volatility")
             
         except Exception as e:
             logger.error(f"ExpectedMoveEngine: Error computing expected move: {e}")

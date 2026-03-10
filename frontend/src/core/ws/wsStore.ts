@@ -26,6 +26,7 @@ interface WSStore {
   signalScore: any               // Step 15: unified score
   chartAnalysis: any             // Chart intelligence: waves, zones, signals
   aiPrediction: any              // AI ML Probability Prediction
+  candles: any[]                  // Candlestick data for charts
   _lastChainUpdate: number
   _THROTTLE_MS: number
   handleMessage: (message: any) => void
@@ -55,12 +56,16 @@ export const useWSStore = create<WSStore>((set, get) => ({
   signalScore: null,          // Step 15
   chartAnalysis: null,        // Chart intelligence
   aiPrediction: null,         // AI ML Prediction
+  candles: [],                // Candlestick data for charts
   lastUpdate: 0,
   _lastChainUpdate: 0,
   _THROTTLE_MS: 50,
 
   handleMessage: (message: any) => {
     if (!message) return
+
+    // STEP 3: DEBUG LOG
+    console.log("WS MESSAGE PROCESSED", message);
 
     // Market status update
     if (message.type === "market_status" && message.market_open !== undefined) {
@@ -82,19 +87,97 @@ export const useWSStore = create<WSStore>((set, get) => ({
     if (message.type === "index_tick" && message.data) {
       const tick = message.data
       
+      // DEBUG: Log index tick details
+      console.log("INDEX TICK RECEIVED", {
+        messageSymbol: message.symbol,
+        tickSymbol: tick.symbol,
+        ltp: tick.ltp
+      })
+      
       // PATCH 2: Filter WebSocket index ticks by selected symbol
       const marketStore = useMarketStore.getState()
       const selectedSymbol = marketStore?.currentSymbol || 'NIFTY'
       
-      if (tick.symbol !== selectedSymbol) {
+      // Use message.symbol instead of tick.symbol for filtering
+      if (message.symbol !== selectedSymbol) {
+        console.log("INDEX TICK FILTERED", {
+          messageSymbol: message.symbol,
+          selectedSymbol
+        })
         return
       }
       
       set({
         spot: tick.ltp ?? 0,
         lastUpdate: Date.now(),
-        liveData: { ...tick, symbol: message.symbol },
-        wsLiveData: { ...tick, symbol: message.symbol },
+        liveData: { ...tick, symbol: message.symbol, spot_price: tick.ltp },
+        wsLiveData: { ...tick, symbol: message.symbol, spot_price: tick.ltp },
+        error: null
+      })
+      return
+    }
+
+    // OPTION TICK — individual option price updates
+    if (message.type === "option_tick" && message.data) {
+      const tick = message.data
+      
+      // PERFORMANCE: Filter by selected symbol to prevent unnecessary updates
+      const marketStore = useMarketStore.getState()
+      const selectedSymbol = marketStore?.currentSymbol || 'NIFTY'
+      
+      if (message.symbol !== selectedSymbol) {
+        console.log("OPTION TICK FILTERED", {
+          messageSymbol: message.symbol,
+          selectedSymbol
+        })
+        return
+      }
+      
+      // DEBUG: Log option tick details
+      console.log("OPTION TICK RECEIVED", {
+        symbol: message.symbol,
+        strike: tick.strike,
+        right: tick.right,
+        ltp: tick.ltp,
+        oi: tick.oi
+      })
+      
+      // Update option chain with individual tick data
+      const currentData = get().marketData || {}
+      
+      // PERFORMANCE: Avoid expensive spread on large objects
+      // Only update the specific strike that changed
+      const strikeKey = tick.strike
+      const optionType = tick.right === 'CE' ? 'CE' : 'PE'
+      
+      // Check if data actually changed to avoid unnecessary updates
+      const currentOption = currentData[strikeKey]?.[optionType]
+      if (currentOption && 
+          currentOption.ltp === tick.ltp && 
+          currentOption.oi === (tick.oi || 0) && 
+          currentOption.volume === (tick.volume || 0)) {
+        // No change, skip update
+        return
+      }
+      
+      // Create new object with only the updated strike
+      const updatedData = {
+        ...currentData,
+        [strikeKey]: {
+          ...currentData[strikeKey],
+          [optionType]: {
+            strike: tick.strike,
+            right: tick.right,
+            ltp: tick.ltp,
+            oi: tick.oi || 0,
+            volume: tick.volume || 0
+          }
+        }
+      }
+      
+      set({
+        marketData: updatedData,
+        lastUpdate: Date.now(),
         error: null
       })
       return
@@ -105,7 +188,28 @@ export const useWSStore = create<WSStore>((set, get) => ({
       const now = Date.now()
       const store = get()
 
+      // PERFORMANCE: Filter by selected symbol to prevent unnecessary updates
+      const marketStore = useMarketStore.getState()
+      const selectedSymbol = marketStore?.currentSymbol || 'NIFTY'
+      
+      if (message.symbol !== selectedSymbol) {
+        console.log("OPTION CHAIN UPDATE FILTERED", {
+          messageSymbol: message.symbol,
+          selectedSymbol
+        })
+        return
+      }
+
+      // DEBUG: Log option chain update details
+      console.log("OPTION CHAIN UPDATE RECEIVED", {
+        symbol: message.symbol,
+        spot: message.data?.spot,
+        strikesCount: message.data?.strikes?.length,
+        timestamp: message.timestamp
+      })
+
       if (now - store._lastChainUpdate < store._THROTTLE_MS) {
+        console.log("OPTION CHAIN UPDATE THROTTLED")
         return
       }
 
@@ -165,6 +269,31 @@ export const useWSStore = create<WSStore>((set, get) => ({
         liveData: message,
         wsLiveData: message,
         error: null
+      })
+      return
+    }
+
+    // STEP 1: HANDLE TICK MESSAGE
+    if (message.type === "tick") {
+      // ADD SAFETY
+      if (!message.ltp) {
+        console.warn("Tick missing LTP", message)
+        return
+      }
+      
+      set({
+        liveData: {
+          spot_price: message.ltp,
+          timestamp: Date.now()
+        }
+      })
+      return
+    }
+
+    // STEP 2: HANDLE SNAPSHOT MESSAGE
+    if (message.type === "snapshot") {
+      set({
+        optionChainSnapshot: message.data
       })
       return
     }
@@ -290,6 +419,16 @@ export const useWSStore = create<WSStore>((set, get) => ({
           error: null
         })
       }
+      return
+    }
+
+    // CANDLE DATA — from candle_builder
+    if (message.type === "candle_data") {
+      set({
+        candles: message.candles || [],
+        lastUpdate: Date.now(),
+        error: null
+      })
       return
     }
 

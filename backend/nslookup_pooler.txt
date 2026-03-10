@@ -1,5 +1,0 @@
-*** UnKnown can't find aws-0-ap-south-1.pooler.supabase.com: No response from server
-
-Server:  UnKnown
-Address:  2401:4900:50:9::7d5
-

@@ -190,13 +190,17 @@ class LiveStructuralEngine:
         """
         Start the continuous analytics computation loop
         """
-        while True:
-            try:
-                await self.compute_all_metrics()
-                await asyncio.sleep(interval_seconds)
-            except Exception as e:
-                logger.error(f"Analytics loop error: {e}")
-                await asyncio.sleep(5)
+        try:
+            while True:
+                try:
+                    await self.compute_all_metrics()
+                    await asyncio.sleep(interval_seconds)
+                except Exception as e:
+                    logger.error(f"Analytics loop error: {e}")
+                    await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            logger.info("Analytics loop cancelled")
+            raise
     
     async def compute_all_metrics(self) -> None:
         """

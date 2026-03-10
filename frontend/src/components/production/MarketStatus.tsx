@@ -11,7 +11,8 @@ interface MarketStatusProps {
 }
 
 const MarketStatus: React.FC<MarketStatusProps> = ({ className = '' }) => {
-  const { connected } = useWSStore();
+  // PERFORMANCE: Use proper selector to prevent unnecessary re-renders
+  const connected = useWSStore(state => state.connected);
 
   const getStatusColor = () => {
     if (connected) return 'text-green-500';

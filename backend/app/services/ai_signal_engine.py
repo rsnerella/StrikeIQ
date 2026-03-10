@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 from ai.ai_db import ai_db
 from ai.prediction_service import prediction_service
+from app.core.ai_diagnostics import validate_option_chain, validate_oi, validate_ai_signal
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +182,15 @@ class AISignalEngine:
             market_data = self.get_latest_market_snapshot()
             if not market_data:
                 logger.warning("No market data available for signal generation")
+                return 0
+            
+            # AI Validation: Check option chain and OI data
+            if not validate_option_chain(market_data):
+                logger.warning("AI disabled: invalid option chain")
+                return 0
+            
+            if not validate_oi(market_data):
+                logger.warning("AI disabled: invalid OI data")
                 return 0
             
             # Get active formulas

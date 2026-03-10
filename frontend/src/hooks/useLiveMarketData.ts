@@ -5,9 +5,10 @@
  * It does NOT create WebSocket connections.
  */
 
-import { useState, useEffect, useRef, useMemo } from "react"
-import { useWSStore } from "@/core/ws/wsStore"
-import { useOptionChainStore } from "@/core/ws/optionChainStore"
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useWSStore } from '../core/ws/wsStore';
+import { useOptionChainStore } from '../core/ws/optionChainStore';
+import { useShallow } from 'zustand/shallow';
 import throttle from "lodash/throttle"
 import { uiLog } from "@/utils/uiLogger"
 
@@ -48,8 +49,15 @@ export function useLiveMarketData(symbol: string, expiry: string | null) {
     })
   }
 
-  // READ ONLY from stores
-  const { spot, lastUpdate, connected, analytics } = useWSStore()
+  // READ ONLY from stores with grouped selectors to prevent unnecessary re-renders
+  const { spot, lastUpdate, connected, analytics } = useWSStore(
+    useShallow(state => ({
+      spot: state.spot,
+      lastUpdate: state.lastUpdate,
+      connected: state.connected,
+      analytics: state.analytics
+    }))
+  )
   const { optionChainData, optionChainLastUpdate } = useOptionChainStore()
   
   // Spot fallback logic

@@ -61,24 +61,9 @@
       "static/chunks/src_pages_auth_index_tsx_2da965e7._.js",
       "static/chunks/turbopack-src_pages_auth_index_tsx_e9585d2f._.js"
     ],
-    "/auth/success": [
-      "static/chunks/node_modules_next_dist_compiled_ebbb8748._.js",
-      "static/chunks/node_modules_next_dist_shared_lib_e7a9eec2._.js",
-      "static/chunks/node_modules_next_dist_client_5a8a528e._.js",
-      "static/chunks/node_modules_next_dist_335aced5._.js",
-      "static/chunks/node_modules_next_c7385ca9._.js",
-      "static/chunks/node_modules_react_e3593a73._.js",
-      "static/chunks/node_modules_react-dom_cjs_react-dom_development_2b5e0eb3.js",
-      "static/chunks/node_modules_react-dom_8a8085df._.js",
-      "static/chunks/node_modules_axios_lib_2c8bf6cb._.js",
-      "static/chunks/node_modules_e201ec3c._.js",
-      "static/chunks/[root-of-the-server]__6193bfca._.js",
-      "static/chunks/src_pages_auth_success_tsx_2da965e7._.js",
-      "static/chunks/turbopack-src_pages_auth_success_tsx_d014cc2a._.js"
-    ],
     "/dashboard": [
-      "static/chunks/src_components_0210274f._.js",
-      "static/chunks/[root-of-the-server]__5a199ec4._.js",
+      "static/chunks/src_components_b0af9512._.js",
+      "static/chunks/[root-of-the-server]__df54f1fc._.js",
       "static/chunks/node_modules_next_dist_compiled_ae1db307._.js",
       "static/chunks/node_modules_next_dist_shared_lib_3c08820a._.js",
       "static/chunks/node_modules_next_dist_client_5a8a528e._.js",
@@ -87,9 +72,10 @@
       "static/chunks/node_modules_react_e3593a73._.js",
       "static/chunks/node_modules_react-dom_cjs_react-dom_development_2b5e0eb3.js",
       "static/chunks/node_modules_react-dom_8a8085df._.js",
-      "static/chunks/node_modules_4dc71e2b._.js",
+      "static/chunks/node_modules_lightweight-charts_dist_lightweight-charts_development_mjs_9fe126b9._.js",
+      "static/chunks/node_modules_b5a65017._.js",
       "static/chunks/src_pages_dashboard_index_tsx_2da965e7._.js",
-      "static/chunks/turbopack-src_pages_dashboard_index_tsx_4c21dac6._.js"
+      "static/chunks/turbopack-src_pages_dashboard_index_tsx_69cf1589._.js"
     ]
   },
   "devFiles": [],

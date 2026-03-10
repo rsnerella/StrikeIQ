@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 import bisect
 
 from app.services.oi_buildup_engine import OIBuildupEngine
+from app.core.diagnostics import diag, increment_counter
+from app.core.ai_health_state import mark_health
 
 logger = logging.getLogger(__name__)
 
@@ -120,46 +122,85 @@ class OptionChainBuilder:
     
     async def _generate_snapshots(self):
         """Generate snapshots for all active symbols"""
+
+        logger.debug("OPTION CHAIN ENGINE LOOP RUNNING")
+
         current_time = datetime.now()
 
+        logger.debug(f"SNAPSHOT LOOP SYMBOLS → {list(self.spot_prices.keys())}")
+
         for symbol in list(self.spot_prices.keys()):
-            # P3: Evict strikes more than 20% from spot to bound memory
+
             spot = self.spot_prices.get(symbol, 0)
-            if spot > 0 and symbol in self.chains:
+
+            # Skip if no chain data yet
+            chain = self.chains.get(symbol)
+            if not chain:
+                continue
+
+            # P3: Evict strikes far from spot to bound memory
+            if spot > 0:
                 far_strikes = [
-                    s for s in list(self.chains[symbol].keys())
-                    if abs(s - spot) / spot > 0.20
+                    s for s in list(chain.keys())
+                    if abs(s - spot) > 1500
                 ]
+
                 for s in far_strikes:
-                    del self.chains[symbol][s]
+                    chain.pop(s, None)
 
             # Check if we need to generate snapshot
             last_snapshot = self.last_snapshots.get(symbol, datetime.min)
+
             if (current_time - last_snapshot).total_seconds() >= 0.5:
+
                 snapshot = self._create_snapshot(symbol)
-                if snapshot:
-                    self.last_snapshots[symbol] = current_time
-                    # Broadcast snapshot
-                    await self._broadcast_snapshot(snapshot)
+
+                if snapshot is None:
+                    logger.warning("Snapshot not generated – skipping broadcast")
+                    continue
+
+                spot = getattr(snapshot, "spot", None)
+
+                if spot is None:
+                    logger.warning("Snapshot missing spot price")
+                    continue
+
+                self.last_snapshots[symbol] = current_time
+
+                # DIAGNOSTICS AFTER SUCCESSFUL SNAPSHOT
+                diag("CHAIN_ENGINE", "Option chain update triggered")
+                increment_counter("chain_updates")
+
+                # ONLY broadcast option chain (tick already comes from market feed)
+                await self._broadcast_snapshot(snapshot)
     
     def _create_snapshot(self, symbol: str) -> Optional[ChainSnapshot]:
         """Create a snapshot for the given symbol"""
         try:
-            if symbol not in self.chains or symbol not in self.spot_prices:
+            # STEP 3: Add debug log for snapshot creation start
+            logger.info(f"CREATE SNAPSHOT CALLED → {symbol}")
+            
+            # Only require spot price, allow empty chains
+            if symbol not in self.spot_prices:
                 return None
             
             spot = self.spot_prices[symbol]
-            chain = self.chains[symbol]
+            chain = self.chains.get(symbol, {})  # Use .get() to allow empty chains
             
-            if not chain:
-                return None
+            # Add diagnostic log before building snapshot
+            diag("CHAIN", f"Building option chain snapshot from {len(chain)} strikes")
             
-            # Find ATM strike
-            atm_strike = self._find_atm_strike(spot, list(chain.keys()))
+            # Find ATM strike (use spot if no strikes available)
+            strikes_list = list(chain.keys()) if chain else []
+            atm_strike = self._find_atm_strike(spot, strikes_list) if strikes_list else spot
+            
+            # Add diagnostic logging for ATM calculation
+            diag("CHAIN_ENGINE", f"ATM calculated: {atm_strike}")
             
             # Build strikes list
             strikes = []
-            for strike in sorted(chain.keys()):
+            sorted_strikes = sorted(chain.keys())
+            for strike in sorted_strikes:
                 strike_data = chain[strike]
                 
                 call_data = strike_data.get("CE")
@@ -176,6 +217,15 @@ class OptionChainBuilder:
                 }
                 
                 strikes.append(strike_info)
+            
+            # Add diagnostic logging for option instruments active
+            diag("CHAIN_ENGINE", f"Option instruments active: {len(strikes)}")
+            
+            # Mark option chain as healthy
+            mark_health("option_chain")
+            
+            # STEP 3: Add debug log for snapshot result
+            logger.info(f"SNAPSHOT RESULT → spot={spot}")
             
             return ChainSnapshot(
                 symbol=symbol,
@@ -235,48 +285,80 @@ class OptionChainBuilder:
     
     def update_index_price(self, symbol: str, price: float):
         """Update index spot price"""
+        # STEP 2: Add debug log for chain engine receiving tick
+        logger.info(f"CHAIN ENGINE RECEIVED TICK → {symbol} {price}")
+        
+        # STEP 4: Normalize symbol
+        symbol = symbol.upper().strip()
+        
+        if symbol in ["BANKNIFTY", "BANK NIFTY"]:
+            symbol = "BANKNIFTY"
+
+        elif symbol == "NIFTY":
+            symbol = "NIFTY"
+        
         self.spot_prices[symbol] = price
+        logger.info(f"SPOT PRICE STORE → {symbol}")
         logger.debug(f"Updated {symbol} spot price to {price}")
     
-    def update_option_tick(self, symbol: str, strike: float, right: str, ltp: float, oi: int = 0, volume: int = 0):
-        """Update option data from tick"""
+def update_option_tick(self, symbol: str, strike: float, right: str, ltp: float, oi: int = 0, volume: int = 0):
+    """Update option data from tick"""
+
+    try:
+
+        # normalize symbol
+        symbol = symbol.upper().strip()
+
+        if symbol in ["BANK NIFTY", "BANKNIFTY"]:
+            symbol = "BANKNIFTY"
+        elif symbol in ["NIFTY", "NIFTY 50"]:
+            symbol = "NIFTY"
+
+        # validate option type
+        if right not in ["CE", "PE"]:
+            return
+
+        # normalize strike
+        strike = float(round(strike, 2))
+
+        logger.debug(
+            f"OPTION TICK → {symbol}_{strike}{right} LTP={ltp} OI={oi}"
+        )
+
+        if symbol not in self.chains:
+            self.chains[symbol] = {}
+
+        if strike not in self.chains[symbol]:
+            self.chains[symbol][strike] = {}
+
+        if right not in self.chains[symbol][strike]:
+            self.chains[symbol][strike][right] = OptionData(strike=strike)
+
+        option_data = self.chains[symbol][strike][right]
+
+        # guard bad LTP
+        if ltp is None or not isinstance(ltp, (int, float)) or ltp < 0:
+            return
+
+        option_data.ltp = ltp
+        option_data.oi = max(0, oi)
+        option_data.volume = max(0, volume)
+        option_data.last_update = datetime.utcnow()
+
+        # detect OI buildup
+        instrument_key = f"{symbol}_{strike}{right}"
+
         try:
-            logger.info(f"OPTION TICK → {symbol}_{strike}{right} | LTP={ltp} | OI={oi} | Volume={volume}")
-            
-            if symbol not in self.chains:
-                self.chains[symbol] = {}
-            
-            if strike not in self.chains[symbol]:
-                self.chains[symbol][strike] = {}
-            
-            if right not in self.chains[symbol][strike]:
-                self.chains[symbol][strike][right] = OptionData(strike=strike)
-            
-            option_data = self.chains[symbol][strike][right]
-            # Guard against NaN / negative LTP
-            if ltp is None or math.isnan(ltp) or ltp < 0:
-                logger.debug(f"Rejected bad LTP={ltp} for {symbol} {strike} {right}")
-                return
-            option_data.ltp = ltp
-            option_data.oi = max(0, oi)   # reject negative OI
-            option_data.volume = max(0, volume)
-            option_data.last_update = datetime.now()
-            
-            # Log OI update for debugging
-            if oi > 0:
-                logger.info(f"OI UPDATE → {symbol}_{strike}{right} OI={oi}")
-            
-            # Detect OI buildup signal
-            instrument_key = f"{symbol}_{strike}{right}"
             signal = self.oi_buildup_engine.detect(instrument_key, ltp, oi)
-            
-            if signal:
-                logger.info(f"OI SIGNAL → {instrument_key} → {signal}")
-            
-            logger.debug(f"Updated {symbol} {strike} {right}: LTP={ltp}, OI={oi}")
-            
         except Exception as e:
-            logger.error(f"Option tick update failed: {e}")
+            logger.error(f"OI engine error: {e}")
+            signal = None
+
+        if signal:
+            logger.info(f"OI SIGNAL → {instrument_key} → {signal}")
+
+    except Exception as e:
+        logger.error(f"Option tick update failed: {e}")
     
     async def process_option_tick(self, tick: dict):
         """
@@ -304,6 +386,12 @@ class OptionChainBuilder:
             expiry = meta["expiry"]
             strike = meta["strike"]
             option_type = meta["option_type"]
+
+            if not symbol or not strike or not option_type:
+                return
+
+            # Add diagnostic log for option tick processing
+            diag("CHAIN", f"Processing option tick strike={strike} type={option_type}")
 
             # call existing internal update function
             self.update_option_tick(

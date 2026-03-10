@@ -7,6 +7,8 @@ import logging
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 import numpy as np
+from app.core.diagnostics import diag
+from app.core.ai_health_state import mark_health
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +141,12 @@ class GammaPressureMapEngine:
                 gamma_flip_zone=gamma_flip_zone,
                 pressure_distribution=pressure_distribution
             )
+            
+            # Add diagnostic logging for gamma calculation
+            diag("AI_TEST", f"Gamma calculated: {total_call_gex - total_put_gex}")
+            
+            # Mark gamma engine as healthy
+            mark_health("gamma")
             
         except Exception as e:
             logger.error(f"Error computing pressure map for {symbol}: {e}")

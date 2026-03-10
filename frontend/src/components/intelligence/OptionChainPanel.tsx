@@ -7,17 +7,47 @@ interface OptionChainPanelProps {
 }
 
 const OptionChainPanel: React.FC<OptionChainPanelProps> = ({ optionChainData }) => {
+  // Runtime guard for undefined data
+  if (!optionChainData) {
+    return (
+      <div className="bg-[#111827] border border-[#1F2937] rounded-xl p-5 h-full flex flex-col items-center justify-center">
+        <div className="w-10 h-10 border-2 border-gray-700 border-t-gray-500 rounded-full animate-spin mb-4" />
+        <p className="text-gray-500 font-mono text-xs tracking-wider">Loading Option Chain...</p>
+      </div>
+    );
+  }
+
   // Extract calls and puts from normalized optionChain structure
   const calls = optionChainData?.calls ?? [];
   const puts = optionChainData?.puts ?? [];
   
-  console.log("Calls length:", calls.length);
-  console.log("Puts length:", puts.length);
-  console.log("FIRST CALL OBJECT:", calls[0]);
-  console.log("FIRST PUT OBJECT:", puts[0]);
+  // PERFORMANCE: Limit visible strikes to prevent rendering performance issues
+  // Show only 20 strikes around ATM (10 above, 10 below)
+  const totalStrikes = Math.max(calls.length, puts.length);
+  const maxVisibleStrikes = 20;
+  let visibleCalls = calls;
+  let visiblePuts = puts;
+  
+  if (totalStrikes > maxVisibleStrikes) {
+    // Find ATM strike (middle of the array)
+    const atmIndex = Math.floor(totalStrikes / 2);
+    const startIndex = Math.max(0, atmIndex - 10);
+    const endIndex = Math.min(totalStrikes, atmIndex + 10);
+    
+    visibleCalls = calls.slice(startIndex, endIndex);
+    visiblePuts = puts.slice(startIndex, endIndex);
+    
+    console.log(`PERFORMANCE: Limited strikes from ${totalStrikes} to ${visibleCalls.length} visible`);
+  }
+  
+  console.log("Calls length:", visibleCalls.length);
+  console.log("Puts length:", visiblePuts.length);
+  console.log("VISIBLE STRIKES", visibleCalls.length + visiblePuts.length);
+  console.log("FIRST CALL OBJECT:", visibleCalls[0]);
+  console.log("FIRST PUT OBJECT:", visiblePuts[0]);
 
   // Handle missing data with skeleton (Phase 4)
-  if (!optionChainData || (calls.length === 0 && puts.length === 0)) {
+  if (!optionChainData || (visibleCalls.length === 0 && visiblePuts.length === 0)) {
     return (
       <div className="bg-[#111827] border border-[#1F2937] rounded-xl p-5 h-full flex flex-col items-center justify-center">
         <div className="w-10 h-10 border-2 border-gray-700 border-t-gray-500 rounded-full animate-spin mb-4" />
@@ -53,7 +83,7 @@ const OptionChainPanel: React.FC<OptionChainPanelProps> = ({ optionChainData }) 
       <div className="mb-4 p-4 bg-black/50 rounded border border-gray-800">
         <h4 className="text-xs font-bold text-gray-500 mb-2">DEBUG - First Call Object:</h4>
         <pre className="text-xs text-gray-300 overflow-auto max-h-32">
-          {JSON.stringify(calls[0], null, 2)}
+          {JSON.stringify(visibleCalls[0], null, 2)}
         </pre>
       </div>
 
@@ -96,10 +126,10 @@ const OptionChainPanel: React.FC<OptionChainPanelProps> = ({ optionChainData }) 
                 <span className="text-[10px] font-bold text-[#FF4D4F] uppercase tracking-wider">Resistance</span>
               </div>
               <div className="space-y-2">
-                {optionChainData.key_levels.resistance.map((level, index) => (
-                  <div key={index} className="flex items-center justify-between text-xs font-mono font-bold">
+                {optionChainData.key_levels.resistance.map((level) => (
+                  <div key={`resistance-${level}`} className="flex items-center justify-between text-xs font-mono font-bold">
                     <span className="text-gray-300">{level}</span>
-                    <span className="text-[#FF4D4F]">R{index + 1}</span>
+                    <span className="text-[#FF4D4F]">R</span>
                   </div>
                 ))}
               </div>
@@ -111,10 +141,10 @@ const OptionChainPanel: React.FC<OptionChainPanelProps> = ({ optionChainData }) 
                 <span className="text-[10px] font-bold text-[#00FF9F] uppercase tracking-wider">Support</span>
               </div>
               <div className="space-y-2">
-                {optionChainData.key_levels.support.map((level, index) => (
-                  <div key={index} className="flex items-center justify-between text-xs font-mono font-bold">
+                {optionChainData.key_levels.support.map((level) => (
+                  <div key={`support-${level}`} className="flex items-center justify-between text-xs font-mono font-bold">
                     <span className="text-gray-300">{level}</span>
-                    <span className="text-[#00FF9F]">S{index + 1}</span>
+                    <span className="text-[#00FF9F]">S</span>
                   </div>
                 ))}
               </div>
@@ -128,8 +158,8 @@ const OptionChainPanel: React.FC<OptionChainPanelProps> = ({ optionChainData }) 
         <div>
           <h4 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">OI Concentration</h4>
           <div className="space-y-2">
-            {optionChainData.top_strikes.slice(0, 3).map((strike, index) => (
-              <div key={index} className="bg-black/20 rounded-xl p-4 border border-gray-800">
+            {optionChainData.top_strikes.slice(0, 3).map((strike) => (
+              <div key={`strike-${strike.strike}`} className="bg-black/20 rounded-xl p-4 border border-gray-800">
                 <div className="flex items-center justify-between mb-3">
                   <div className="text-sm font-bold text-white font-mono">{strike.strike}</div>
                   <div className="text-[10px] text-gray-500 font-mono font-bold">

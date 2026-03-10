@@ -1,12 +1,17 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { useDashboardData } from '@/hooks/useDashboardData';
 
 interface SpotPriceWidgetProps {
   symbol: string;
 }
 
-const SpotPriceWidget: React.FC<SpotPriceWidgetProps> = ({ symbol }) => {
+const SpotPriceWidget: React.FC<SpotPriceWidgetProps> = memo(({ symbol }) => {
   const { spot, connected } = useDashboardData();
+  
+  // PERFORMANCE: Render profiling moved to useEffect
+  useEffect(() => {
+    console.count("SpotPriceWidget render")
+  })
 
   return (
     <div className="bg-gray-900 text-white p-4 rounded-lg">
@@ -19,6 +24,6 @@ const SpotPriceWidget: React.FC<SpotPriceWidgetProps> = ({ symbol }) => {
       </div>
     </div>
   );
-};
+});
 
 export default SpotPriceWidget;
