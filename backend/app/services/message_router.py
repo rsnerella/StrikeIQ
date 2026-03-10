@@ -16,7 +16,11 @@ class MessageRouter:
     """Routes market data ticks to appropriate processors"""
 
     def __init__(self):
-        # Track last prices for index change calculation
+
+        # cache registry (avoid lookup per tick)
+        self.registry = get_instrument_registry()
+
+        # Track last prices for change calculation
         self.last_index_prices: Dict[str, float] = {}
 
     # ---------------------------------------------------------
@@ -24,16 +28,14 @@ class MessageRouter:
     # ---------------------------------------------------------
 
     def route_tick(self, tick: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """
-        Route a single tick to appropriate message type
-        """
+        """Route a single tick to appropriate message type"""
 
         try:
 
             instrument_key = tick.get("instrument_key")
 
             if not instrument_key:
-                logger.warning(f"Tick missing instrument_key: {tick}")
+                logger.debug("Tick missing instrument_key")
                 return None
 
             # -------------------------------------------------
@@ -45,18 +47,14 @@ class MessageRouter:
             raw_volume = tick.get("volume")
 
             if raw_ltp is None:
-                logger.warning(f"Invalid tick data (missing LTP): {tick}")
                 return None
 
             try:
                 ltp = float(raw_ltp)
             except Exception:
-                logger.warning(f"Invalid LTP value: {tick}")
                 return None
 
-            # ---- PATCH 4: ADD LTP VALIDATION ----
-            if ltp is None or ltp <= 0:
-                logger.warning(f"Invalid LTP value (None or <= 0): {tick}")
+            if ltp <= 0:
                 return None
 
             try:
@@ -69,14 +67,9 @@ class MessageRouter:
             except Exception:
                 volume = 0
 
-            # Update normalized values
             tick["ltp"] = ltp
             tick["oi"] = oi
             tick["volume"] = volume
-
-            logger.debug(
-                f"ROUTING TICK → {instrument_key} LTP={ltp} OI={oi} VOL={volume}"
-            )
 
             # -------------------------------------------------
             # PARSE INSTRUMENT KEY
@@ -85,7 +78,6 @@ class MessageRouter:
             parsed = self._parse_instrument_key(instrument_key)
 
             if not parsed:
-                logger.warning(f"Could not parse instrument key: {instrument_key}")
                 return None
 
             symbol = parsed["symbol"]
@@ -98,62 +90,70 @@ class MessageRouter:
             # -------------------------------------------------
 
             if instrument_type == "INDEX":
-                # Feed price history for Step 14 advanced strategies
+
+                # push price history
                 try:
                     from app.services.advanced_strategies_engine import push_price
                     push_price(symbol, ltp)
                 except Exception:
                     pass
 
-                # Feed candle builder for chart intelligence
+                # candle builder
                 try:
                     from app.services.candle_builder import candle_builder
                     candle_builder.push_tick(symbol, ltp, volume=volume)
                 except Exception:
                     pass
 
-                return self._create_index_tick(symbol, ltp, timestamp, instrument_key=instrument_key)
+                return self._create_index_tick(
+                    symbol,
+                    ltp,
+                    timestamp,
+                    instrument_key=instrument_key
+                )
+
+            # -------------------------------------------------
+            # OPTION ROUTING
+            # -------------------------------------------------
 
             elif instrument_type == "OPTION":
-                # ---- PATCH OPTION TICK ROUTING ----
-                instrument_key = tick["instrument_key"]
-                
-                meta = get_instrument_registry().get_option_meta(instrument_key)
-                
+
+                meta = self.registry.get_option_meta(instrument_key)
+
                 if not meta:
-                    logger.warning(f"OPTION META NOT FOUND → {instrument_key}")
+                    logger.debug(f"OPTION META NOT FOUND → {instrument_key}")
                     return None
-                
-                normalized_tick = {
-                    "symbol": meta["symbol"],
-                    "strike": meta["strike"],
-                    "option_type": meta["option_type"],
-                    "expiry": meta["expiry"],
-                    "instrument_key": instrument_key,
-                    "ltp": tick["ltp"],
-                    "oi": tick.get("oi", 0),
-                    "volume": tick.get("volume", 0),
-                    "timestamp": tick["timestamp"]
-                }
-                
-                from app.services.option_chain_builder import option_chain_builder
-                import asyncio
-                
-                # Forward to option chain builder
+
+                # direct call (NO async task creation)
                 try:
-                    asyncio.create_task(option_chain_builder.process_option_tick(normalized_tick))
+                    from app.services.option_chain_builder import option_chain_builder
+
+                    option_chain_builder.update_option_tick(
+                        symbol=meta["symbol"],
+                        strike=meta["strike"],
+                        right=meta["option_type"],
+                        ltp=ltp,
+                        oi=oi,
+                        volume=volume
+                    )
+
                 except Exception as e:
-                    logger.error(f"Failed to forward option tick: {e}")
-                
+                    logger.error(f"Option tick forward failed: {e}")
+
                 return {
                     "type": "option_tick",
                     "symbol": meta["symbol"],
                     "timestamp": timestamp,
-                    "data": normalized_tick
+                    "data": {
+                        "strike": meta["strike"],
+                        "right": meta["option_type"],
+                        "ltp": ltp,
+                        "oi": oi,
+                        "volume": volume
+                    }
                 }
 
             else:
-                logger.warning(f"Unknown instrument type: {instrument_type}")
                 return None
 
         except Exception as e:
@@ -191,24 +191,19 @@ class MessageRouter:
                 elif "FINNIFTY" in token_upper or "FIN NIFTY" in token_upper:
                     return {"symbol": "FINNIFTY", "type": "INDEX"}
 
-                else:
-                    logger.debug(f"Unknown index symbol: {token}")
-                    return None
+                return None
 
             # -------------------------------------------------
-            # OPTION / FUTURE TOKENS
+            # OPTION TOKENS
             # -------------------------------------------------
 
             if segment == "NSE_FO":
 
-                # Upstox V3 sends numeric instrument token
                 try:
                     instrument_id = int(token)
                 except ValueError:
-                    logger.warning(f"Invalid option token: {token}")
                     return None
 
-                # Symbol resolved later by option chain builder
                 return {
                     "symbol": "UNKNOWN",
                     "type": "OPTION",
@@ -233,14 +228,21 @@ class MessageRouter:
         instrument_key: str = None
     ) -> Dict[str, Any]:
 
-        last_price = self.last_index_prices.get(symbol, ltp)
+        if symbol not in self.last_index_prices:
 
-        change = ltp - last_price
+            self.last_index_prices[symbol] = ltp
+            change = 0
 
-        change_percent = (change / last_price * 100) if last_price > 0 else 0
+        else:
 
-        # Update last price
-        self.last_index_prices[symbol] = ltp
+            last_price = self.last_index_prices[symbol]
+            change = ltp - last_price
+            self.last_index_prices[symbol] = ltp
+
+        change_percent = (
+            change / self.last_index_prices[symbol] * 100
+            if self.last_index_prices[symbol] > 0 else 0
+        )
 
         return {
             "type": "index_tick",
@@ -251,32 +253,6 @@ class MessageRouter:
                 "ltp": ltp,
                 "change": round(change, 2),
                 "change_percent": round(change_percent, 2)
-            }
-        }
-
-    # ---------------------------------------------------------
-    # OPTION TICK CREATION
-    # ---------------------------------------------------------
-
-    def _create_option_tick(
-        self,
-        symbol: str,
-        parsed: Dict[str, Any],
-        ltp: float,
-        oi: int,
-        volume: int,
-        timestamp: int
-    ) -> Dict[str, Any]:
-
-        return {
-            "type": "option_tick",
-            "symbol": symbol,
-            "timestamp": timestamp,
-            "data": {
-                "instrument_id": parsed.get("instrument_id"),
-                "ltp": ltp,
-                "oi": oi,
-                "volume": volume
             }
         }
 
