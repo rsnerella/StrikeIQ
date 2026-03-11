@@ -13,7 +13,7 @@ async def test_websocket_connection():
     
     try:
         # Connect to WebSocket
-        uri = "ws://localhost:8000/ws"
+        uri = "ws://localhost:8000/ws/market"
         print(f"Connecting to {uri}...")
         
         async with websockets.connect(uri) as websocket:

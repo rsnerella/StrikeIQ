@@ -90,22 +90,39 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
                             ltp = float(market_ff.ltpc.ltp)
 
                         if not is_index:
+                            # DEBUG: Log raw protobuf structure to find OI field
+                            logger.info(
+                                f"[UPSTOX_DEBUG] optionGreeks={getattr(market_ff, 'optionGreeks', None)} "
+                                f"openInterest={getattr(market_ff, 'openInterest', None)} "
+                                f"marketOHLC={getattr(market_ff, 'marketOHLC', None)}"
+                            )
+                            
                             # CRITICAL FIX: Extract OI with production-safe fallback logic
                             try:
-                                oi = (
-                                    getattr(market_ff.optionGreeks, "oi", 0) if getattr(market_ff, "optionGreeks", None) else 0
-                                )
+                                # Try optionGreeks.openInterest first (most likely)
+                                oi = 0
+                                if getattr(market_ff, "optionGreeks", None):
+                                    oi = getattr(market_ff.optionGreeks, "openInterest", 0)
                                 
-                                # openInterest (camelCase)
-                                oi = oi or getattr(market_ff, "openInterest", 0)
+                                # Try marketFF.openInterest (camelCase)
+                                if not oi:
+                                    oi = getattr(market_ff, "openInterest", 0)
                                 
-                                # open_interest (snake_case fallback)
-                                oi = oi or getattr(market_ff, "open_interest", 0)
+                                # Try marketFF.open_interest (snake_case fallback)
+                                if not oi:
+                                    oi = getattr(market_ff, "open_interest", 0)
                                 
-                                # marketOHLC.oi fallback
+                                # Try marketOHLC.openInterest fallback
+                                if not oi and getattr(market_ff, "marketOHLC", None):
+                                    oi = getattr(market_ff.marketOHLC, "openInterest", 0)
+                                
+                                # Legacy marketOHLC.oi fallback
                                 if not oi and getattr(market_ff, "marketOHLC", None):
                                     oi = getattr(market_ff.marketOHLC, "oi", 0)
-                            except Exception:
+                                    
+                                logger.info(f"[UPSTOX_OI_DEBUG] Final OI value: {oi}")
+                            except Exception as e:
+                                logger.warning(f"[UPSTOX_OI_ERROR] {e}")
                                 oi = 0
 
                             if getattr(market_ff, "marketOHLC", None):

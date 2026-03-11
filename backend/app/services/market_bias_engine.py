@@ -158,19 +158,13 @@ class MarketBiasEngine:
             
             if total_call_oi == 0 or total_put_oi == 0:
                 logger.warning("OI data not ready for PCR calculation")
-                return {
-                    "pcr": 1.0,
-                    "bias_strength": 50,
-                    "price_vs_vwap": 0,
-                    "divergence_detected": False,
-                    "divergence_type": "none"
-                }
+                return 1.0  # Return neutral PCR as float, not dict
             
             return total_put_oi / total_call_oi if total_call_oi > 0 else 1.0
             
         except Exception as e:
             logger.error(f"Error calculating PCR: {e}")
-            raise DataUnavailableError(f"PCR calculation failed: {e}")
+            return 1.0  # Return neutral PCR on error
     
     def _detect_divergence(self, price_vs_vwap: float, pcr: float, oi_change: float) -> tuple[bool, str]:
         """Detect bullish/bearish divergence"""
