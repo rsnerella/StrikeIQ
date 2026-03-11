@@ -163,12 +163,20 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
                 except Exception as e:
                     logger.warning("Queue push failed: %s", e)
 
-        return ticks
-
     except Exception as e:
-
         logger.error("PROTOBUF DECODE ERROR: %s", e, exc_info=True)
         return []
+
+    # Tick throughput counter for observability
+    if not hasattr(decode_protobuf_message, 'tick_counter'):
+        decode_protobuf_message.tick_counter = 0
+    decode_protobuf_message.tick_counter += len(ticks)
+    
+    # Log throughput every 1000 ticks
+    if decode_protobuf_message.tick_counter % 1000 == 0:
+        logger.info(f"[PIPELINE] ticks_processed={decode_protobuf_message.tick_counter}")
+
+    return ticks
 
 
 # ---------------------------------------------------------

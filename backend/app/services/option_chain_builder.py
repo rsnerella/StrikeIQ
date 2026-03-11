@@ -246,6 +246,10 @@ class OptionChainBuilder:
             # OI SANITY CHECK - Permanent debug metric
             logger.info(f"[DATA_HEALTH] strikes={len(snapshot.strikes)} call_oi={snapshot.total_oi_calls:,} put_oi={snapshot.total_oi_puts:,} pcr={snapshot.pcr:.2f}")
             
+            # OI Data Health Alert
+            if snapshot.total_oi_calls == 0 and snapshot.total_oi_puts == 0:
+                logger.warning("[DATA_HEALTH_ALERT] OI values zero - feed issue possible")
+            
             # Broadcast option chain update
             await manager.broadcast(
                 {
