@@ -49,6 +49,15 @@ class AnalyticsBroadcaster:
 
         try:
 
+            # Convert ChainSnapshot to dict if needed
+            if not isinstance(chain_data, dict):
+                chain_data = {
+                    "symbol": getattr(chain_data, "symbol", None),
+                    "spot": getattr(chain_data, "spot", None),
+                    "atm_strike": getattr(chain_data, "atm_strike", None),
+                    "strikes": getattr(chain_data, "strikes", [])
+                }
+
             strikes = chain_data.get("strikes", [])
 
             logger.info(
@@ -248,10 +257,14 @@ class AnalyticsBroadcaster:
             broadcast_start = time.time()
 
             try:
-                await manager.broadcast(dict(analytics_payload))
+                # Ensure correct message type for frontend
+                analytics_message = dict(analytics_payload)
+                analytics_message["type"] = "analytics_update"
+                
+                await manager.broadcast(analytics_message)
                 broadcast_ms = (time.time() - broadcast_start) * 1000
-                logger.debug(
-                    f"ANALYTICS BROADCAST → symbol={analytics_payload.get('symbol','?')} "
+                logger.info(
+                    f"ANALYTICS BROADCAST → {analytics_payload.get('symbol','?')} "
                     f"clients={len(manager.active_connections)} latency={broadcast_ms:.1f}ms"
                 )
             except Exception as e:

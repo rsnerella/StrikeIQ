@@ -74,10 +74,10 @@ class WSManager:
         async with self._lock:
             connections = self.active_connections.copy()
             subscriptions = self.client_subscriptions.copy()
-
-        # STEP 4: VERIFY CLIENTS
-        logger.info(f"WS CLIENT COUNT → {len(connections)}")
-
+        
+        logger.debug(f"WS CLIENT COUNT → {len(connections)}")
+        logger.info(f"CLIENTS CONNECTED → {len(connections)}")
+        
         if not connections:
             return
 
@@ -87,19 +87,29 @@ class WSManager:
         target_connections = []
         message_symbol = message.get("symbol")
         
-        if message_symbol:
-            # Only send to clients subscribed to this symbol
-            for conn in connections:
-                client_sub = subscriptions.get(conn, {})
-                if client_sub.get("symbol") == message_symbol:
-                    target_connections.append(conn)
-        else:
-            # Non-symbol messages (like market status) go to all clients
-            target_connections = connections
+        # TEMP DEBUG: Send to all clients for testing
+        target_connections = connections
+        logger.info(f"TEMP DEBUG: Broadcasting to all {len(connections)} clients")
+        
+        # TODO: Re-enable symbol filtering after debugging
+        # if message_symbol:
+        #     # Only send to clients subscribed to this symbol
+        #     logger.info(f"FILTERING for symbol {message_symbol} across {len(connections)} clients")
+        #     for conn in connections:
+        #         client_sub = subscriptions.get(conn, {})
+        #         logger.debug(f"Client subscription: {client_sub}")
+        #         if client_sub.get("symbol") == message_symbol:
+        #             target_connections.append(conn)
+        #             logger.debug(f"Client MATCHES subscription")
+        # else:
+        #     # Non-symbol messages (like market status) go to all clients
+        #     target_connections = connections
 
-        if not target_connections:
-            logger.debug(f"No clients subscribed to {message_symbol}")
-            return
+        # logger.info(f"TARGET CONNECTIONS: {len(target_connections)} for {message_symbol}")
+        # if not target_connections:
+        #     logger.warning(f"No clients subscribed to {message_symbol}")
+        #     logger.warning(f"Available subscriptions: {[sub.get('symbol') for sub in subscriptions.values()]}")
+        #     return
 
         results = await asyncio.gather(
             *[conn.send_json(message) for conn in target_connections],

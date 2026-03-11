@@ -100,6 +100,9 @@ async def market_ws(websocket: WebSocket):
 
                     logger.info(f"SUBSCRIPTION → {symbol} {expiry}")
 
+                    # ---------------- REGISTER SUBSCRIPTION ----------------
+                    await manager.register_subscription(websocket, symbol, expiry)
+
                     # ---------------- HANDLE SWITCH ----------------
 
                     await handle_subscription(symbol, expiry)

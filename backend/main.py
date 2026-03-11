@@ -236,8 +236,10 @@ async def lifespan(app: FastAPI):
 
     try:
 
+        from app.services.live_structural_engine import LiveStructuralEngine, structural_engine_instance
         app.state.live_engine = LiveStructuralEngine(ws_feed_manager)
-
+        structural_engine_instance = app.state.live_engine
+        
         task = asyncio.create_task(
             app.state.live_engine.start_analytics_loop(),
             name="analytics_engine"
@@ -346,6 +348,47 @@ app = FastAPI(
     version="2.1.0",
     lifespan=lifespan
 )
+
+# ================= SHUTDOWN EVENTS =================
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("StrikeIQ shutting down")
+    
+    try:
+        from app.services.websocket_market_feed import market_feed_instance
+        if market_feed_instance:
+            await market_feed_instance.stop()
+    except Exception as e:
+        logger.warning(f"Market feed stop error: {e}")
+    
+    try:
+        from app.services.oi_heatmap_engine import oi_heatmap_engine
+        await oi_heatmap_engine.stop()
+    except Exception as e:
+        logger.warning(f"Heatmap stop error: {e}")
+    
+    try:
+        from app.services.analytics_broadcaster import analytics_broadcaster
+        await analytics_broadcaster.stop()
+    except Exception as e:
+        logger.warning(f"Analytics stop error: {e}")
+    
+    try:
+        from app.services.live_structural_engine import structural_engine_instance
+        if structural_engine_instance:
+            await structural_engine_instance.stop()
+    except Exception as e:
+        logger.warning(f"Structural engine stop error: {e}")
+    
+    try:
+        from ai.scheduler import ai_scheduler
+        if ai_scheduler.running:
+            ai_scheduler.shutdown(wait=False)
+    except Exception as e:
+        logger.warning(f"AI scheduler stop error: {e}")
+    
+    logger.info("All services stopped")
 
 
 # ================= CORS =================

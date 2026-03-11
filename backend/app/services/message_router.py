@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 
 from app.services.instrument_registry import get_instrument_registry
+from app.services.option_chain_builder import option_chain_builder
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,13 @@ class MessageRouter:
                 except Exception:
                     pass
 
+                # 🔥 CRITICAL FIX
+                # Forward index price to option chain builder
+                try:
+                    option_chain_builder.update_index_price(symbol, ltp)
+                except Exception as e:
+                    logger.error(f"Index price forward failed: {e}")
+
                 return self._create_index_tick(
                     symbol,
                     ltp,
@@ -126,7 +134,6 @@ class MessageRouter:
 
                 # direct call (NO async task creation)
                 try:
-                    from app.services.option_chain_builder import option_chain_builder
 
                     option_chain_builder.update_option_tick(
                         symbol=meta["symbol"],

@@ -83,6 +83,10 @@ class AIDatabase:
             
     def fetch_one(self, query: str, params: tuple = None):
         """Execute a query and fetch single result"""
+        if not self.connection:
+            logger.warning("AI DB connection unavailable — skipping query")
+            return None
+            
         try:
             if not self.connection or self.connection.closed:
                 self.connect()
@@ -91,13 +95,7 @@ class AIDatabase:
             result = self.cursor.fetchone()
             return result
         except Exception as e:
-            logger.error(f"Error fetching single result: {e}")
-            if self.connection:
-                try:
-                    self.connection.rollback()
-                    logger.info("Transaction rolled back")
-                except Exception as rollback_error:
-                    logger.error(f"Error during rollback: {rollback_error}")
+            logger.error(f"AI DB query failed: {e}")
             return None
 
 # Global database instance

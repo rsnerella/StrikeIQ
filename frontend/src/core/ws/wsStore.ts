@@ -319,6 +319,23 @@ export const useWSStore = create<WSStore>((set, get) => ({
       return
     }
 
+    // ANALYTICS UPDATE — from analytics_broadcaster
+    if (message.type === "analytics_update" && message.data) {
+      console.log("ANALYTICS UPDATE RECEIVED", {
+        symbol: message.symbol,
+        timestamp: message.timestamp,
+        keys: Object.keys(message.data)
+      })
+      
+      // Update analytics state
+      set({
+        analytics: message.data,
+        lastUpdate: Date.now(),
+        error: null
+      })
+      return
+    }
+
     // INTELLIGENCE UPDATE — from LiveStructuralEngine
     if (message.type === "intelligence_update" && message.intelligence) {
       set({

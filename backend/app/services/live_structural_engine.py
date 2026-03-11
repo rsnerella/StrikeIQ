@@ -64,6 +64,9 @@ class LiveMetrics:
     expiry_magnet_analysis: Optional[Dict[str, Any]] = None
     trade_suggestion: Optional[Dict[str, Any]] = None
 
+# Global instance for app-wide access
+structural_engine_instance = None
+
 class LiveStructuralEngine:
     """
     Computes live structural analytics from market state
@@ -202,6 +205,12 @@ class LiveStructuralEngine:
             logger.info("Analytics loop cancelled")
             raise
     
+    async def stop(self):
+        """Stop the analytics engine"""
+        logger.info("Stopping structural engine...")
+        self._running = False
+        logger.info("Structural engine stopped")
+    
     async def compute_all_metrics(self) -> None:
         """
         Compute metrics for all active symbols
@@ -226,7 +235,20 @@ class LiveStructuralEngine:
         try:
             # Get current market state
             snapshot = await self.market_state.get_market_snapshot(symbol)
-            if not snapshot or not snapshot.get("spot"):
+            
+            # Convert ChainSnapshot to dict if needed
+            if not isinstance(snapshot, dict):
+                snapshot = {
+                    "symbol": getattr(snapshot, "symbol", None),
+                    "spot": getattr(snapshot, "spot", None),
+                    "atm_strike": getattr(snapshot, "atm_strike", None),
+                    "strikes": getattr(snapshot, "strikes", []),
+                    "pcr": getattr(snapshot, "pcr", 0),
+                    "total_oi_calls": getattr(snapshot, "total_oi_calls", 0),
+                    "total_oi_puts": getattr(snapshot, "total_oi_puts", 0)
+                }
+            
+            if not snapshot or not getattr(snapshot, "spot", None):
                 return None
             
             # Get detailed strike data
@@ -336,9 +358,9 @@ class LiveStructuralEngine:
         formatted_expiry_analysis = self.expiry_magnet_engine.format_for_frontend(expiry_magnet_analysis)
         # ================= AI LIVE SIGNAL INTEGRATION =================
         try:
-            pcr = snapshot.get("pcr", 0)
-            call_oi = snapshot.get("total_oi_calls", 0)
-            put_oi = snapshot.get("total_oi_puts", 0)
+            pcr = getattr(snapshot, "pcr", 0)
+            call_oi = getattr(snapshot, "total_oi_calls", 0)
+            put_oi = getattr(snapshot, "total_oi_puts", 0)
             total_oi = call_oi + put_oi
             
             logger.info(f"STRUCTURAL ENGINE DEBUG → {symbol} PCR={pcr} CALL_OI={call_oi} PUT_OI={put_oi} TOTAL_OI={total_oi}")
@@ -379,8 +401,8 @@ class LiveStructuralEngine:
             resistance_level=support_resistance["resistance"],
             volatility_regime=volatility_regime,
             oi_velocity=oi_velocity,
-            pcr=snapshot["pcr"],
-            total_oi=snapshot["total_oi_calls"] + snapshot["total_oi_puts"],
+            pcr=getattr(snapshot, "pcr", 0),
+            total_oi=getattr(snapshot, "total_oi_calls", 0) + getattr(snapshot, "total_oi_puts", 0),
             timestamp=timestamp,
             # New Gamma + Flow metrics
             net_gamma=gamma_metrics.get("net_gamma"),
@@ -928,6 +950,15 @@ class LiveStructuralEngine:
             
             # Get previous snapshot
             previous_oi = self.previous_oi_snapshot.get(symbol, {})
+            
+            # Convert to dict if needed
+            if not isinstance(previous_oi, dict):
+                previous_oi = {
+                    "symbol": getattr(previous_oi, "symbol", None),
+                    "spot": getattr(previous_oi, "spot", None),
+                    "atm_strike": getattr(previous_oi, "atm_strike", None),
+                    "strikes": getattr(previous_oi, "strikes", [])
+                }
             
             # Calculate velocities
             total_call_velocity = 0

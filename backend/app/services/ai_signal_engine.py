@@ -181,7 +181,7 @@ class AISignalEngine:
             # Get latest market data
             market_data = self.get_latest_market_snapshot()
             if not market_data:
-                logger.warning("No market data available for signal generation")
+                logger.warning("No market snapshot available — skipping signal generation")
                 return 0
             
             # AI Validation: Check option chain and OI data

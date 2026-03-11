@@ -5,7 +5,10 @@ import asyncio
 import asyncpg
 from urllib.parse import urlparse
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://localhost:5432/postgres"
+)
 print("DEBUG DATABASE_URL:", DATABASE_URL)
 
 if DATABASE_URL is None:
