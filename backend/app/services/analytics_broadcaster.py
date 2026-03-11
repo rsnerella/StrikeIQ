@@ -253,19 +253,20 @@ class AnalyticsBroadcaster:
                 except Exception as e:
                     logger.debug(f"Signal scoring skipped: {e}")
 
-            # ── Trade Setup Engine (Rule Based Fallback) ──────────────────────────────────────
+            # ── Option Trade Engine (AI Real Options) ──────────────────────────────────
             try:
-                from app.services.trade_setup_engine import trade_setup_engine
-                trade_setup = trade_setup_engine.compute(
-                    symbol=symbol,
-                    spot=engine_data["spot"],
-                    chain_data=chain_data,
-                    analytics=analytics_results,
-                )
-                if trade_setup:
-                    analytics_results["trade_setup"] = trade_setup
+                from ai.options_trade_engine import generate_option_trade
+                snapshot = {
+                    "symbol": symbol,
+                    "spot_price": engine_data["spot"],
+                    "pcr": pcr
+                }
+                option_trade = generate_option_trade(snapshot, chain_data)
+                if option_trade:
+                    analytics_results["trade_setup"] = option_trade
+                    logger.info(f"AI OPTION TRADE GENERATED → {option_trade['symbol']} {option_trade['strike']} {option_trade['type']}")
             except Exception as e:
-                logger.debug(f"Trade setup skipped: {e}")
+                logger.debug(f"AI option trade engine skipped: {e}")
 
             # ── AI Signal Integration (Primary) ──────────────────────────────────────
             try:
@@ -287,16 +288,33 @@ class AnalyticsBroadcaster:
             except Exception as e:
                 logger.debug(f"AI signal fetch failed: {e}")
 
+            # PHASE 8: Bundle full professional payload
+            from app.services.option_chain_builder import option_chain_builder
+            from app.services.candle_builder import candle_builder
+            
+            # Fetch additional components for bundling
+            chain_snapshot = option_chain_builder.get_chain(symbol)
+            candles_1m = candle_builder.get_candles_as_dicts(symbol, "1m", 100)
+            
             analytics_payload = {
                 "type": "analytics_update",
-                "version": "2.0",
+                "version": "3.0 PRO",
                 "symbol": symbol,
                 "timestamp": int(time.time()),
                 "data": {
-                    **analytics_results,
-                    "bias": analytics_results.get("bias", {}),
-                    "expected_move": analytics_results.get("expected_move", {}),
-                    "structural": analytics_results.get("structural", {})
+                    "snapshot": {
+                        "spot": engine_data["spot"],
+                        "pcr": pcr,
+                        "total_call_oi": total_call_oi,
+                        "total_put_oi": total_put_oi,
+                        "gamma_exposure": analytics_results.get("structural", {}).get("net_gamma", 0),
+                        "expected_move": analytics_results.get("expected_move", {}).get("move_1sd", 0)
+                    },
+                    "analytics": analytics_results,
+                    "option_chain": chain_snapshot.__dict__ if hasattr(chain_snapshot, '__dict__') else chain_snapshot,
+                    "trade_setup": analytics_results.get("trade_setup"),
+                    "candles": candles_1m,
+                    "ai_signals": analytics_results.get("ai_signal")
                 }
             }
             
@@ -372,6 +390,7 @@ class AnalyticsBroadcaster:
                 # Cache analytics snapshot for new connections
                 global LAST_ANALYTICS
                 if symbol:
+                    # Phase 8: Store full bundled payload
                     LAST_ANALYTICS[symbol] = analytics_message
                 
                 await manager.broadcast(analytics_message)

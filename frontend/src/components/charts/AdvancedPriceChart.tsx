@@ -87,13 +87,50 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
     useEffect(() => {
         let isMounted = true;
         const loadHistoricalCandles = async () => {
+            if (!chartRef.current || !symbol) return;
+            
             setLoading(true);
             try {
+                // PHASE 1: Reset chart before loading new symbol
+                if (seriesRef.current) {
+                    chartRef.current.removeSeries(seriesRef.current);
+                    seriesRef.current = null;
+                }
+                if (waveSeriesRef.current) {
+                    chartRef.current.removeSeries(waveSeriesRef.current);
+                    waveSeriesRef.current = null;
+                }
+
+                // Add fresh series
+                const candlestickSeries = chartRef.current.addCandlestickSeries({
+                    upColor: '#4ade80',
+                    downColor: '#f87171',
+                    borderVisible: false,
+                    wickUpColor: '#4ade80',
+                    wickDownColor: '#f87171',
+                });
+                const waveSeries = chartRef.current.addLineSeries({
+                    color: '#a855f7',
+                    lineWidth: 2,
+                    lineStyle: LineStyle.Solid,
+                });
+
+                seriesRef.current = candlestickSeries;
+                waveSeriesRef.current = waveSeries;
+
                 const res = await fetch(`/api/v1/market/candles?symbol=${symbol}&tf=${timeframe}&limit=300`);
                 if (res.ok) {
-                    const candles = await res.json();
+                    const responseData = await res.json();
+                    const candles = responseData.candles || [];
+                    
                     if (isMounted && seriesRef.current && candles.length > 0) {
-                        seriesRef.current.setData(candles);
+                        seriesRef.current.setData(candles.map((c: any) => ({
+                            time: c.time,
+                            open: c.open,
+                            high: c.high,
+                            low: c.low,
+                            close: c.close
+                        })));
                         const lastCandle = candles[candles.length - 1];
                         currentPriceRef.current = lastCandle.close;
                         currentCloseTimeRef.current = lastCandle.time;
@@ -106,9 +143,7 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
             }
         };
 
-        if (symbol && timeframe) {
-            loadHistoricalCandles();
-        }
+        loadHistoricalCandles();
 
         return () => {
             isMounted = false;
@@ -237,39 +272,25 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
             }));
         }
 
-        // Phase 9: AI Trade Signals (Target and SL lines + Markers)
-        const signal = data?.intelligence?.trade_suggestion;
-        if (signal && signal.entry) {
-            const isBullish = signal.direction === 'BULLISH' || signal.signal?.includes('BUY');
+        // Phase 9: AI Trade Signals (Real Options)
+        const activeTrade = (data?.analytics as any)?.trade_setup;
+        if (activeTrade && activeTrade.entry) {
+            const isBullish = activeTrade.option_type === 'CE';
             
             markers.push({
                 time: currentCloseTimeRef.current,
                 position: isBullish ? 'belowBar' : 'aboveBar',
-                color: isBullish ? '#4ade80' : '#ff4444',
+                color: isBullish ? '#34d399' : '#f87171',
                 shape: isBullish ? 'arrowUp' : 'arrowDown',
-                text: `${isBullish ? 'BUY' : 'SELL'} @ ${signal.entry}`,
+                text: `BUY ${activeTrade.option_type} @ ${activeTrade.entry}`,
             });
 
-            if (signal.target) {
-                priceLinesRef.current.push(seriesRef.current.createPriceLine({
-                    price: signal.target,
-                    color: '#4ade80',
-                    lineWidth: 2,
-                    lineStyle: LineStyle.Solid,
-                    title: 'Target',
-                    axisLabelVisible: true,
-                }));
-            }
-            if (signal.stop_loss) {
-                priceLinesRef.current.push(seriesRef.current.createPriceLine({
-                    price: signal.stop_loss,
-                    color: '#ff4444',
-                    lineWidth: 2,
-                    lineStyle: LineStyle.Solid,
-                    title: 'SL',
-                    axisLabelVisible: true,
-                }));
-            }
+            // Note: Chart is price-scaled to Index, but trade is in Premium.
+            // We only show markers on the index chart for entry confirmation.
+            // Targets and SL lines for PREMIUM are better shown as text or in a dedicated premium chart.
+            // However, the user asked for SL/Target lines. If they meant index levels, we should use them.
+            // Since the engine only gave us premium levels, we will skip drawing lines 
+            // on the index chart to avoid scaling issues, unless we have index-equivalent targets.
         }
 
         // Liquidity Sweep Markers

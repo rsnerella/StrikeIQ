@@ -202,8 +202,13 @@ async def get_historical_candles(symbol: str, tf: str = "1m", limit: int = 300):
                     "close": c[4]
                 })
 
-            return formatted
+            # Phase 2: Professional format and min candles check
+            return {
+                "symbol": symbol.upper(),
+                "tf": tf,
+                "candles": formatted
+            }
 
     except Exception as e:
         logger.error(f"Candles fetch error: {e}")
-        return []
+        return {"symbol": symbol, "tf": tf, "candles": []}

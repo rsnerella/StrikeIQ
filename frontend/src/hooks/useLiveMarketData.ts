@@ -96,9 +96,13 @@ export function useLiveMarketData(symbol: string, expiry: string | null) {
       console.log("🔗 ANALYTICS FROM STORE:", safeAnalytics)
     }
 
+    // PHASE 8: Support nested professional payload structure
+    const analyticsCore = safeAnalytics?.analytics || safeAnalytics;
+    const snapshot = safeAnalytics?.snapshot || {};
+
     const transformed: LiveMarketData = {
       symbol,
-      spot: effectiveSpot,
+      spot: effectiveSpot || snapshot.spot || 0,
       timestamp: new Date(lastUpdate || optionChainLastUpdate).toISOString(),
       analytics_enabled: optionChainData?.analytics_enabled,
       available_expiries: [],
@@ -116,36 +120,36 @@ export function useLiveMarketData(symbol: string, expiry: string | null) {
       intelligence: {
         // Map analytics to intelligence object for UI components
         bias: {
-          ...safeAnalytics?.bias,
-          label: safeAnalytics?.bias?.divergence_type === 'bullish' ? 'BULLISH' :
-            safeAnalytics?.bias?.divergence_type === 'bearish' ? 'BEARISH' : 'NEUTRAL',
-          score: safeAnalytics?.bias?.bias_strength || 0
+          ...analyticsCore?.bias,
+          label: analyticsCore?.bias?.divergence_type === 'bullish' ? 'BULLISH' :
+            analyticsCore?.bias?.divergence_type === 'bearish' ? 'BEARISH' : 'NEUTRAL',
+          score: analyticsCore?.bias?.bias_strength || 0
         },
-        pcr: safeAnalytics?.bias?.pcr_value ?? safeAnalytics?.pcr ?? 1.0,
-        probability: safeAnalytics?.expected_move,
-        volatility_regime: safeAnalytics?.structural?.volatility_regime ?? "UNKNOWN",
-        breach_probability: safeAnalytics?.structural?.breach_probability ?? 0,
-        expected_move: safeAnalytics?.structural?.expected_move ?? 0,
-        gamma_regime: safeAnalytics?.structural?.gamma_regime ?? "neutral",
-        support_level: safeAnalytics?.structural?.support_level ?? 0,
-        resistance_level: safeAnalytics?.structural?.resistance_level ?? 0,
-        intent_score: safeAnalytics?.structural?.intent_score ?? 0,
-        oi_velocity: safeAnalytics?.structural?.oi_velocity ?? 0,
-        total_oi: safeAnalytics?.structural?.total_oi ?? 0,
+        pcr: analyticsCore?.pcr ?? snapshot?.pcr ?? 1.0,
+        probability: analyticsCore?.expected_move || snapshot?.expected_move,
+        volatility_regime: analyticsCore?.structural?.volatility_regime ?? "UNKNOWN",
+        breach_probability: analyticsCore?.structural?.breach_probability ?? 0,
+        expected_move: analyticsCore?.structural?.expected_move ?? snapshot?.expected_move ?? 0,
+        gamma_regime: analyticsCore?.structural?.gamma_regime ?? "neutral",
+        support_level: analyticsCore?.structural?.support_level ?? 0,
+        resistance_level: analyticsCore?.structural?.resistance_level ?? 0,
+        intent_score: analyticsCore?.structural?.intent_score ?? 0,
+        oi_velocity: analyticsCore?.structural?.oi_velocity ?? 0,
+        total_oi: analyticsCore?.structural?.total_oi ?? snapshot?.total_oi ?? 0,
         regime: {
           market_regime: 'NORMAL',
-          volatility_regime: safeAnalytics?.structural?.volatility_regime ?? "UNKNOWN",
-          trend_regime: safeAnalytics?.bias?.divergence_type === 'bullish' ? 'UPTREND' :
-            (safeAnalytics?.bias?.divergence_type === 'bearish' ? 'DOWNTREND' : 'SIDEWAYS'),
+          volatility_regime: analyticsCore?.structural?.volatility_regime ?? "UNKNOWN",
+          trend_regime: analyticsCore?.bias?.divergence_type === 'bullish' ? 'UPTREND' :
+            (analyticsCore?.bias?.divergence_type === 'bearish' ? 'DOWNTREND' : 'SIDEWAYS'),
           confidence: 85.0
         },
         gamma: {
-          net_gamma: safeAnalytics?.structural?.net_gamma ?? 0,
-          gamma_flip: safeAnalytics?.structural?.gamma_flip_level ?? 0,
-          dealer_gamma: safeAnalytics?.structural?.gamma_regime ?? "NEUTRAL",
-          gamma_exposure: safeAnalytics?.structural?.net_gamma ?? 0
+          net_gamma: analyticsCore?.structural?.net_gamma ?? snapshot?.gamma_exposure ?? 0,
+          gamma_flip: analyticsCore?.structural?.gamma_flip_level ?? 0,
+          dealer_gamma: analyticsCore?.structural?.gamma_regime ?? "NEUTRAL",
+          gamma_exposure: analyticsCore?.structural?.net_gamma ?? snapshot?.gamma_exposure ?? 0
         },
-        trade_suggestion: safeAnalytics?.trade_suggestion || safeAnalytics?.trade_setup,
+        trade_suggestion: safeAnalytics?.trade_setup || analyticsCore?.trade_suggestion || analyticsCore?.trade_setup,
         // Keep existing optionChain intelligence if available
         ...optionChainData?.intelligence
       }

@@ -199,7 +199,7 @@ export function connectMarketWS() {
       console.log("WS MESSAGE RECEIVED", data);
 
       // Route analytics to handleAnalytics
-      if (data.type === "analytics") {
+      if (data.type === "analytics" || data.type === "analytics_update") {
         if (process.env.NODE_ENV === "development") {
           console.log("📊 ANALYTICS RECEIVED:", data)
         }

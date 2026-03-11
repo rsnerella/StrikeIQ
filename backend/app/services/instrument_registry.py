@@ -93,7 +93,8 @@ class InstrumentRegistry:
                         itype = inst.get("instrument_type")
 
                         # Only index derivatives
-                        if name not in ("NIFTY", "BANKNIFTY"):
+                        # Only index derivatives
+                        if name not in ("NIFTY", "BANKNIFTY", "FINNIFTY"):
                             continue
 
                         expiry = normalize_expiry(inst.get("expiry"))
@@ -195,7 +196,7 @@ class InstrumentRegistry:
             itype = inst.get("instrument_type")
 
             # Only index derivatives
-            if name not in ("NIFTY", "BANKNIFTY"):
+            if name not in ("NIFTY", "BANKNIFTY", "FINNIFTY"):
                 continue
 
             expiry = normalize_expiry(inst.get("expiry"))

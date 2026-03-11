@@ -119,10 +119,10 @@ function AICommandCenter({ intelligence }: AICommandCenterProps) {
           <div
             className="px-4 py-2 rounded-lg border text-[11px] font-bold font-mono tracking-[0.2em] transition-all duration-500"
             style={{
-              borderColor: getStatusColor(safeIntelligence?.regime?.market_regime).color + '30',
-              background: getStatusColor(safeIntelligence?.regime?.market_regime).color + '05',
-              color: getStatusColor(safeIntelligence?.regime?.market_regime).color,
-              boxShadow: `0 0 15px ${getStatusColor(safeIntelligence?.regime?.market_regime).glow}`
+              borderColor: getStatusColor(safeIntelligence?.regime?.market_regime || "NEUTRAL").color + '30',
+              background: getStatusColor(safeIntelligence?.regime?.market_regime || "NEUTRAL").color + '05',
+              color: getStatusColor(safeIntelligence?.regime?.market_regime || "NEUTRAL").color,
+              boxShadow: `0 0 15px ${getStatusColor(safeIntelligence?.regime?.market_regime || "NEUTRAL").glow}`
             }}
           >
             {safeIntelligence?.regime?.market_regime || 'NEUTRAL'} REGIME
@@ -135,16 +135,16 @@ function AICommandCenter({ intelligence }: AICommandCenterProps) {
         {[
           {
             icon: <Activity className="w-4 h-4" />,
-            label: 'Volatility State',
+            label: 'Volatility Regime',
             value: safeIntelligence?.regime?.volatility_regime || 'NORMAL',
-            color: getStatusColor(safeIntelligence?.regime?.volatility_regime).color,
+            color: getStatusColor(safeIntelligence?.regime?.volatility_regime || "NORMAL").color,
             sub: `Expected: ±${safeIntelligence?.probability?.expected_move?.toFixed(2) || '0.00'}`,
           },
           {
             icon: <TrendingUp className="w-4 h-4" />,
-            label: 'Current Trend',
-            value: safeIntelligence?.regime?.trend_regime || 'SIDEWAYS',
-            color: getStatusColor(safeIntelligence?.regime?.trend_regime).color,
+            label: 'Market Bias',
+            value: biasData.label || 'NEUTRAL',
+            color: getStatusColor(biasData.label || "NEUTRAL").color,
             sub: `Strength: ${(biasData.strength * 100).toFixed(1)}% / 100`,
           },
           {
@@ -184,8 +184,8 @@ function AICommandCenter({ intelligence }: AICommandCenterProps) {
           </div>
           <div className="grid grid-cols-2 gap-y-6 gap-x-12">
             {[
-              { l: 'SIGNAL DIRECTION', v: biasData.label || 'NEUTRAL', c: getStatusColor(biasData.label).color },
-              { l: ' Neural CONFIDENCE', v: `${biasData.confidence?.toFixed(1) || '0.0'}%`, c: '#fff' },
+              { l: 'FLOW INTENT', v: safeIntelligence?.liquidity?.flow_direction || 'STABLE', c: getStatusColor(safeIntelligence?.liquidity?.flow_direction || 'STABLE').color },
+              { l: 'SIGNAL DIRECTION', v: biasData.label || 'NEUTRAL', c: getStatusColor(biasData.label || "NEUTRAL").color },
               { l: 'ORDER PRESSURE', v: biasData.direction || 'NONE', c: '#fff' },
               { l: 'INTENT SCORE', v: (biasData.strength * 10).toFixed(1), c: '#fff' },
             ].map((m, i) => (
@@ -207,10 +207,10 @@ function AICommandCenter({ intelligence }: AICommandCenterProps) {
           </div>
           <div className="grid grid-cols-2 gap-y-6 gap-x-12">
             {[
-              { l: 'DEALER GAMMA', v: safeIntelligence?.gamma?.net_gamma?.toFixed(2) || '0.00', c: (safeIntelligence?.gamma?.net_gamma ?? 0) > 0 ? '#4ade80' : '#f87171' },
-              { l: 'EXPOSURE REGIME', v: safeIntelligence?.gamma?.dealer_gamma || 'NEUTRAL', c: '#fff' },
+              { l: 'DEALER POSITIONING', v: safeIntelligence?.gamma?.dealer_gamma || 'NEUTRAL', c: '#fff' },
+              { l: 'GAMMA EXPOSURE', v: safeIntelligence?.gamma?.gamma_exposure?.toFixed(2) || '0.00', c: (safeIntelligence?.gamma?.gamma_exposure ?? 0) > 0 ? '#4ade80' : '#f87171' },
+              { l: 'TRADE CONFIDENCE', v: `${(safeIntelligence?.regime?.confidence || biasData.confidence || 0).toFixed(1)}%`, c: '#fff' },
               { l: 'GAMMA FLIP LEVEL', v: safeIntelligence?.gamma?.gamma_flip?.toLocaleString() || 'N/A', c: '#60a5fa' },
-              { l: 'DELTA IMBALANCE', v: '0.42%', c: '#fff' },
             ].map((m, i) => (
               <div key={i} className="flex flex-col gap-1">
                 <span className="text-[9px] font-bold font-mono tracking-widest text-slate-600 uppercase">{m.l}</span>

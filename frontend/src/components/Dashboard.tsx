@@ -349,10 +349,12 @@ export default function Dashboard({ initialSymbol = 'NIFTY' }: DashboardProps) {
             <ExpiryMagnetPanel data={data} />
           </div>
 
-          {/* ROW 11 — Strategy Plan (Full Width) */}
           <div className="col-12">
             <div className="trading-panel">
-              <MemoizedStrategyPlan symbol={currentSymbol} />
+              <MemoizedStrategyPlan 
+                symbol={currentSymbol} 
+                data={data?.intelligence?.trade_suggestion} 
+              />
             </div>
           </div>
 
@@ -367,7 +369,7 @@ export default function Dashboard({ initialSymbol = 'NIFTY' }: DashboardProps) {
           {/* ROW 13 — AI Command Center (full width) */}
           <div className="col-12">
             <div className="trading-panel">
-              <MemoizedAICommandCenter />
+              <MemoizedAICommandCenter intelligence={data?.intelligence} />
             </div>
           </div>
 

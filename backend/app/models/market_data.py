@@ -28,6 +28,8 @@ class MarketSnapshot(Base):
     total_call_oi = Column(BigInteger, nullable=True)
     total_put_oi = Column(BigInteger, nullable=True)
     atm_strike = Column(Float, nullable=True)
+    gamma_exposure = Column(Float, nullable=True)
+    expected_move = Column(Float, nullable=True)
 
 
 class OptionChainSnapshot(Base):

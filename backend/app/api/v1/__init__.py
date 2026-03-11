@@ -3,7 +3,7 @@ v1 API routers for StrikeIQ
 """
 
 from .auth import router as auth_router
-from .market import router as market_router
+from .market.market_api import router as market_router
 from .options import router as options_router
 from .system import router as system_router
 from .predictions import router as predictions_router

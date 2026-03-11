@@ -26,6 +26,15 @@ async def live_options_ws(websocket: WebSocket, symbol: str):
     await manager.connect(websocket)
     await manager.register_subscription(websocket, symbol, expiry or "")
 
+    # Phase 6: Immediate send from cache
+    try:
+        from app.services.analytics_broadcaster import LAST_ANALYTICS
+        if symbol in LAST_ANALYTICS:
+            await websocket.send_json(LAST_ANALYTICS[symbol])
+            logger.info(f"IMM_ANALYTICS_SENT → {symbol}")
+    except Exception as e:
+        logger.error(f"Failed to send cached analytics: {e}")
+
     logger.info(f"🟢 WS CONNECTED → {key}")
 
     builder = None

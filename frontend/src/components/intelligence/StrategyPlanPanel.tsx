@@ -6,32 +6,43 @@ import api from '@/api/client';
 
 interface StrategyPlan {
     symbol: string;
-    strategy: string;
-    direction: 'CALL' | 'PUT' | 'NEUTRAL';
-    trade_type: 'BUY' | 'SELL' | 'NONE';
     strike: number;
+    option_type: 'CE' | 'PE';
+    option_ltp: number;
     entry: number;
     target: number;
-    stoploss: number;
+    stop_loss: number;
     confidence: number;
-    lot_size: number;
+    lots: number;
     expected_profit: number;
-    expected_loss: number;
-    risk_reward: number;
+    max_loss: number;
 }
 
-const StrategyPlanPanel: React.FC<{ symbol: string }> = ({ symbol }) => {
+const StrategyPlanPanel: React.FC<{ symbol: string, data?: any }> = ({ symbol, data: liveData }) => {
     const [plan, setPlan] = useState<StrategyPlan | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<boolean>(false);
 
+    // Sync live data if available
     useEffect(() => {
+        if (liveData) {
+            setPlan(liveData);
+            setLoading(false);
+            setError(false);
+        }
+    }, [liveData]);
+
+    useEffect(() => {
+        if (liveData) return; // Skip fetch if we have live data
+
         const fetchPlan = async () => {
             try {
                 setLoading(true);
                 setError(false);
                 const response = await api.get(`/v1/ai/strategy-plan?symbol=${symbol}`);
-                setPlan(response.data);
+                if (response.data) {
+                    setPlan(response.data);
+                }
             } catch (err) {
                 console.error('Error fetching strategy plan:', err);
                 setError(true);
@@ -43,7 +54,7 @@ const StrategyPlanPanel: React.FC<{ symbol: string }> = ({ symbol }) => {
         fetchPlan();
         const interval = setInterval(fetchPlan, 30000); // 30s update
         return () => clearInterval(interval);
-    }, [symbol]);
+    }, [symbol, liveData]);
 
     if (loading && !plan) {
         return (
@@ -65,7 +76,7 @@ const StrategyPlanPanel: React.FC<{ symbol: string }> = ({ symbol }) => {
         );
     }
 
-    const isBullish = plan.direction === 'CALL';
+    const isBullish = plan.option_type === 'CE';
     const accentColor = isBullish ? '#10b981' : '#f43f5e';
 
     return (
@@ -80,20 +91,20 @@ const StrategyPlanPanel: React.FC<{ symbol: string }> = ({ symbol }) => {
                                 <span className={`relative inline-flex rounded-full h-2 w-2`} style={{ backgroundColor: accentColor }} />
                             </div>
                             <span className="text-[10px] font-bold font-mono tracking-widest uppercase" style={{ color: accentColor }}>
-                                {plan.strategy} • {plan.direction} {plan.trade_type}
+                                BUY {plan.symbol} {plan.strike} {plan.option_type}
                             </span>
                         </div>
                     </div>
 
                     <div className="flex items-center gap-4">
                         <div className="flex flex-col items-end">
-                            <span className="text-[10px] font-bold font-mono text-slate-500 uppercase">Confidence</span>
-                            <span className="text-sm font-bold font-mono text-white">{((plan.confidence || 0) * 100).toFixed(1)}%</span>
+                            <span className="text-[10px] font-bold font-mono text-cyan-400 uppercase">Option LTP</span>
+                            <span className="text-sm font-bold font-mono text-white">₹{plan.option_ltp?.toFixed(2) || '0.00'}</span>
                         </div>
                         <div className="h-8 w-[1px] bg-white/10" />
                         <div className="flex flex-col items-end">
-                            <span className="text-[10px] font-bold font-mono text-slate-500 uppercase">Risk Reward</span>
-                            <span className="text-sm font-bold font-mono text-cyan-400">1:{(plan.risk_reward || 0).toFixed(1)}</span>
+                            <span className="text-[10px] font-bold font-mono text-slate-500 uppercase">Confidence</span>
+                            <span className="text-sm font-bold font-mono text-white">{((plan.confidence || 0.85) * 100).toFixed(1)}%</span>
                         </div>
                     </div>
                 </div>
@@ -106,23 +117,23 @@ const StrategyPlanPanel: React.FC<{ symbol: string }> = ({ symbol }) => {
                         </div>
 
                         <div className="flex flex-col gap-1">
-                            <span className="text-[10px] font-bold font-mono text-slate-500 uppercase">Target Strike</span>
+                            <span className="text-[10px] font-bold font-mono text-slate-500 uppercase">Strike</span>
                             <span className="text-lg font-bold font-mono text-white">{plan.strike || 0}</span>
                         </div>
 
                         <div className="flex flex-col gap-1">
-                            <span className="text-[10px] font-bold font-mono text-emerald-500/70 uppercase">Entry Zone</span>
+                            <span className="text-[10px] font-bold font-mono text-emerald-500/70 uppercase">Entry</span>
                             <span className="text-lg font-bold font-mono text-white">{plan.entry || 0}</span>
                         </div>
 
                         <div className="flex flex-col gap-1">
-                            <span className="text-[10px] font-bold font-mono text-cyan-500/70 uppercase">Take Profit</span>
+                            <span className="text-[10px] font-bold font-mono text-cyan-500/70 uppercase">Target</span>
                             <span className="text-lg font-bold font-mono text-white">{plan.target || 0}</span>
                         </div>
 
                         <div className="flex flex-col gap-1">
                             <span className="text-[10px] font-bold font-mono text-rose-500/70 uppercase">Stop Loss</span>
-                            <span className="text-lg font-bold font-mono text-white">{plan.stoploss || 0}</span>
+                            <span className="text-lg font-bold font-mono text-white">{plan.stop_loss || 0}</span>
                         </div>
                     </div>
 
@@ -134,7 +145,7 @@ const StrategyPlanPanel: React.FC<{ symbol: string }> = ({ symbol }) => {
                                 <span className="text-[10px] font-bold font-mono text-slate-300 uppercase">Position Sizing</span>
                             </div>
                             <div className="px-2 py-0.5 rounded bg-cyan-400/10 border border-cyan-400/20 text-[9px] font-bold font-mono text-cyan-400">
-                                {plan.lot_size || 0} LOTS
+                                {plan.lots || 0} LOTS
                             </div>
                         </div>
 
@@ -144,8 +155,8 @@ const StrategyPlanPanel: React.FC<{ symbol: string }> = ({ symbol }) => {
                                 <span className="text-[13px] font-bold font-mono text-emerald-400">₹{(plan.expected_profit || 0).toLocaleString()}</span>
                             </div>
                             <div className="flex items-center justify-between">
-                                <span className="text-[11px] font-mono text-slate-500">Expected Max Loss</span>
-                                <span className="text-[13px] font-bold font-mono text-rose-400">₹{(plan.expected_loss || 0).toLocaleString()}</span>
+                                <span className="text-[11px] font-mono text-slate-500">Max Loss</span>
+                                <span className="text-[13px] font-bold font-mono text-rose-400">₹{(plan.max_loss || 0).toLocaleString()}</span>
                             </div>
                         </div>
                     </div>

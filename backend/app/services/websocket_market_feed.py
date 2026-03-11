@@ -123,9 +123,9 @@ class WebSocketMarketFeed:
         self._client = httpx.AsyncClient(timeout=30)
         
         # Option subscription tracking - CONSOLIDATED
-        self.current_atms = {"NIFTY": None, "BANKNIFTY": None}
-        self.last_atms = {"NIFTY": None, "BANKNIFTY": None}
-        self.current_expiries = {"NIFTY": None, "BANKNIFTY": None}
+        self.current_atms = {"NIFTY": None, "BANKNIFTY": None, "FINNIFTY": None}
+        self.last_atms = {"NIFTY": None, "BANKNIFTY": None, "FINNIFTY": None}
+        self.current_expiries = {"NIFTY": None, "BANKNIFTY": None, "FINNIFTY": None}
         self.current_option_keys = []
         self.subscribed_instruments = set()
         self.dropped_ticks = 0
@@ -135,7 +135,7 @@ class WebSocketMarketFeed:
         self.max_tick_latency = 0
         self.tick_counter = 0
         self.instrument_registry = get_instrument_registry()
-        self.last_index_prices = {"NIFTY": None, "BANKNIFTY": None}
+        self.last_index_prices = {"NIFTY": None, "BANKNIFTY": None, "FINNIFTY": None}
         self._failsafe_task: Optional[asyncio.Task] = None  # P5: track to prevent leaks
         self._disconnect_task: Optional[asyncio.Task] = None  # P1: track to prevent duplicate reconnects
         self._atm_shift_task: Optional[asyncio.Task] = None  # P3: track ATM shift tasks
@@ -662,6 +662,8 @@ class WebSocketMarketFeed:
             return "NSE_INDEX|Nifty 50"
         elif symbol == "BANKNIFTY":
             return "NSE_INDEX|Nifty Bank"
+        elif symbol == "FINNIFTY":
+            return "NSE_INDEX|Nifty Fin Service"
         else:
             logger.error(f"Unknown symbol for index key: {symbol}")
             return None

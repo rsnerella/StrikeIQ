@@ -320,19 +320,8 @@ export const useWSStore = create<WSStore>((set, get) => ({
     }
 
     // ANALYTICS UPDATE — from analytics_broadcaster
-    if (message.type === "analytics_update" && message.data) {
-      console.log("ANALYTICS UPDATE RECEIVED", {
-        symbol: message.symbol,
-        timestamp: message.timestamp,
-        keys: Object.keys(message.data)
-      })
-      
-      // Update analytics state
-      set({
-        analytics: message.data,
-        lastUpdate: Date.now(),
-        error: null
-      })
+    if (message.type === "analytics_update") {
+      get().handleAnalytics(message);
       return
     }
 
@@ -478,8 +467,16 @@ export const useWSStore = create<WSStore>((set, get) => ({
       console.log("Analytics stored in Zustand")
     }
 
+    // Unpack data if it's a wrapped payload (Phase 8 format)
+    const renderableData = payload.data 
+      ? { ...payload.data, symbol: payload.symbol, _timestamp: payload.timestamp } 
+      : { ...payload };
+
     set({
-      analytics: { ...payload },
+      analytics: renderableData,
+      // Phase 8: Extract spot and chain from bundle for full sync
+      spot: renderableData.snapshot?.spot || get().spot,
+      optionChainSnapshot: renderableData.option_chain || get().optionChainSnapshot,
       lastUpdate: Date.now(),
       connected: true,
       error: null

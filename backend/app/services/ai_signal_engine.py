@@ -205,13 +205,13 @@ class AISignalEngine:
                     return 0
             
             if spot <= 0:
-                logger.warning("Rejecting snapshot: spot_price <= 0")
+                logger.warning(f"Rejecting snapshot for {symbol}: spot_price {spot} <= 0")
                 return 0
             if expected_move <= 0:
-                logger.warning("Rejecting snapshot: expected_move <= 0")
+                logger.warning(f"Rejecting snapshot for {symbol}: expected_move {expected_move} <= 0")
                 return 0
-            if total_call_oi <= 0 and total_put_oi <= 0:
-                logger.warning("Rejecting snapshot: both call and put OI are zero")
+            if total_call_oi == 0 and total_put_oi == 0:
+                logger.warning(f"Rejecting snapshot for {symbol}: both call and put OI are zero")
                 return 0
 
             # Get active formulas

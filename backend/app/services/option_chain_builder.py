@@ -23,6 +23,8 @@ class OptionData:
     strike: float
     ltp: float = 0.0
     oi: int = 0
+    iv: float = 0.0
+    gamma: float = 0.0
     volume: int = 0
     last_update: datetime = field(default_factory=datetime.utcnow)
 
@@ -352,6 +354,7 @@ class OptionChainBuilder:
         ltp: float,
         oi: int = 0,
         volume: int = 0,
+        **kwargs
     ):
 
         try:
@@ -366,6 +369,10 @@ class OptionChainBuilder:
             if symbol not in self.chains:
                 self.chains[symbol] = {}
 
+            # Phase 5 GUARD: skip if ltp <= 0
+            if ltp is None or ltp <= 0:
+                return
+
             if strike not in self.chains[symbol]:
                 self.chains[symbol][strike] = {}
 
@@ -374,12 +381,17 @@ class OptionChainBuilder:
 
             opt = self.chains[symbol][strike][right]
 
-            if ltp is not None and ltp >= 0:
-                opt.ltp = ltp
+            opt.ltp = ltp
             if oi > 0:
                 opt.oi = oi
             if volume > 0:
                 opt.volume = volume
+            
+            # Update greeks if provided
+            if "iv" in kwargs:
+                opt.iv = kwargs["iv"]
+            if "gamma" in kwargs:
+                opt.gamma = kwargs["gamma"]
                 
             opt.last_update = datetime.utcnow()
             

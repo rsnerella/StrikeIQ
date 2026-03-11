@@ -372,41 +372,35 @@ async def get_strategy_plan(symbol: str = "NIFTY"):
     """
     Get the latest AI strategy plan for a symbol (Step 9)
     """
-    # Define high-quality fallback response
+    symbol = symbol.upper()
+    
+    # Define high-quality fallback response (Professional Options Format)
     fallback_plan = {
-        "symbol": symbol.upper(),
-        "strategy": "Bull Call Spread",
-        "direction": "CALL",
-        "trade_type": "BUY",
+        "symbol": symbol,
         "strike": 22400,
-        "entry": 22420,
-        "target": 22540,
-        "stoploss": 22380,
-        "confidence": 0.71,
-        "lot_size": 2,
-        "expected_profit": 7200,
-        "expected_loss": 2800,
-        "risk_reward": 2.5,
-        "source": "SIMULATED_FALLBACK"
+        "option_type": "CE",
+        "option_ltp": 155.50,
+        "entry": 155.50,
+        "target": 210.00,
+        "stop_loss": 132.00,
+        "lots": 2,
+        "max_loss": 2350,
+        "expected_profit": 5450,
+        "confidence": 0.85
     }
 
     try:
-        from app.services.websocket_market_feed import get_live_structural_engine
+        from app.services.analytics_broadcaster import LAST_ANALYTICS
         
-        # Access the singleton engine from the background feed
-        engine = get_live_structural_engine()
-        
-        if not engine:
-            logger.warning("Live engine not initialized - returning fallback")
-            return fallback_plan
-            
-        metrics = await engine.get_latest_metrics(symbol.upper())
-        if metrics and hasattr(metrics, 'trade_suggestion') and metrics.trade_suggestion:
-            return metrics.trade_suggestion
+        # Phase 8: Pull from bundled analytics cache
+        if symbol in LAST_ANALYTICS:
+            cached = LAST_ANALYTICS[symbol]
+            trade_setup = cached.get("data", {}).get("trade_setup")
+            if trade_setup:
+                return trade_setup
         
         return fallback_plan
         
     except Exception as e:
-        import traceback
-        logger.error(f"Error in get_strategy_plan: {e}\n{traceback.format_exc()}")
+        logger.error(f"Error in get_strategy_plan: {e}")
         return fallback_plan

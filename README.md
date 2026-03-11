@@ -2,7 +2,7 @@ License: Proprietary (All Rights Reserved)
 
 # StrikeIQ - Options Market Intelligence SaaS
 
-AI-powered options market intelligence platform for Indian markets (NIFTY & BANKNIFTY) with **production-grade OAuth 2.0 security implementation**, **proactive structural intelligence engine**, and **modern, optimized tech stack**.
+AI-powered options market intelligence platform for Indian markets (**NIFTY, BANKNIFTY & FINNIFTY**) with **production-grade OAuth 2.0 security implementation**, **proactive structural intelligence engine**, and **modern, optimized tech stack**.
 
 ## 🚀 Tech Stack
 
@@ -47,37 +47,32 @@ AI-powered options market intelligence platform for Indian markets (NIFTY & BANK
 - **Confidence Scoring**: Quantified conviction metrics for all signals
 - **Chart Analysis Engine**: Combines waves, zones, and structure for unified chart intelligence
 
-### Market Bias Engine
-- Price vs VWAP analysis
-- 5-minute OI change calculations
-- Put-Call Ratio (PCR) computation
-- Price-OI divergence detection
-- Bullish/Bearish/Neutral bias with confidence percentage
-
-### Expected Move Engine
-- Expected move calculation using ATM Call + ATM Put premiums
-- Current price vs expected range display
-- Breakout condition flagging
-
-### Smart Money Activity Detector
-- Aggressive call writing detection
-- Aggressive put writing detection
-- Long/short buildup identification
-- Liquidity trap zone detection
+### 🎯 AI Options Trade Engine (v2.0)
+- **Real Option Trade Selection**: Transitions from index-level levels to strike-specific premium trades
+- **Strike Selection**: Automatic selection of high-liquidity ATM/OTM strikes based on bias
+- **PnL Projections**: Real-time calculation of Entry, Target, Stop-Loss, Max Loss, and Expected Profit in INR
+- **Lot Sizing**: Instrument-aware lot sizes (NIFTY: 50, BANKNIFTY: 15, FINNIFTY: 40)
+- **Confidence Scoring**: Neural-weighted conviction metrics for execution nodes
+- **Rejection Guards**: Safe-mode guards for illiquid strikes (0 OI) or data gaps
 
 ### 🎯 Optimized Intelligence Dashboard
 - **Institutional-grade terminal interface**
 - **Streamlined Navigation**: Options Chain now redirects to functional OI Heatmap
 - **Structural Regime Banner**: Real-time regime with confidence metrics
-- **Intelligence Score Cards**: Conviction, directional pressure, instability
-- **Gamma Pressure Map**: Strike-level magnets and cliffs visualization
+- **AI Command Center v2.4.8-PRO**: Unlocked professional analytics for:
+  - **Market Bias**: Multi-factor directional scoring
+  - **Gamma Exposure**: Dealer positioning and net gamma regime
+  - **Flow Intent**: Real-time tape order flow direction
+  - **Volatility Regime**: Structural volatility state and expected move
+  - **Trade Confidence**: Cross-validated signal conviction
+- **Strategic Implementation Plan**: Real-time AI execution planning with real option premiums
 - **OI Heatmap**: Interactive options interest visualization with smooth scrolling
 - **Advanced Price Chart**: Professional TradingView-grade charting with:
   - **Elliott Wave Visualization**: Automatic wave point plotting
   - **SMC Order Blocks**: Bullish/Bearish block level detection
   - **ICT Equilibrium**: Premium/Discount zone equilibrium lines
   - **Gamma Walls**: Real-time resistance (Call) and support (Put) walls
-  - **AI Trade Signals**: Visual entry, target, and stop-loss overlays
+  - **AI Trade Signals**: Visual entry, target, and stop-loss overlays with CE/PE action markers
   - **Liquidity Sweeps**: Market liquidity grab markers
 - **Structural Alerts Panel**: Proactive alerts with severity levels
 - **Flow + Gamma Interaction**: Decision-oriented interaction analysis
@@ -88,21 +83,13 @@ AI-powered options market intelligence platform for Indian markets (NIFTY & BANK
 
 ## 🛠️ System Improvements (Latest)
 
-### Repository Cleanup & Optimization
-- **Clean Architecture**: Removed 40+ outdated debug scripts, experimental files, and legacy test files
-- **Production Tests**: Implemented comprehensive test suite with 5 focused test files:
-  - `test_websocket.py` - WebSocket connection and status detection
-  - `test_option_chain.py` - Option chain API and multi-expiry support  
-  - `test_ai_scheduler.py` - AI scheduler with market gating functionality
-  - `test_market_status.py` - Market session manager testing
-  - `test_api_endpoints.py` - System monitoring and API compatibility
-- **AI Market Gating**: AI engines now only run during market hours (9:15 AM - 3:30 PM IST, weekdays)
-- **System Monitoring**: Added new health and status endpoints:
-  - `/system/ws-status` - WebSocket connection status (LIVE/OFFLINE/ERROR)
-  - `/system/ai-status` - AI scheduler status with market state
-- **WebSocket Optimization**: Improved connection management and status detection
-- **UI Streamlining**: Removed placeholder Option Chain panel, enhanced navigation flow
-- **Smooth Scrolling**: Added CSS smooth scrolling for better user experience
+### Professional Pipeline Infrastructure
+- **Unified Analytics Bundle**: WebSocket payload now contains snapshot, analytics, chain, trade_setup, and candles
+- **Immediate-Sync Cache**: `LAST_ANALYTICS` storage sends data instantly to new subscribers
+- **FINNIFTY Support**: Full stack integration for FINNIFTY pricing, strikes, and analytics
+- **Real Option Trade Support**: Every panel (Trade Setup, Chart, Strategy Plan) uses real option premiums
+- **Neural Engine Update**: Updated AI Command Center with 6 core institutional metrics
+- **UI Responsiveness**: Added CSS smooth scrolling and lazy-loaded heavy intelligence panels
 
 ### UI/UX Enhancements
 - **Navigation Optimization**: "Options Chain" tab now redirects to functional OI Heatmap
