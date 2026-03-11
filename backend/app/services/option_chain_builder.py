@@ -243,6 +243,9 @@ class OptionChainBuilder:
             logger.info(f"CHAIN SNAPSHOT → {snapshot.symbol} spot={snapshot.spot} atm={snapshot.atm_strike} pcr={snapshot.pcr} calls={snapshot.total_oi_calls} puts={snapshot.total_oi_puts}")
             logger.info(f"CHAIN STRIKES → {len(snapshot.strikes)}")
             
+            # OI SANITY CHECK - Permanent debug metric
+            logger.info(f"[DATA_HEALTH] strikes={len(snapshot.strikes)} call_oi={snapshot.total_oi_calls:,} put_oi={snapshot.total_oi_puts:,} pcr={snapshot.pcr:.2f}")
+            
             # Broadcast option chain update
             await manager.broadcast(
                 {

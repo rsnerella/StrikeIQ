@@ -91,19 +91,22 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
 
                         if not is_index:
                             # CRITICAL FIX: Extract OI with production-safe fallback logic
-                            oi = (
-                                getattr(market_ff.optionGreeks, "oi", 0) if getattr(market_ff, "optionGreeks", None) else 0
-                            )
-                            
-                            # openInterest (camelCase)
-                            oi = oi or getattr(market_ff, "openInterest", 0)
-                            
-                            # open_interest (snake_case fallback)
-                            oi = oi or getattr(market_ff, "open_interest", 0)
-                            
-                            # marketOHLC.oi fallback
-                            if not oi and getattr(market_ff, "marketOHLC", None):
-                                oi = getattr(market_ff.marketOHLC, "oi", 0)
+                            try:
+                                oi = (
+                                    getattr(market_ff.optionGreeks, "oi", 0) if getattr(market_ff, "optionGreeks", None) else 0
+                                )
+                                
+                                # openInterest (camelCase)
+                                oi = oi or getattr(market_ff, "openInterest", 0)
+                                
+                                # open_interest (snake_case fallback)
+                                oi = oi or getattr(market_ff, "open_interest", 0)
+                                
+                                # marketOHLC.oi fallback
+                                if not oi and getattr(market_ff, "marketOHLC", None):
+                                    oi = getattr(market_ff.marketOHLC, "oi", 0)
+                            except Exception:
+                                oi = 0
 
                             if getattr(market_ff, "marketOHLC", None):
                                 volume = getattr(market_ff.marketOHLC, "volume", 0)
