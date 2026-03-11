@@ -167,7 +167,7 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
         logger.error("PROTOBUF DECODE ERROR: %s", e, exc_info=True)
         return []
 
-    # Tick throughput counter for observability
+    # Tick throughput counter for observability (thread-safe)
     if not hasattr(decode_protobuf_message, 'tick_counter'):
         decode_protobuf_message.tick_counter = 0
     decode_protobuf_message.tick_counter += len(ticks)

@@ -6,6 +6,7 @@ Maintains in-memory option chain and produces snapshots
 import asyncio
 import logging
 import bisect
+import time
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
@@ -247,10 +248,11 @@ class OptionChainBuilder:
             logger.info(f"[DATA_HEALTH] strikes={len(snapshot.strikes)} call_oi={snapshot.total_oi_calls:,} put_oi={snapshot.total_oi_puts:,} pcr={snapshot.pcr:.2f}")
             
             # OI Data Health Alert
-            if snapshot.total_oi_calls == 0 and snapshot.total_oi_puts == 0:
+            if len(snapshot.strikes) > 0 and snapshot.total_oi_calls == 0 and snapshot.total_oi_puts == 0:
                 logger.warning("[DATA_HEALTH_ALERT] OI values zero - feed issue possible")
             
             # Broadcast option chain update
+            pipeline_start = time.time()
             await manager.broadcast(
                 {
                     "type": "option_chain_update",
@@ -259,6 +261,8 @@ class OptionChainBuilder:
                     "data": snapshot.__dict__,
                 }
             )
+            pipeline_latency_ms = (time.time() - pipeline_start) * 1000
+            logger.info(f"[PIPELINE_LATENCY] {pipeline_latency_ms:.2f} ms")
             
             logger.info(f"PIPELINE → analytics triggered {snapshot.symbol}")
             
