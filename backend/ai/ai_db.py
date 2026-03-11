@@ -45,7 +45,9 @@ class AIDatabase:
         """Execute a query with parameters"""
         try:
             if not self.connection or self.connection.closed:
-                self.connect()
+                if not self.connect():
+                    logger.warning("AI DB connection unavailable — skipping query")
+                    return False
             
             self.cursor.execute(query, params or ())
             self.connection.commit()
@@ -65,31 +67,25 @@ class AIDatabase:
         """Execute a query and fetch results"""
         try:
             if not self.connection or self.connection.closed:
-                self.connect()
+                if not self.connect():
+                    logger.warning("AI DB connection unavailable — skipping query")
+                    return []
             
             self.cursor.execute(query, params or ())
             results = self.cursor.fetchall()
             logger.info(f"Fetched {len(results)} rows")
             return results
         except Exception as e:
-            logger.error(f"Error fetching query results: {e}")
-            if self.connection:
-                try:
-                    self.connection.rollback()
-                    logger.info("Transaction rolled back")
-                except Exception as rollback_error:
-                    logger.error(f"Error during rollback: {rollback_error}")
+            logger.error(f"AI DB query failed: {e}")
             return []
             
     def fetch_one(self, query: str, params: tuple = None):
         """Execute a query and fetch single result"""
-        if not self.connection:
-            logger.warning("AI DB connection unavailable — skipping query")
-            return None
-            
         try:
             if not self.connection or self.connection.closed:
-                self.connect()
+                if not self.connect():
+                    logger.warning("AI DB connection unavailable — skipping query")
+                    return None
             
             self.cursor.execute(query, params or ())
             result = self.cursor.fetchone()

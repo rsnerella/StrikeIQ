@@ -90,9 +90,25 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
                             ltp = float(market_ff.ltpc.ltp)
 
                         if not is_index:
-
+                            # CRITICAL FIX: Extract OI with proper fallback logic
+                            oi = 0
+                            
+                            # 1️⃣ optionGreeks.oi
                             if getattr(market_ff, "optionGreeks", None):
                                 oi = getattr(market_ff.optionGreeks, "oi", 0)
+                            
+                            # 2️⃣ direct openInterest (Upstox camelCase)
+                            if not oi:
+                                oi = getattr(market_ff, "openInterest", 0)
+                            
+                            # 3️⃣ open_interest (snake_case fallback)
+                            if not oi:
+                                oi = getattr(market_ff, "open_interest", 0)
+                            
+                            # 4️⃣ marketOHLC.oi fallback
+                            if not oi and getattr(market_ff, "marketOHLC", None):
+                                ohlc = market_ff.marketOHLC
+                                oi = getattr(ohlc, "oi", 0)
 
                             if getattr(market_ff, "marketOHLC", None):
                                 volume = getattr(market_ff.marketOHLC, "volume", 0)

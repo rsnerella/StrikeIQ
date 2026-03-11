@@ -256,9 +256,14 @@ async def lifespan(app: FastAPI):
 
     try:
 
-        ai_scheduler.start()
-
-        logger.info("🧠 AI Scheduler started")
+        import os
+        env = os.getenv("ENV", "development")
+        
+        if env == "production":
+            ai_scheduler.start()
+            logger.info("🧠 AI Scheduler started (production)")
+        else:
+            logger.info("🧠 AI Scheduler disabled (development mode)")
 
     except Exception as e:
         logger.error(f"AI Scheduler failed: {e}")

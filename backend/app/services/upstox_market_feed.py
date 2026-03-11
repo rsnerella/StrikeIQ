@@ -16,10 +16,10 @@ from app.services.upstox_auth_service import get_upstox_auth_service
 from app.services.token_manager import get_token_manager
 from app.utils.upstox_retry import retry_on_upstox_401
 from app.core.live_market_state import MarketStateManager
-from app.services.market_session_manager import get_market_session_manager, MarketSession, EngineMode, is_live_market
+from app.services.market_session_manager import get_market_session_manager, EngineMode, check_market_time
 from fastapi import HTTPException
 import httpx
-from app.services.upstox_protobuf_parser import parse_upstox_feed
+from app.services.upstox_protobuf_parser_v3 import decode_protobuf_message
 from app.services.live_chain_builder_registry import get_live_chain_builder
 logger = logging.getLogger(__name__)
 
@@ -728,13 +728,13 @@ class UpstoxMarketFeed:
         # Note: Handshake should be awaited externally before this loop takes over
         asyncio.create_task(self.run_feed_loop())
     
-    async def _on_market_status_change(self, status: MarketSession, mode: EngineMode):
+    async def _on_market_status_change(self, status, mode: EngineMode):
         """Handle market status changes"""
         logger.info(f"Market status changed: {status.value} ({mode.value})")
         
         # Step 3 fix: Do not start feed loop here to avoid parallel handshake triggers
         # Only handle stopping if needed, or logging.
-        if not is_live_market(status.value) or mode != EngineMode.LIVE:
+        if not check_market_time() or mode != EngineMode.LIVE:
             if self.is_running:
                 logger.info(f"Market {status.value} - stopping WebSocket feed background loop")
                 # We keep the connection if possible, or fully stop. 
@@ -747,7 +747,7 @@ class UpstoxMarketFeed:
             self.session_manager = get_market_session_manager()
         
         current_status = self.session_manager.get_market_status().value
-        return is_live_market(current_status) and self.session_manager.get_engine_mode() == EngineMode.LIVE
+        return check_market_time() and self.session_manager.get_engine_mode() == EngineMode.LIVE
     
     async def resync_subscriptions(self) -> None:
         """

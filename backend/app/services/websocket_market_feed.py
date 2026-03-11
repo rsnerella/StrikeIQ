@@ -1134,7 +1134,7 @@ class WebSocketMarketFeed:
             message_type = message.get("type")
             symbol = message.get("symbol")
             
-            logger.info(f"PIPELINE → tick received: {message_type} for {symbol}")
+            logger.info(f"PIPELINE → tick received {message_type} {symbol}")
             
             if TICK_DEBUG:
                 logger.debug(f"ROUTED MESSAGE → {message_type} for {symbol}")
@@ -1152,12 +1152,14 @@ class WebSocketMarketFeed:
                     if TICK_DEBUG:
                         logger.info(f"PIPELINE CHECK → Spot price extracted {ltp}")
                     
+                    logger.info(f"PIPELINE → forwarded tick to option_chain_builder {symbol}")
+                    
                     option_chain_builder.update_index_price(
                         symbol,
                         float(ltp)
                     )
                     
-                    logger.info(f"PIPELINE → chain updated for {symbol}")
+                    logger.info(f"PIPELINE → chain updated {symbol}")
                     
                     # Store last spot price for ATM calculation
                     self.last_spot_price[symbol] = ltp
@@ -1219,13 +1221,32 @@ class WebSocketMarketFeed:
                 right = data.get("right")
                 ltp = data.get("ltp")
                 
+                # CRITICAL DEBUG: Log raw Upstox payload
+                logger.info(f"RAW TICK PAYLOAD → {data}")
+                
                 if not all([strike, right, ltp]):
                     return  # Skip malformed ticks
                 
+                # CRITICAL FIX: Parse OI from multiple possible field names
+                oi = (
+                    data.get("oi")
+                    or data.get("open_interest")
+                    or data.get("oi_day_high")
+                    or data.get("oi_day_low")
+                    or 0
+                )
+                volume = data.get("volume", 0)
+                
+                # CRITICAL DEBUG: Log raw option data
+                logger.info(
+                    f"OPTION RAW DATA → strike={strike} right={right} "
+                    f"ltp={ltp} oi={oi}"
+                )
+                
+                logger.info(f"PIPELINE → forwarded tick to option_chain_builder {symbol}")
+
                 # AUDIT METRICS - STEP 3: Option Chain Builder CPU Time
                 start = time.time()
-                oi = data.get("oi", 0)
-                volume = data.get("volume", 0)
 
                 option_chain_builder.update_option_tick(
                     symbol,

@@ -12,6 +12,7 @@ Produces a normalized confidence score (0-100) + directional bias.
 """
 
 import logging
+import time
 from typing import Any, Dict, Optional
 from datetime import datetime, timezone
 
@@ -118,7 +119,7 @@ class SignalScoringEngine:
             return {
                 "type": "signal_score",
                 "symbol": symbol,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": int(time.time()),
                 "score": overall_score,
                 "bias": dominant_bias,
                 "confidence_tier": tier,

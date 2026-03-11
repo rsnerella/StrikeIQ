@@ -192,8 +192,8 @@ class OptionChainBuilder:
             )
 
         # Calculate PCR and total OI
-        total_call_oi = sum(data.get("call", {}).get("oi", 0) for data in strikes.values())
-        total_put_oi = sum(data.get("put", {}).get("oi", 0) for data in strikes.values())
+        total_call_oi = sum(strike.get("call_oi", 0) for strike in strikes)
+        total_put_oi = sum(strike.get("put_oi", 0) for strike in strikes)
         pcr = total_put_oi / total_call_oi if total_call_oi > 0 else 0.0
 
         mark_health("option_chain")
@@ -237,9 +237,13 @@ class OptionChainBuilder:
         try:
 
             from app.core.ws_manager import manager
+            from app.services.analytics_broadcaster import analytics_broadcaster
 
-            logger.info(f"CHAIN BROADCAST → {snapshot.symbol}")
+            logger.info(f"PIPELINE → chain updated {snapshot.symbol}")
+            logger.info(f"CHAIN SNAPSHOT → {snapshot.symbol} spot={snapshot.spot} atm={snapshot.atm_strike} pcr={snapshot.pcr} calls={snapshot.total_oi_calls} puts={snapshot.total_oi_puts}")
+            logger.info(f"CHAIN STRIKES → {len(snapshot.strikes)}")
             
+            # Broadcast option chain update
             await manager.broadcast(
                 {
                     "type": "option_chain_update",
@@ -248,6 +252,17 @@ class OptionChainBuilder:
                     "data": snapshot.__dict__,
                 }
             )
+            
+            logger.info(f"PIPELINE → analytics triggered {snapshot.symbol}")
+            
+            # Trigger analytics engine
+            try:
+                await analytics_broadcaster.compute_single_analytics(snapshot.symbol, snapshot.__dict__)
+                logger.info(f"PIPELINE → analytics engine called {snapshot.symbol}")
+            except Exception as e:
+                logger.error(f"PIPELINE → analytics engine failed {snapshot.symbol}: {e}")
+
+            logger.info("CHAIN BROADCAST SUCCESS")
 
         except Exception as e:
             logger.error("Snapshot broadcast error: %s", e)
@@ -305,6 +320,8 @@ class OptionChainBuilder:
             opt.oi = max(0, oi)
             opt.volume = max(0, volume)
             opt.last_update = datetime.utcnow()
+            
+            logger.debug(f"OPTION TICK UPDATED → {symbol} {strike}{right} ltp={ltp} oi={oi}")
 
             instrument_key = f"{symbol}_{strike}{right}"
 

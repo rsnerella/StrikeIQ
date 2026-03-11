@@ -49,12 +49,16 @@ class AIScheduler:
             )
             
             # Outcome checker → every 1 minute
+            from app.services.ai_outcome_engine import AIOutcomeEngine
+            engine = AIOutcomeEngine()
             self.scheduler.add_job(
-                lambda: asyncio.create_task(
-                    AIOutcomeEngine.evaluate_pending_outcomes()
-                ),
+                engine.evaluate_pending_outcomes,
                 "interval",
-                minutes=1
+                minutes=1,
+                id='outcome_checker',
+                name='Evaluate prediction outcomes',
+                replace_existing=True,
+                max_instances=1
             )
             
             # Learning updater → every 1 minute

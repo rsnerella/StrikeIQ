@@ -44,25 +44,34 @@ class AnalyticsBroadcaster:
     # --------------------------------------------------------
 
     async def _compute_analytics(
-        self, symbol: str, chain_data: Dict[str, Any]
+        self, symbol: str, chain_data
     ) -> Optional[Dict[str, Any]]:
 
         try:
 
-            # Convert ChainSnapshot to dict if needed
-            if not isinstance(chain_data, dict):
-                chain_data = {
+            logger.info(f"ANALYTICS ENGINE RUNNING → {symbol}")
+            logger.info(f"CHAIN DEBUG → chain_data type: {type(chain_data)}")
+
+            # Handle both ChainSnapshot object and dict
+            if hasattr(chain_data, '__dict__'):
+                # ChainSnapshot object - convert to dict
+                chain_dict = {
                     "symbol": getattr(chain_data, "symbol", None),
                     "spot": getattr(chain_data, "spot", None),
                     "atm_strike": getattr(chain_data, "atm_strike", None),
-                    "strikes": getattr(chain_data, "strikes", [])
+                    "strikes": getattr(chain_data, "strikes", []),
+                    "pcr": getattr(chain_data, "pcr", 0),
+                    "total_oi_calls": getattr(chain_data, "total_oi_calls", 0),
+                    "total_oi_puts": getattr(chain_data, "total_oi_puts", 0)
                 }
+            else:
+                # Already a dict
+                chain_dict = chain_data
 
-            strikes = chain_data.get("strikes", [])
-
-            logger.info(
-                f"COMPUTING ANALYTICS FOR {symbol} - Chain data with {len(strikes)} strikes"
-            )
+            strikes = chain_dict.get("strikes", [])
+            
+            logger.info(f"COMPUTING ANALYTICS FOR {symbol} - Chain data with {len(strikes)} strikes")
+            logger.info(f"CHAIN DEBUG strikes sample {strikes[:3] if strikes else 'EMPTY'}")
 
             engine_data = {
                 "symbol": symbol,
@@ -94,7 +103,25 @@ class AnalyticsBroadcaster:
                         }
                     )
 
-            analytics_results = {}
+            # Calculate PCR and total OI from ChainSnapshot if available
+            pcr = chain_dict.get("pcr", 0)
+            total_call_oi = chain_dict.get("total_oi_calls", 0)
+            total_put_oi = chain_dict.get("total_oi_puts", 0)
+            
+            if pcr == 0 and strikes:
+                # Fallback PCR calculation
+                total_call_oi = sum(strike.get("call_oi", 0) for strike in strikes)
+                total_put_oi = sum(strike.get("put_oi", 0) for strike in strikes)
+                pcr = total_put_oi / total_call_oi if total_call_oi > 0 else 0.0
+            
+            logger.info(f"SNAPSHOT CREATED → PCR={pcr} CALL_OI={total_call_oi} PUT_OI={total_put_oi}")
+
+            analytics_results = {
+                "pcr": pcr,
+                "total_call_oi": total_call_oi,
+                "total_put_oi": total_put_oi,
+                "total_oi": total_call_oi + total_put_oi
+            }
 
             # -----------------------
             # MARKET BIAS
@@ -109,10 +136,13 @@ class AnalyticsBroadcaster:
                     logger.debug(f"COMPUTING MARKET BIAS FOR {symbol}")
 
                     bias = bias_engine.compute(engine_data)
+                    
+                    # CRITICAL FIX: Extract bias_value correctly from bias object
+                    bias_value = getattr(bias, "bias_strength", 0) if hasattr(bias, 'bias_strength') else bias.get("bias_strength", 0)
 
                     analytics_results["bias"] = {
                         "pcr": getattr(bias, "pcr", 0),
-                        "bias_strength": getattr(bias, "bias_strength", 0),
+                        "bias_strength": bias_value,
                         "price_vs_vwap": getattr(bias, "price_vs_vwap", 0),
                         "divergence_detected": getattr(bias, "divergence_detected", False),
                         "divergence_type": getattr(bias, "divergence_type", "none"),
@@ -217,12 +247,19 @@ class AnalyticsBroadcaster:
                     logger.debug(f"Signal scoring skipped: {e}")
 
             analytics_payload = {
-                "type": "analytics",
+                "type": "analytics_update",
                 "version": "2.0",
                 "symbol": symbol,
-                "timestamp": datetime.utcnow().isoformat(),
-                **analytics_results
+                "timestamp": int(time.time()),
+                "data": {
+                    **analytics_results,
+                    "bias": analytics_results.get("bias", {}),
+                    "expected_move": analytics_results.get("expected_move", {}),
+                    "structural": analytics_results.get("structural", {})
+                }
             }
+            
+            logger.info(f"ANALYTICS PAYLOAD → {analytics_payload}")
 
             # cache store
             self.analytics_cache[symbol] = analytics_payload
@@ -257,9 +294,18 @@ class AnalyticsBroadcaster:
             broadcast_start = time.time()
 
             try:
-                # Ensure correct message type for frontend
-                analytics_message = dict(analytics_payload)
-                analytics_message["type"] = "analytics_update"
+                # Create correct frontend-compatible payload
+                analytics_message = {
+                    "type": "analytics_update",
+                    "symbol": analytics_payload.get("symbol"),
+                    "timestamp": analytics_payload.get("timestamp", int(time.time())),
+                    "data": {
+                        "analytics": analytics_payload.get("data", analytics_payload)
+                    }
+                }
+                
+                logger.info(f"ANALYTICS BROADCAST SUCCESS → {analytics_payload.get('symbol','?')}")
+                logger.info(f"FINAL PAYLOAD → {analytics_message}")
                 
                 await manager.broadcast(analytics_message)
                 broadcast_ms = (time.time() - broadcast_start) * 1000
@@ -283,7 +329,18 @@ class AnalyticsBroadcaster:
 
     async def compute_single_analytics(self, symbol, chain_data):
 
-        return await self._compute_analytics(symbol, chain_data)
+        analytics_payload = await self._compute_analytics(symbol, chain_data)
+        
+        if analytics_payload:
+            logger.info(f"ANALYTICS ENGINE → computed metrics {symbol}")
+            await self._broadcast_analytics(analytics_payload)
+            logger.info(f"ANALYTICS BROADCAST → {symbol}")
+            
+            # Return pure analytics data (not wrapped)
+            return analytics_payload.get("data", {})
+        else:
+            logger.warning(f"ANALYTICS ENGINE → failed to compute metrics {symbol}")
+            return None
 
     # --------------------------------------------------------
     # BACKGROUND LOOP
