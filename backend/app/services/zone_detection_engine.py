@@ -222,6 +222,7 @@ class ZoneDetectionEngine:
                 "demand":          demand,
                 "order_blocks":    obs,
                 "liquidity_pools": pools,
+                "all_zones": supply + demand + obs + pools,
                 "nearest_supply":  nearest_supply,
                 "nearest_demand":  nearest_demand,
             }

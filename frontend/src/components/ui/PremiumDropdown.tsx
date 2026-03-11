@@ -52,14 +52,41 @@ export function PremiumDropdown({
         return () => document.removeEventListener('mousedown', handler);
     }, [open]);
 
-    // Close on Escape
+    const [focusedIndex, setFocusedIndex] = useState(-1);
+
+    // Reset focus and add keyboard nav
     useEffect(() => {
-        function handler(e: KeyboardEvent) {
-            if (e.key === 'Escape') setOpen(false);
+        if (!open) return;
+
+        // Init focus on current value
+        const idx = options.indexOf(value);
+        setFocusedIndex(idx >= 0 ? idx : 0);
+
+        function handleKeyDown(e: KeyboardEvent) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setFocusedIndex(prev => (prev < options.length - 1 ? prev + 1 : prev));
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setFocusedIndex(prev => (prev > 0 ? prev - 1 : prev));
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                setFocusedIndex(prev => {
+                    if (prev >= 0 && prev < options.length) {
+                        onChange(options[prev]);
+                        setOpen(false);
+                    }
+                    return prev;
+                });
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                setOpen(false);
+            }
         }
-        if (open) document.addEventListener('keydown', handler);
-        return () => document.removeEventListener('keydown', handler);
-    }, [open]);
+        
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [open, options, value, onChange]);
 
     const isDisabled = disabled || loading;
     const label = loading ? 'Loading…' : (value || placeholder);
@@ -161,9 +188,13 @@ export function PremiumDropdown({
                     }} />
 
                     {/* Options list */}
-                    <div style={{ padding: '4px 4px 4px', maxHeight: 240, overflowY: 'auto' }}>
-                        {options.map(opt => {
+                    <div 
+                        onWheel={(e) => e.stopPropagation()}
+                        style={{ padding: '4px 4px 4px', maxHeight: 260, overflowY: 'auto' }}
+                    >
+                        {options.map((opt, i) => {
                             const selected = opt === value;
+                            const isFocused = i === focusedIndex;
                             return (
                                 <button
                                     key={opt}
@@ -180,28 +211,18 @@ export function PremiumDropdown({
                                         borderRadius: 8,
                                         background: selected
                                             ? 'rgba(0,229,255,0.10)'
-                                            : 'transparent',
+                                            : isFocused ? 'rgba(255,255,255,0.05)' : 'transparent',
                                         border: selected
                                             ? '1px solid rgba(0,229,255,0.22)'
-                                            : '1px solid transparent',
+                                            : isFocused ? '1px solid rgba(255,255,255,0.07)' : '1px solid transparent',
                                         cursor: 'pointer',
                                         transition: 'all 0.12s ease',
                                         marginBottom: 2,
                                         outline: 'none',
                                         textAlign: 'left',
                                     }}
-                                    onMouseEnter={e => {
-                                        if (!selected) {
-                                            (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)';
-                                            (e.currentTarget as HTMLElement).style.border = '1px solid rgba(255,255,255,0.07)';
-                                        }
-                                    }}
-                                    onMouseLeave={e => {
-                                        if (!selected) {
-                                            (e.currentTarget as HTMLElement).style.background = 'transparent';
-                                            (e.currentTarget as HTMLElement).style.border = '1px solid transparent';
-                                        }
-                                    }}
+                                    onMouseEnter={() => setFocusedIndex(i)}
+                                    onMouseLeave={() => setFocusedIndex(-1)}
                                 >
                                     <span style={{
                                         fontSize: 11,

@@ -99,30 +99,21 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
                             
                             # CRITICAL FIX: Extract OI with production-safe fallback logic
                             try:
-                                # Try optionGreeks.openInterest first (most likely)
                                 oi = 0
                                 if getattr(market_ff, "optionGreeks", None):
                                     oi = getattr(market_ff.optionGreeks, "openInterest", 0)
                                 
-                                # Try marketFF.openInterest (camelCase)
                                 if not oi:
                                     oi = getattr(market_ff, "openInterest", 0)
                                 
-                                # Try marketFF.open_interest (snake_case fallback)
-                                if not oi:
-                                    oi = getattr(market_ff, "open_interest", 0)
-                                
-                                # Try marketOHLC.openInterest fallback
                                 if not oi and getattr(market_ff, "marketOHLC", None):
                                     oi = getattr(market_ff.marketOHLC, "openInterest", 0)
                                 
-                                # Legacy marketOHLC.oi fallback
                                 if not oi and getattr(market_ff, "marketOHLC", None):
                                     oi = getattr(market_ff.marketOHLC, "oi", 0)
                                     
-                                logger.info(f"[UPSTOX_OI_DEBUG] Final OI value: {oi}")
                             except Exception as e:
-                                logger.warning(f"[UPSTOX_OI_ERROR] {e}")
+                                logger.error(f"[UPSTOX_OI_ERROR] Failed to extract OI: {e}", exc_info=True)
                                 oi = 0
 
                             if getattr(market_ff, "marketOHLC", None):
@@ -144,7 +135,7 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
             # DROP INVALID TICKS
             # =================================================
 
-            if ltp is None or ltp <= 0:
+            if (ltp is None or ltp <= 0) and oi <= 0:
                 continue
 
             # =================================================
@@ -153,7 +144,7 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
 
             tick = {
                 "instrument_key": instrument_key,
-                "ltp": float(ltp),
+                "ltp": float(ltp) if ltp is not None else 0.0,
                 "oi": oi,
                 "volume": volume,
                 "timestamp": time.time()

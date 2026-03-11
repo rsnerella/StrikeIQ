@@ -14,20 +14,20 @@ const OptionRow = memo(({ index, style, data }: any) => {
 
   return (
     <div style={style} className="flex items-center border-b border-gray-800 hover:bg-gray-800/50 transition-colors">
-      <div className="flex-1 text-xs font-mono text-gray-300 px-2 py-1">
-        {item.strike}
+      <div className="w-16 text-xs font-mono text-gray-400 px-2 py-1 text-right">
+        {item.call_ltp ? item.call_ltp.toFixed(1) : '-'}
       </div>
-      <div className="w-24 text-xs font-mono text-red-400 px-2 py-1 text-right">
+      <div className="w-20 text-xs font-mono text-red-400 px-2 py-1 text-right">
         {item.call_oi ? (item.call_oi / 1000).toFixed(1) + 'k' : '-'}
       </div>
-      <div className="w-24 text-xs font-mono text-green-400 px-2 py-1 text-right">
+      <div className="flex-1 text-xs font-mono font-bold text-gray-200 px-2 py-1 text-center bg-gray-900/40">
+        {item.strike}
+      </div>
+      <div className="w-20 text-xs font-mono text-green-400 px-2 py-1 text-right">
         {item.put_oi ? (item.put_oi / 1000).toFixed(1) + 'k' : '-'}
       </div>
-      <div className="w-24 text-xs font-mono text-blue-400 px-2 py-1 text-right">
-        {item.total_oi ? (item.total_oi / 1000).toFixed(1) + 'k' : '-'}
-      </div>
-      <div className="w-20 text-xs font-mono text-gray-400 px-2 py-1 text-right">
-        {item.oi_concentration ? item.oi_concentration.toFixed(1) + '%' : '-'}
+      <div className="w-16 text-xs font-mono text-gray-400 px-2 py-1 text-right">
+        {item.put_ltp ? item.put_ltp.toFixed(1) : '-'}
       </div>
     </div>
   );
@@ -66,20 +66,22 @@ const VirtualizedOptionChain: React.FC<VirtualizedOptionChainProps> = memo(({ op
     const strikeMap = new Map();
 
     calls.forEach((c: any) => {
-      const existing = strikeMap.get(c.strike) || { strike: c.strike, call_oi: 0, put_oi: 0, total_oi: 0 };
+      const existing = strikeMap.get(c.strike) || { strike: c.strike, call_oi: 0, put_oi: 0, total_oi: 0, call_ltp: 0, put_ltp: 0 };
       strikeMap.set(c.strike, {
         ...existing,
-        call_oi: c.open_interest || 0,
-        total_oi: existing.total_oi + (c.open_interest || 0)
+        call_oi: c.open_interest || c.oi || 0,
+        call_ltp: c.ltp || c.last_price || 0,
+        total_oi: existing.total_oi + (c.open_interest || c.oi || 0)
       });
     });
 
     puts.forEach((p: any) => {
-      const existing = strikeMap.get(p.strike) || { strike: p.strike, call_oi: 0, put_oi: 0, total_oi: 0 };
+      const existing = strikeMap.get(p.strike) || { strike: p.strike, call_oi: 0, put_oi: 0, total_oi: 0, call_ltp: 0, put_ltp: 0 };
       strikeMap.set(p.strike, {
         ...existing,
-        put_oi: p.open_interest || 0,
-        total_oi: existing.total_oi + (p.open_interest || 0)
+        put_oi: p.open_interest || p.oi || 0,
+        put_ltp: p.ltp || p.last_price || 0,
+        total_oi: existing.total_oi + (p.open_interest || p.oi || 0)
       });
     });
 
@@ -115,12 +117,12 @@ const VirtualizedOptionChain: React.FC<VirtualizedOptionChainProps> = memo(({ op
         <h3 className="text-lg font-semibold text-white">Option Chain</h3>
       </div>
 
-      <div className="flex items-center border-b border-gray-700 pb-2 mb-2">
-        <div className="flex-1 text-xs font-bold text-gray-400 px-2">Strike</div>
-        <div className="w-24 text-xs font-bold text-red-400 px-2 text-right">Call OI</div>
-        <div className="w-24 text-xs font-bold text-green-400 px-2 text-right">Put OI</div>
-        <div className="w-24 text-xs font-bold text-blue-400 px-2 text-right">Total OI</div>
-        <div className="w-20 text-xs font-bold text-gray-400 px-2 text-right">Conc</div>
+      <div className="flex items-center border-b border-gray-700 pb-2 mb-2 bg-[#1A2235] rounded-t pt-2">
+        <div className="w-16 text-[10px] font-bold text-gray-400 px-2 text-right uppercase tracking-wider">C. LTP</div>
+        <div className="w-20 text-[10px] font-bold text-red-400 px-2 text-right uppercase tracking-wider">Call OI</div>
+        <div className="flex-1 text-[11px] font-black text-white px-2 text-center uppercase tracking-widest bg-gray-800/50 rounded py-1 mx-2">Strike</div>
+        <div className="w-20 text-[10px] font-bold text-green-400 px-2 text-right uppercase tracking-wider">Put OI</div>
+        <div className="w-16 text-[10px] font-bold text-gray-400 px-2 text-right uppercase tracking-wider">P. LTP</div>
       </div>
 
       <div className="border border-gray-800 rounded">

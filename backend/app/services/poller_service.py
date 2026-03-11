@@ -13,6 +13,7 @@ from app.services.token_manager import token_manager
 from app.utils.upstox_retry import retry_on_upstox_401
 from app.core.diagnostics import diag, increment_counter
 from app.services.websocket_market_feed import get_market_feed
+from app.core.market_context import MARKET_CONTEXT
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +27,9 @@ class PollerService:
 
         self.symbol_map = {
             "NIFTY": "NSE_INDEX|Nifty 50",
-            "BANKNIFTY": "NSE_INDEX|Nifty Bank"
+            "BANKNIFTY": "NSE_INDEX|Nifty Bank",
+            "FINNIFTY": "NSE_INDEX|Nifty Fin Service",
         }
-
-        self.active_symbol = "NIFTY"
-        self.active_expiry: Optional[str] = None
 
         # shared http client
         self.http_client = httpx.AsyncClient(timeout=10)
@@ -43,8 +42,8 @@ class PollerService:
             logger.warning(f"Invalid symbol subscription: {symbol}")
             return
 
-        self.active_symbol = symbol
-        self.active_expiry = expiry
+        MARKET_CONTEXT["symbol"] = symbol
+        MARKET_CONTEXT["expiry"] = expiry
 
         logger.info(f"POLLER SUBSCRIPTION UPDATED → {symbol} {expiry}")
 
@@ -94,7 +93,7 @@ class PollerService:
                     await asyncio.sleep(5)
                     return
 
-                symbol = self.active_symbol
+                symbol = MARKET_CONTEXT["symbol"]
 
                 await self._poll_symbol(symbol, token, db)
 
@@ -232,13 +231,14 @@ class PollerService:
                 key=lambda x: datetime.strptime(x, "%Y-%m-%d")
             )
 
-            if self.active_expiry and self.active_expiry not in expiry_list:
+            active_expiry = MARKET_CONTEXT["expiry"]
+            if active_expiry and active_expiry not in expiry_list:
                 logger.warning("Frontend expiry not available, fallback")
-                self.active_expiry = None
+                active_expiry = None
 
-            if self.active_expiry:
+            if active_expiry:
                 nearest_expiry = datetime.strptime(
-                    self.active_expiry, "%Y-%m-%d"
+                    active_expiry, "%Y-%m-%d"
                 ).date()
             else:
                 nearest_expiry = datetime.strptime(
@@ -320,7 +320,7 @@ class PollerService:
 
             opt = OptionChainSnapshot(
                 market_snapshot_id=snapshot_id,
-                symbol=self.active_symbol,
+                symbol=MARKET_CONTEXT["symbol"],
                 strike=strike,
                 option_type=option_type,
                 expiry=str(expiry),  # FIX: date → string

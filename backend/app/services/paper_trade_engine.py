@@ -19,20 +19,20 @@ class PaperTradeEngine:
         self.trade_duration_minutes = 30  # Configurable trade duration
         self.default_quantity = 75  # Default lot size for NIFTY options
         
-    def get_latest_predictions(self) -> List[Dict]:
+    async def get_latest_predictions(self) -> List[Dict]:
         """Get latest predictions that don't have paper trades yet"""
         try:
             query = """
-                SELECT p.id, p.formula_id, p.signal, p.confidence, p.nifty_spot, p.prediction_time
-                FROM prediction_log p
+                SELECT p.id, p.formula_id, p.signal, p.confidence, p.spot_price, p.timestamp
+                FROM ai_signal_logs p
                 LEFT JOIN paper_trade_log pt ON p.id = pt.prediction_id
-                WHERE p.prediction_time >= NOW() - INTERVAL '1 hour'
+                WHERE p.timestamp >= NOW() - INTERVAL '1 hour'
                 AND pt.prediction_id IS NULL
-                AND p.signal IN ('BUY', 'SELL')
-                ORDER BY p.prediction_time DESC
+                ORDER BY p.timestamp DESC
+                LIMIT 50
             """
             
-            results = self.db.fetch_query(query)
+            results = await self.db.fetch_query(query)
             
             predictions = []
             for row in results:
@@ -112,7 +112,7 @@ class PaperTradeEngine:
             logger.error(f"Error selecting strike price: {e}")
             return rounded_spot, "CE"  # Fallback
     
-    def create_paper_trade(self, prediction: Dict) -> bool:
+    async def create_paper_trade(self, prediction: Dict) -> bool:
         """
         Create a paper trade entry for a prediction
         
@@ -120,18 +120,6 @@ class PaperTradeEngine:
             True if successful, False otherwise
         """
         try:
-            # Get symbol ID from registry to prevent integer errors
-            from app.services.instrument_registry import get_instrument_registry
-            registry = get_instrument_registry()
-            
-            symbol = prediction.get('symbol', 'NIFTY')
-            symbol_id = registry.get_id(symbol) if hasattr(registry, 'get_id') else None
-            
-            # If we can't get symbol_id, use a default integer
-            if symbol_id is None:
-                symbol_id = 1  # Default NIFTY ID
-                logger.warning(f"Could not get symbol_id for {symbol}, using default {symbol_id}")
-            
             # Select strike price and option type
             strike_price, option_type = self.select_strike_price(
                 prediction['signal'], 
@@ -155,20 +143,20 @@ class PaperTradeEngine:
             
             params = (
                 prediction['id'],
-                symbol,
+                'NIFTY',
                 strike_price,
                 entry_price,
                 self.default_quantity
             )
             
-            result = self.db.fetch_one(query, params)
+            result = await self.db.fetch_one(query, params)
             
             if result:
                 trade_id = result[0]
                 logger.debug(f"Paper trade created: ID {trade_id}, {option_type} {strike_price} @ {entry_price}")
                 
                 # Log AI event
-                self.log_ai_event(
+                await self.log_ai_event(
                     event_type="PAPER_TRADE_OPENED",
                     description=f"Opened paper trade: {option_type} {strike_price} @ {entry_price} for prediction {prediction['id']}"
                 )
@@ -182,7 +170,7 @@ class PaperTradeEngine:
             logger.error(f"Error creating paper trade: {e}")
             return False
     
-    def get_open_trades(self) -> List[Dict]:
+    async def get_open_trades(self) -> List[Dict]:
         """Get all open paper trades that need to be monitored"""
         try:
             query = """
@@ -195,7 +183,7 @@ class PaperTradeEngine:
                 LIMIT 100
             """
             
-            results = self.db.fetch_query(query)
+            results = await self.db.fetch_query(query)
             
             open_trades = []
             for row in results:
@@ -217,7 +205,7 @@ class PaperTradeEngine:
             logger.error(f"Error fetching open trades: {e}")
             return []
     
-    def exit_paper_trade(self, trade: Dict) -> bool:
+    async def exit_paper_trade(self, trade: Dict) -> bool:
         """
         Exit a paper trade and calculate PnL
         
@@ -249,13 +237,13 @@ class PaperTradeEngine:
             """
             
             params = (exit_price, pnl, datetime.now(), trade['id'])
-            success = self.db.execute_query(query, params)
+            success = await self.db.execute_query(query, params)
             
             if success:
                 logger.debug(f"Paper trade closed: ID {trade['id']}, PnL: {pnl:.2f}")
                 
                 # Update ai_trade_history
-                self._update_ai_trade_history(trade, exit_price, pnl)
+                await self._update_ai_trade_history(trade, exit_price, pnl)
 
                 # Log AI event
                 self.log_ai_event(
@@ -272,7 +260,7 @@ class PaperTradeEngine:
             logger.error(f"Error exiting paper trade: {e}")
             return False
 
-    def _update_ai_trade_history(self, trade: Dict, exit_price: float, pnl: float):
+    async def _update_ai_trade_history(self, trade: Dict, exit_price: float, pnl: float):
         """Update ai_trade_history when a trade closes"""
         try:
             result = "WIN" if pnl > 0 else "LOSS"
@@ -293,13 +281,13 @@ class PaperTradeEngine:
                 trade['strike_price']
             )
             
-            self.db.execute_query(update_query, params)
+            await self.db.execute_query(update_query, params)
             logger.info(f"Updated ai_trade_history for {trade['symbol']} {trade['strike_price']}")
             
         except Exception as e:
             logger.error(f"Error updating ai_trade_history: {e}")
     
-    def monitor_open_trades(self) -> int:
+    async def monitor_open_trades(self) -> int:
         """
         Monitor open trades and exit those that have reached their time window
         
@@ -307,7 +295,7 @@ class PaperTradeEngine:
             Number of trades closed
         """
         try:
-            open_trades = self.get_open_trades()
+            open_trades = await self.get_open_trades()
             trades_closed = 0
             
             for trade in open_trades:
@@ -320,7 +308,7 @@ class PaperTradeEngine:
                 
                 if time_elapsed >= timedelta(minutes=self.trade_duration_minutes):
                     # Exit the trade
-                    if self.exit_paper_trade(trade):
+                    if await self.exit_paper_trade(trade):
                         trades_closed += 1
             
             logger.debug(f"Trade monitoring completed. Closed {trades_closed} trades")
@@ -330,7 +318,7 @@ class PaperTradeEngine:
             logger.error(f"Error monitoring open trades: {e}")
             return 0
     
-    def process_new_predictions(self) -> int:
+    async def process_new_predictions(self) -> int:
         """
         Process new predictions and create paper trades
         
@@ -338,11 +326,11 @@ class PaperTradeEngine:
             Number of paper trades created
         """
         try:
-            predictions = self.get_latest_predictions()
+            predictions = await self.get_latest_predictions()
             trades_created = 0
             
             for prediction in predictions:
-                if self.create_paper_trade(prediction):
+                if await self.create_paper_trade(prediction):
                     trades_created += 1
             
             logger.debug(f"New prediction processing completed. Created {trades_created} paper trades")
@@ -352,7 +340,7 @@ class PaperTradeEngine:
             logger.error(f"Error processing new predictions: {e}")
             return 0
     
-    def log_ai_event(self, event_type: str, description: str):
+    async def log_ai_event(self, event_type: str, description: str):
         """Log AI events to ai_event_log table"""
         try:
             query = """
@@ -361,7 +349,7 @@ class PaperTradeEngine:
             """
             
             params = (event_type, description)
-            self.db.execute_query(query, params)
+            await self.db.execute_query(query, params)
             
         except Exception as e:
             logger.error(f"Error logging AI event: {e}")

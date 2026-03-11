@@ -54,7 +54,7 @@ class InstrumentService:
             
             # Get access token
             auth_service = get_upstox_auth_service()
-            if not auth_service.is_authenticated():
+            if not await auth_service.is_authenticated():
                 raise APIResponseError("Not authenticated")
             
             token = await auth_service.get_valid_access_token()

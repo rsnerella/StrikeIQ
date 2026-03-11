@@ -1,9 +1,10 @@
-import requests
+import httpx
 import logging
 from datetime import datetime, timedelta
-from typing import List, Dict
+from typing import List, Dict, Optional
 from .prediction_service import prediction_service
 from .experience_updater import experience_updater
+from app.services.upstox_auth_service import get_upstox_auth_service
 
 logger = logging.getLogger(__name__)
 
@@ -11,26 +12,29 @@ class OutcomeChecker:
     def __init__(self):
         self.prediction_service = prediction_service
         self.experience_updater = experience_updater
+        self.auth_service = get_upstox_auth_service()
+        self._client = httpx.AsyncClient(timeout=10)
         
-    def get_current_nifty_price(self) -> float:
-        """Get current NIFTY price from Upstox API"""
+    async def get_current_nifty_price(self) -> Optional[float]:
+        """Get current NIFTY price from Upstox API using centralized auth"""
         try:
-            # Use existing Upstox API endpoint
             url = "https://api.upstox.com/v2/market-quote/ltp"
+            
+            token_data = await self.auth_service.get_valid_access_token()
             headers = {
                 'accept': 'application/json',
-                'Authorization': 'Bearer ' + self._get_access_token()
+                'Authorization': f"Bearer {token_data['access_token']}"
             }
             params = {
                 'instrument_key': 'NSE_INDEX|Nifty 50'
             }
             
-            response = requests.get(url, headers=headers, params=params, timeout=10)
+            response = await self._client.get(url, headers=headers, params=params)
             
             if response.status_code == 200:
                 data = response.json()
-                if 'data' in data and 'ltp' in data['data']:
-                    price = float(data['data']['ltp'])
+                if 'data' in data and 'NSE_INDEX|Nifty 50' in data['data']:
+                    price = float(data['data']['NSE_INDEX|Nifty 50']['last_price'])
                     logger.info(f"Current NIFTY price: {price}")
                     return price
                     
@@ -40,17 +44,6 @@ class OutcomeChecker:
         except Exception as e:
             logger.error(f"Error getting NIFTY price: {e}")
             return None
-            
-    def _get_access_token(self) -> str:
-        """Get access token from credentials file"""
-        try:
-            import json
-            with open('upstox_credentials.json', 'r') as f:
-                credentials = json.load(f)
-                return credentials.get('access_token', '')
-        except Exception as e:
-            logger.error(f"Error reading access token: {e}")
-            return ''
             
     def calculate_outcome(self, initial_spot: float, current_spot: float) -> str:
         """
@@ -75,50 +68,40 @@ class OutcomeChecker:
         else:
             return 'NEUTRAL'
             
-    def check_outcomes(self):
-        """Check outcomes for all pending predictions"""
+    async def check_outcomes(self):
+        """Check outcomes for all pending predictions (Async)"""
         try:
             logger.info("Starting outcome check cycle")
             
-            # Get all predictions that are ready for outcome checking
-            pending_predictions = self.prediction_service.get_pending_predictions()
+            pending_predictions = await self.prediction_service.get_pending_predictions()
             
             if not pending_predictions:
-                logger.info("No pending predictions to check")
                 return
                 
-            current_price = self.get_current_nifty_price()
+            current_price = await self.get_current_nifty_price()
             
             if not current_price:
-                logger.error("Could not get current NIFTY price, skipping outcome check")
                 return
                 
             for prediction in pending_predictions:
                 try:
-                    # Calculate outcome
                     outcome = self.calculate_outcome(
                         prediction['nifty_spot'],
                         current_price
                     )
                     
-                    logger.info(f"Prediction {prediction['id']}: {prediction['signal']} @ {prediction['nifty_spot']} -> {outcome} (current: {current_price})")
-                    
-                    # Mark prediction as checked
-                    success = self.prediction_service.mark_prediction_checked(
+                    success = await self.prediction_service.mark_prediction_checked(
                         prediction['id'],
                         outcome
                     )
                     
                     if success:
-                        # Update formula experience
                         self.experience_updater.update_experience(
                             prediction['formula_id'],
                             outcome
                         )
-                        
                 except Exception as e:
                     logger.error(f"Error processing prediction {prediction['id']}: {e}")
-                    continue
                     
             logger.info(f"Outcome check cycle completed. Processed {len(pending_predictions)} predictions")
             

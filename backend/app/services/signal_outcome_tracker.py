@@ -12,26 +12,19 @@ Design:
 No per-tick DB writes. CPU cost: ~0ms per tick.
 """
 
-import asyncio
-import json
-import logging
-import os
-import time
-from collections import deque
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from app.models.database import AsyncSessionLocal
+from app.models.ai_signal_log import AiSignalLog
+from app.models.signal_outcome import SignalOutcome
+
 logger = logging.getLogger(__name__)
 
-# ── Dataset directory ──────────────────────────────────────────────────────────
-
+# No longer used, but kept for cleanup if needed
 _DATASET_DIR = os.path.join(
     os.path.dirname(__file__), "..", "..", "data", "learning"
 )
-
-def _ensure_dataset_dir() -> str:
-    os.makedirs(_DATASET_DIR, exist_ok=True)
-    return _DATASET_DIR
 
 
 # ── Outcome evaluation windows ─────────────────────────────────────────────────
@@ -42,7 +35,7 @@ EVAL_WINDOWS = [5 * 60, 15 * 60, 30 * 60]   # seconds
 class PendingSignal:
     """A chart signal awaiting outcome evaluation."""
 
-    __slots__ = ("signal_id", "symbol", "signal", "confidence", "price_at_signal",
+    __slots__ = ("signal_id", "db_id", "symbol", "signal", "confidence", "price_at_signal",
                  "ts", "pcr", "gamma", "wave", "signal_score", "outcomes")
 
     def __init__(
@@ -56,6 +49,7 @@ class PendingSignal:
         metadata: Dict[str, Any],
     ):
         self.signal_id      = signal_id
+        self.db_id          = None  # To be filled after DB save
         self.symbol         = symbol
         self.signal         = signal
         self.confidence     = confidence
@@ -83,12 +77,13 @@ class SignalOutcomeTracker:
 
     def __init__(self):
         self._pending: deque = deque(maxlen=self.MAX_PENDING)
-        self._resolved: List[Dict] = []
-        self._dataset_path = os.path.join(_ensure_dataset_dir(), "chart_signals.jsonl")
+        self._resolved_count = 0
+        self._wins = 0
+        self._losses = 0
         self._lock = asyncio.Lock()
-        logger.info("SignalOutcomeTracker initialized | dataset=%s", self._dataset_path)
+        logger.info("SignalOutcomeTracker initialized | Supabase Persistence Active")
 
-    def record_signal(
+    async def record_signal(
         self,
         chart_payload: Dict[str, Any],
         extra: Optional[Dict[str, Any]] = None,
@@ -127,8 +122,29 @@ class SignalOutcomeTracker:
                 metadata   = meta,
             )
 
+            # Persist to Supabase immediately (ai_signal_logs)
+            try:
+                async with AsyncSessionLocal() as session:
+                    db_log = AiSignalLog(
+                        symbol=ps.symbol,
+                        signal=ps.signal,
+                        confidence=ps.confidence,
+                        spot_price=ps.price_at_signal,
+                        extra_metadata={
+                            **meta,
+                            "signal_id_internal": signal_id
+                        }
+                    )
+                    session.add(db_log)
+                    await session.commit()
+                    await session.refresh(db_log)
+                    ps.db_id = db_log.id
+            except Exception as db_e:
+                logger.error(f"Failed to persist signal to DB: {db_e}")
+                # Don't return False, we can still track in-memory for this session
+
             self._pending.append(ps)
-            logger.debug("Signal recorded: %s %s conf=%.2f", signal_id, signal, confidence)
+            logger.info("Signal recorded & persisted: %s %s (DB ID: %s)", signal_id, signal, ps.db_id)
             return True
 
         except Exception as e:
@@ -163,12 +179,43 @@ class SignalOutcomeTracker:
 
                 if all_resolved:
                     self._pending.remove(ps)
-                    record = self._build_record(ps)
-                    self._resolved.append(record)
-                    self._write_record(record)
+                    await self._persist_outcomes(ps, current_price)
+                    self._resolved_count += 1
                     resolved_count += 1
 
         return resolved_count
+
+    async def _persist_outcomes(self, ps: PendingSignal, final_price: float) -> None:
+        """Persist resolved outcomes to signal_outcomes table"""
+        if not ps.db_id:
+            logger.warning(f"Cannot persist outcomes for signal {ps.signal_id} - missing DB ID")
+            return
+
+        try:
+            async with AsyncSessionLocal() as session:
+                for window, result in ps.outcomes.items():
+                    outcome = SignalOutcome(
+                        signal_id=ps.db_id,
+                        outcome_type=f"{window // 60}m",
+                        outcome_value=final_price - ps.price_at_signal,
+                        result=result,
+                        metadata={
+                            "entry_price": ps.price_at_signal,
+                            "exit_price": final_price,
+                            "window_seconds": window
+                        }
+                    )
+                    session.add(outcome)
+                    
+                    if result == "WIN":
+                        self._wins += 1
+                    elif result == "LOSS":
+                        self._losses += 1
+                        
+                await session.commit()
+                logger.info(f"Outcomes persisted for signal {ps.db_id}")
+        except Exception as e:
+            logger.error(f"Failed to persist outcomes to DB: {e}")
 
     def _determine_outcome(self, signal: str, entry_price: float, current_price: float) -> str:
         """WIN / LOSS / HOLD based on signal direction vs price movement."""
@@ -180,44 +227,14 @@ class SignalOutcomeTracker:
         else:  # SELL
             return "WIN" if move_pct < 0 else "LOSS"
 
-    def _build_record(self, ps: PendingSignal) -> Dict[str, Any]:
-        return {
-            "signal_id":      ps.signal_id,
-            "symbol":         ps.symbol,
-            "signal":         ps.signal,
-            "confidence":     round(ps.confidence, 3),
-            "price":          round(ps.price_at_signal, 2),
-            "timestamp":      datetime.fromtimestamp(ps.ts, tz=timezone.utc).isoformat(),
-            "pcr":            round(ps.pcr, 3),
-            "gamma":          round(ps.gamma, 3),
-            "wave":           ps.wave,
-            "signal_score":   ps.signal_score,
-            "outcomes": {
-                f"{w // 60}m": ps.outcomes[w]
-                for w in EVAL_WINDOWS
-            },
-        }
-
-    def _write_record(self, record: Dict[str, Any]) -> None:
-        """Append record as one JSONL line — no DB required."""
-        try:
-            with open(self._dataset_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record) + "\n")
-            logger.debug("Outcome written: %s", record["signal_id"])
-        except Exception as e:
-            logger.error("Failed to write outcome record: %s", e)
-
     def get_stats(self) -> Dict[str, Any]:
         """Summary stats for monitoring."""
-        total = len(self._resolved)
-        wins  = sum(1 for r in self._resolved if any(v == "WIN"  for v in r["outcomes"].values()))
-        losses = sum(1 for r in self._resolved if any(v == "LOSS" for v in r["outcomes"].values()))
         return {
             "pending":    len(self._pending),
-            "resolved":   total,
-            "wins":       wins,
-            "losses":     losses,
-            "win_rate":   round(wins / max(total, 1) * 100, 1),
+            "resolved":   self._resolved_count,
+            "wins":       self._wins,
+            "losses":     self._losses,
+            "win_rate":   round(self._wins / max(self._resolved_count, 1) * 100, 1),
         }
 
 

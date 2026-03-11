@@ -28,6 +28,7 @@ export interface LiveMarketData {
     puts: any[]
   } | null
   analytics?: any
+  chartAnalysis?: any
   intelligence?: any
 }
 
@@ -40,7 +41,7 @@ export function useLiveMarketData(symbol: string, expiry: string | null) {
   // Render loop detection
   const renderCountRef = useRef(0)
   renderCountRef.current++
-  
+
   if (renderCountRef.current > 20) {
     console.warn("⚠️ EXCESSIVE RENDER DETECTED in useLiveMarketData", {
       renderCount: renderCountRef.current,
@@ -55,11 +56,12 @@ export function useLiveMarketData(symbol: string, expiry: string | null) {
       spot: state.spot,
       lastUpdate: state.lastUpdate,
       connected: state.connected,
-      analytics: state.analytics
+      analytics: state.analytics,
+      chartAnalysis: state.chartAnalysis
     }))
   )
   const { optionChainData, optionChainLastUpdate } = useOptionChainStore()
-  
+
   // Spot fallback logic
   const effectiveSpot =
     optionChainData?.spot ||
@@ -81,19 +83,19 @@ export function useLiveMarketData(symbol: string, expiry: string | null) {
   useEffect(() => {
     // Transform store data → UI data
     const safeAnalytics = analytics || {}
-    
+
     // PATCH 1: Prevent symbol mismatch from analytics
     if (analytics?.symbol !== symbol) {
       return
     }
-    
+
     // PATCH 4: Add defensive null guard
     if (!analytics) return
-    
+
     if (process.env.NODE_ENV === "development") {
       console.log("🔗 ANALYTICS FROM STORE:", safeAnalytics)
     }
-    
+
     const transformed: LiveMarketData = {
       symbol,
       spot: effectiveSpot,
@@ -109,15 +111,17 @@ export function useLiveMarketData(symbol: string, expiry: string | null) {
           puts: optionChainData.puts || []
         }
         : null,
-      analytics: optionChainData?.analytics,
+      analytics: safeAnalytics,
+      chartAnalysis: useWSStore.getState().chartAnalysis,
       intelligence: {
         // Map analytics to intelligence object for UI components
         bias: {
           ...safeAnalytics?.bias,
-          label: safeAnalytics?.bias?.divergence_type === 'bullish' ? 'BULLISH' : 
-                safeAnalytics?.bias?.divergence_type === 'bearish' ? 'BEARISH' : 'NEUTRAL',
+          label: safeAnalytics?.bias?.divergence_type === 'bullish' ? 'BULLISH' :
+            safeAnalytics?.bias?.divergence_type === 'bearish' ? 'BEARISH' : 'NEUTRAL',
           score: safeAnalytics?.bias?.bias_strength || 0
         },
+        pcr: safeAnalytics?.bias?.pcr_value ?? safeAnalytics?.pcr ?? 1.0,
         probability: safeAnalytics?.expected_move,
         volatility_regime: safeAnalytics?.structural?.volatility_regime ?? "UNKNOWN",
         breach_probability: safeAnalytics?.structural?.breach_probability ?? 0,
@@ -125,17 +129,28 @@ export function useLiveMarketData(symbol: string, expiry: string | null) {
         gamma_regime: safeAnalytics?.structural?.gamma_regime ?? "neutral",
         support_level: safeAnalytics?.structural?.support_level ?? 0,
         resistance_level: safeAnalytics?.structural?.resistance_level ?? 0,
-        net_gamma: safeAnalytics?.structural?.net_gamma ?? 0,
-        gamma_flip_level: safeAnalytics?.structural?.gamma_flip_level ?? 0,
-        distance_from_flip: safeAnalytics?.structural?.distance_from_flip ?? 0,
         intent_score: safeAnalytics?.structural?.intent_score ?? 0,
         oi_velocity: safeAnalytics?.structural?.oi_velocity ?? 0,
         total_oi: safeAnalytics?.structural?.total_oi ?? 0,
+        regime: {
+          market_regime: 'NORMAL',
+          volatility_regime: safeAnalytics?.structural?.volatility_regime ?? "UNKNOWN",
+          trend_regime: safeAnalytics?.bias?.divergence_type === 'bullish' ? 'UPTREND' :
+            (safeAnalytics?.bias?.divergence_type === 'bearish' ? 'DOWNTREND' : 'SIDEWAYS'),
+          confidence: 85.0
+        },
+        gamma: {
+          net_gamma: safeAnalytics?.structural?.net_gamma ?? 0,
+          gamma_flip: safeAnalytics?.structural?.gamma_flip_level ?? 0,
+          dealer_gamma: safeAnalytics?.structural?.gamma_regime ?? "NEUTRAL",
+          gamma_exposure: safeAnalytics?.structural?.net_gamma ?? 0
+        },
+        trade_suggestion: safeAnalytics?.trade_suggestion || safeAnalytics?.trade_setup,
         // Keep existing optionChain intelligence if available
         ...optionChainData?.intelligence
       }
     }
-    
+
     if (process.env.NODE_ENV === "development") {
       console.log("🧠 INTELLIGENCE MAPPING:", transformed.intelligence)
     }

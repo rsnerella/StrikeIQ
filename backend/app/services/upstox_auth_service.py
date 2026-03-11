@@ -8,6 +8,9 @@ import httpx
 import urllib.parse
 from fastapi import HTTPException
 from ..core.config import settings
+from ..models.database import AsyncSessionLocal
+from ..models.system_config import SystemConfig
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 _auth_service_instance = None
@@ -30,8 +33,8 @@ class UpstoxCredentials:
 
 class UpstoxAuthService:
 
-    def __init__(self, credentials_file: str = "upstox_credentials.json"):
-        self._credentials_file = credentials_file
+    def __init__(self, credentials_key: str = "upstox_auth_token"):
+        self._credentials_key = credentials_key
         self._credentials: Optional[UpstoxCredentials] = None
         self._lock = asyncio.Lock()
         self._client = httpx.AsyncClient(timeout=10)
@@ -48,47 +51,61 @@ class UpstoxAuthService:
         )
 
     # ================= LOAD =================
-    def _load_credentials(self) -> Optional[UpstoxCredentials]:
-
-        if not os.path.exists(self._credentials_file):
-            return None
-
+    async def _load_credentials(self) -> Optional[UpstoxCredentials]:
+        """Load credentials from Supabase system_config table"""
         try:
-            with open(self._credentials_file, "r") as f:
-                data = json.load(f)
+            async with AsyncSessionLocal() as session:
+                stmt = select(SystemConfig).where(SystemConfig.key == self._credentials_key)
+                result = await session.execute(stmt)
+                config = result.scalar_one_or_none()
+                
+                if not config or not config.value:
+                    return None
+                
+                data = config.value
+                exp = datetime.fromisoformat(data["expires_at"])
+                if exp.tzinfo is None:
+                    exp = exp.replace(tzinfo=timezone.utc)
 
-            exp = datetime.fromisoformat(data["expires_at"])
-            if exp.tzinfo is None:
-                exp = exp.replace(tzinfo=timezone.utc)
-
-            creds = UpstoxCredentials(
-                data.get("access_token"),
-                data.get("refresh_token"),
-                0
-            )
-            creds.expires_at = exp
-            return creds
+                creds = UpstoxCredentials(
+                    data.get("access_token"),
+                    data.get("refresh_token"),
+                    0
+                )
+                creds.expires_at = exp
+                return creds
 
         except Exception as e:
-            logger.error(f"Failed to load credentials: {e}")
+            logger.error(f"Failed to load credentials from DB: {e}")
             return None
 
     # ================= STORE =================
-    def _store_credentials(self, creds: UpstoxCredentials):
-
-        temp_file = self._credentials_file + ".tmp"
-
-        with open(temp_file, "w") as f:
-            json.dump({
+    async def _store_credentials(self, creds: UpstoxCredentials):
+        """Store credentials in Supabase system_config table"""
+        try:
+            data = {
                 "access_token": creds.access_token,
                 "refresh_token": creds.refresh_token,
                 "expires_at": creds.expires_at.isoformat()
-            }, f)
-
-        os.replace(temp_file, self._credentials_file)
-
-        self._credentials = creds
-        logger.info("Upstox credentials stored safely")
+            }
+            
+            async with AsyncSessionLocal() as session:
+                stmt = select(SystemConfig).where(SystemConfig.key == self._credentials_key)
+                result = await session.execute(stmt)
+                config = result.scalar_one_or_none()
+                
+                if config:
+                    config.value = data
+                else:
+                    config = SystemConfig(key=self._credentials_key, value=data)
+                    session.add(config)
+                
+                await session.commit()
+                
+            self._credentials = creds
+            logger.info("Upstox credentials stored safely in Supabase")
+        except Exception as e:
+            logger.error(f"Failed to store credentials in DB: {e}")
 
     # ================= EXCHANGE CODE =================
     async def exchange_code_for_token(self, code: str) -> Dict[str, Any]:
@@ -125,7 +142,7 @@ class UpstoxAuthService:
                 token.get("expires_in") or 3600
             )
 
-            self._store_credentials(creds)
+            await self._store_credentials(creds)
 
             return {
                 "access_token": creds.access_token,
@@ -138,7 +155,7 @@ class UpstoxAuthService:
         async with self._lock:
 
             if not self._credentials:
-                self._credentials = self._load_credentials()
+                self._credentials = await self._load_credentials()
 
             if not self._credentials:
                 raise HTTPException(status_code=401, detail="Authentication required")
@@ -187,7 +204,7 @@ class UpstoxAuthService:
             logger.error(f"Refresh failed: {response.text}")
             # Clear invalid credentials on 401
             if response.status_code == 401:
-                self._clear_credentials()
+                await self._clear_credentials()
             raise HTTPException(status_code=401, detail="Authentication required")
 
         token_data = response.json()
@@ -198,7 +215,7 @@ class UpstoxAuthService:
             token_data.get("expires_in") or 3600
         )
 
-        self._store_credentials(creds)
+        await self._store_credentials(creds)
 
         logger.info("Token refreshed successfully")
 
@@ -207,24 +224,30 @@ class UpstoxAuthService:
             "expires_in": token_data.get("expires_in") or 3600
         }
 
-    def _clear_credentials(self):
+    async def _clear_credentials(self):
         """
         Clear in-memory credentials and stored file
         """
         self._credentials = None
+        # Clearing from DB is optional, but let's do it for security
         try:
-            if os.path.exists(self._credentials_file):
-                os.remove(self._credentials_file)
-                logger.info("Invalid credentials cleared")
+            async with AsyncSessionLocal() as session:
+                stmt = select(SystemConfig).where(SystemConfig.key == self._credentials_key)
+                result = await session.execute(stmt)
+                config = result.scalar_one_or_none()
+                if config:
+                    await session.delete(config)
+                    await session.commit()
+                logger.info("Invalid credentials cleared from DB")
         except Exception as e:
-            logger.error(f"Failed to clear credentials file: {e}")
+            logger.error(f"Failed to clear credentials from DB: {e}")
 
-    def is_authenticated(self):
+    async def is_authenticated(self):
         """
-        Check if we have valid credentials (not just stored)
+        Check if we have valid credentials
         """
         if not self._credentials:
-            self._credentials = self._load_credentials()
+            self._credentials = await self._load_credentials()
         
         return (
             self._credentials is not None

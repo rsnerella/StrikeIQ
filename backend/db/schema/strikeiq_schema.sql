@@ -9,10 +9,16 @@
 CREATE TABLE IF NOT EXISTS ai_signal_logs (
     id SERIAL PRIMARY KEY,
     timestamp TIMESTAMPTZ DEFAULT NOW(),
+    snapshot_id INTEGER,
     symbol VARCHAR(20),
-    signal VARCHAR(20),
+    signal VARCHAR(50),
     confidence DOUBLE PRECISION,
     spot_price DOUBLE PRECISION,
+    strike DOUBLE PRECISION,
+    direction VARCHAR(10),
+    entry DOUBLE PRECISION,
+    stop_loss DOUBLE PRECISION,
+    target DOUBLE PRECISION,
     metadata JSONB
 );
 
@@ -25,30 +31,22 @@ ON ai_signal_logs(symbol, timestamp DESC);
 -- ===============================
 
 CREATE TABLE IF NOT EXISTS market_snapshots (
-
     id SERIAL PRIMARY KEY,
-
     symbol VARCHAR(20),
-
     timestamp TIMESTAMPTZ DEFAULT NOW(),
-
     spot_price DOUBLE PRECISION,
-
     vwap DOUBLE PRECISION,
-
     change DOUBLE PRECISION,
-
     change_percent DOUBLE PRECISION,
-
     volume BIGINT,
-
     market_status VARCHAR(20),
-
     rsi DOUBLE PRECISION,
-
     momentum_score DOUBLE PRECISION,
-
-    regime VARCHAR(20)
+    regime VARCHAR(20),
+    pcr DOUBLE PRECISION,
+    total_call_oi BIGINT,
+    total_put_oi BIGINT,
+    atm_strike DOUBLE PRECISION
 );
 
 CREATE INDEX IF NOT EXISTS idx_market_snapshots_symbol_time
@@ -398,6 +396,54 @@ CREATE TABLE IF NOT EXISTS signal_outcomes (
 
     metadata JSONB
 );
+
+
+-- ===============================
+-- SYSTEM CONFIG
+-- ===============================
+
+CREATE TABLE IF NOT EXISTS system_config (
+    key VARCHAR PRIMARY KEY,
+    value JSONB,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ===============================
+-- AI AUXILIARY TABLES
+-- ===============================
+
+CREATE TABLE IF NOT EXISTS formula_experience (
+    id SERIAL PRIMARY KEY,
+    formula_id VARCHAR(50),
+    total_tests INTEGER DEFAULT 0,
+    wins INTEGER DEFAULT 0,
+    losses INTEGER DEFAULT 0,
+    accuracy DOUBLE PRECISION DEFAULT 0.0,
+    avg_reward DOUBLE PRECISION DEFAULT 0.0,
+    avg_risk DOUBLE PRECISION DEFAULT 0.0,
+    confidence_adjustment DOUBLE PRECISION DEFAULT 0.0,
+    success_rate DOUBLE PRECISION DEFAULT 0.0,
+    experience_adjusted_confidence DOUBLE PRECISION DEFAULT 0.5,
+    last_updated TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS outcome_log (
+    id SERIAL PRIMARY KEY,
+    prediction_id INTEGER,
+    formula_id VARCHAR,
+    outcome VARCHAR,
+    confidence DOUBLE PRECISION,
+    evaluation_method VARCHAR,
+    evaluation_time TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS ai_event_log (
+    id SERIAL PRIMARY KEY,
+    event_type VARCHAR,
+    description TEXT,
+    timestamp TIMESTAMPTZ DEFAULT NOW()
+);
+
 
 
 -- ======================================================

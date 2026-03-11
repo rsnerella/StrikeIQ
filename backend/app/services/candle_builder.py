@@ -73,7 +73,7 @@ class Candle:
 class _CandleState:
     """Holds the current forming candle + completed history for one (symbol, interval)."""
 
-    MAX_HISTORY = 200  # deque cap
+    MAX_HISTORY = 300  # deque cap
 
     def __init__(self, interval: int):
         self.interval = interval

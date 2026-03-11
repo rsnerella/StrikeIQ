@@ -6,7 +6,9 @@ from app.services.market_status_service import get_market_status
 from app.models.database import get_db
 from app.services.instrument_registry import get_instrument_registry
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
+import httpx
+from app.services.token_manager import token_manager
 
 router = APIRouter(tags=["market"])
 logger = logging.getLogger(__name__)
@@ -144,4 +146,64 @@ async def get_expiries(symbol: str):
 
         print("EXPIRY API ERROR:", e)
 
+        return []
+
+@router.get("/candles")
+async def get_historical_candles(symbol: str, tf: str = "1m", limit: int = 300):
+    """Get historical candles for chart rendering"""
+    try:
+        # Map timeframes to upstox format
+        tf_map = {
+            "1m": "1minute",
+            "5m": "5minute",
+            "15m": "15minute",
+            "30m": "30minute",
+        }
+        interval = tf_map.get(tf, "1minute")
+        
+        # Map symbols to instrument_keys
+        if symbol.upper() == "NIFTY":
+            instrument_key = "NSE_INDEX|Nifty 50"
+        elif symbol.upper() == "BANKNIFTY":
+            instrument_key = "NSE_INDEX|Nifty Bank"
+        elif symbol.upper() == "FINNIFTY":
+            instrument_key = "NSE_INDEX|Nifty Fin Service"
+        else:
+            raise HTTPException(status_code=400, detail="Invalid symbol")
+
+        token = await token_manager.get_token()
+        if not token:
+            raise HTTPException(status_code=401, detail="No valid upstox token")
+
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"https://api.upstox.com/v2/historical-candle/intraday/{instrument_key}/{interval}",
+                headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}
+            )
+            
+            if resp.status_code != 200:
+                logger.error(f"Candle API error: {resp.text}")
+                return []
+                
+            data = resp.json().get("data", {}).get("candles", [])
+            
+            # Upstox returns: [timestamp, open, high, low, close, volume, oi]
+            # Must format for lightweigh-charts: {time: UNIX, open, high, low, close}
+            formatted = []
+            for c in reversed(data[:limit]):
+                # timestamp is ISO 8601 string "2024-03-12T10:00:00+05:30"
+                dt = datetime.fromisoformat(c[0])
+                unix_time = int(dt.timestamp())
+                formatted.append({
+                    "time": unix_time,
+                    "open": c[1],
+                    "high": c[2],
+                    "low": c[3],
+                    "close": c[4]
+                })
+
+            return formatted
+
+    except Exception as e:
+        logger.error(f"Candles fetch error: {e}")
         return []

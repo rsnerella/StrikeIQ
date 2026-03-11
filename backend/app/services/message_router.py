@@ -48,15 +48,12 @@ class MessageRouter:
             raw_volume = tick.get("volume")
 
             if raw_ltp is None:
-                return None
-
-            try:
-                ltp = float(raw_ltp)
-            except Exception:
-                return None
-
-            if ltp <= 0:
-                return None
+                ltp = 0.0
+            else:
+                try:
+                    ltp = float(raw_ltp)
+                except Exception:
+                    ltp = 0.0
 
             try:
                 oi = int(raw_oi or 0)
@@ -93,25 +90,31 @@ class MessageRouter:
             if instrument_type == "INDEX":
 
                 # push price history
-                try:
-                    from app.services.advanced_strategies_engine import push_price
-                    push_price(symbol, ltp)
-                except Exception:
-                    pass
+                if ltp > 0:
+                    try:
+                        from app.services.advanced_strategies_engine import push_price
+                        push_price(symbol, ltp)
+                    except Exception:
+                        pass
 
                 # candle builder
-                try:
-                    from app.services.candle_builder import candle_builder
-                    candle_builder.push_tick(symbol, ltp, volume=volume)
-                except Exception:
-                    pass
+                if ltp > 0:
+                    try:
+                        from app.services.candle_builder import candle_builder
+                        candle_builder.push_tick(symbol, ltp, volume=volume)
+                    except Exception:
+                        pass
 
                 # 🔥 CRITICAL FIX
                 # Forward index price to option chain builder
-                try:
-                    option_chain_builder.update_index_price(symbol, ltp)
-                except Exception as e:
-                    logger.error(f"Index price forward failed: {e}")
+                if ltp > 0:
+                    try:
+                        option_chain_builder.update_index_price(symbol, ltp)
+                    except Exception as e:
+                        logger.error(f"Index price forward failed: {e}")
+
+                if ltp <= 0:
+                    return None
 
                 return self._create_index_tick(
                     symbol,

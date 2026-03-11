@@ -177,6 +177,7 @@ class ChartSignalEngine:
                 "wave":        waves["elliott"].get("wave", "?"),
                 "wave_pattern": waves["elliott"].get("pattern", "UNKNOWN"),
                 "wave_probability": waves["elliott"].get("probability", 0),
+                "wave_points": waves.get("elliott_points", []),
                 "neo_pattern": waves["neo"].get("pattern", "UNKNOWN"),
                 # Structure
                 "trend":       structure.get("trend", "UNKNOWN"),
@@ -186,8 +187,9 @@ class ChartSignalEngine:
                 # Zones
                 "supply_zone": [supply["bottom"], supply["top"]] if supply else [],
                 "demand_zone": [demand["bottom"], demand["top"]] if demand else [],
-                "order_blocks": len(zones.get("order_blocks", [])),
-                "liquidity_pools": len(zones.get("liquidity_pools", [])),
+                "all_zones": zones.get("all_zones", []),
+                "order_blocks": zones.get("order_blocks", []),
+                "liquidity_pools": zones.get("liquidity_pools", []),
                 # Patterns
                 "candle_pattern": patterns["primary"]["pattern"] if patterns["primary"] else None,
                 "candle_signal":  patterns["primary"]["signal"]  if patterns["primary"] else "WAIT",

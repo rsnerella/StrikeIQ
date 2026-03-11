@@ -221,6 +221,19 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Instrument registry failed: {e}")
 
+    # -------- MARKET CONTEXT --------
+
+    try:
+
+        from app.services.market_context_engine import market_context_engine
+
+        await market_context_engine.initialize()
+
+        logger.info("📈 Market context engine ready")
+
+    except Exception as e:
+        logger.error(f"Market context engine failed: {e}")
+
     # -------- TOKEN WATCHER --------
 
     try:

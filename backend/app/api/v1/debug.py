@@ -16,7 +16,7 @@ async def get_auth_session_status(db: Session = Depends(get_db)):
         auth_service = get_upstox_auth_service()
         
         # Check authentication status
-        is_auth = auth_service.is_authenticated()
+        is_auth = await auth_service.is_authenticated()
         
         # Get token details if available
         token_expiry = None
@@ -36,7 +36,7 @@ async def get_auth_session_status(db: Session = Depends(get_db)):
             "state_validation_enabled": True,
             "debug_info": {
                 "has_credentials": auth_service._credentials is not None,
-                "credentials_file": auth_service._credentials_file,
+                "credentials_key": auth_service._credentials_key,
                 "current_time": datetime.now(timezone.utc).isoformat()
             }
         }

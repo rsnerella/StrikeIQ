@@ -280,41 +280,77 @@ class LiveStructuralEngine:
         spot = snapshot["spot"]
         timestamp = datetime.now(timezone.utc)
         
-        # 1. Expected Move Calculation
-        expected_move_data = self._calculate_expected_move(frontend_data)
-        
-        # 2. Gamma Regime Analysis
-        gamma_regime = self._analyze_gamma_regime(frontend_data)
-        
-        # 3. Institutional Intent Score
-        intent_score = self._calculate_intent_score(frontend_data)
-        
-        # 4. Support/Resistance Levels
-        support_resistance = self._find_support_resistance(frontend_data)
-        
-        # 5. Volatility Regime
-        volatility_regime = self._analyze_volatility_regime(frontend_data)
-        
-        # 6. OI Velocity
-        oi_velocity = self._calculate_oi_velocity(symbol)
-        
-        # 7. Breach Probability
-        breach_probability = self._calculate_breach_probability(frontend_data, expected_move_data["expected_move"])
-        
-        # NEW: 8. Net Gamma Exposure (GEX)
-        gamma_metrics = self._calculate_net_gamma_exposure(frontend_data)
-        
-        # NEW: 9. Gamma Flip Level
-        gamma_flip_metrics = self._calculate_gamma_flip_level(frontend_data)
-        
-        # NEW: 10. OI Velocity Engine
-        flow_metrics = self._calculate_oi_flow_engine(symbol, frontend_data)
-        
-        # NEW: 11. Structural Regime Classifier
-        structural_metrics = self._classify_structural_regime(
-            gamma_metrics, flow_metrics, expected_move_data, volatility_regime
-        )
-        
+        def _sync_computations():
+            # Before proceeding with GEX, manually force a Greek generation cycle
+            from app.services.greeks_engine import greeks_engine
+            strikes_data = frontend_data.get("strikes", {})
+            if strikes_data and not any(opt.get("gamma") for strike_info in strikes_data.values() for opt in (strike_info.get("call", {}), strike_info.get("put", {})) if isinstance(opt, dict)):
+                frontend_data["strikes"] = greeks_engine.compute_chain_greeks(strikes_data, spot, 30)
+
+            # 1. Expected Move Calculation
+            expected_move_data = self._calculate_expected_move(frontend_data)
+            
+            # 2. Gamma Regime Analysis
+            gamma_regime = self._analyze_gamma_regime(frontend_data)
+            
+            # 3. Institutional Intent Score
+            intent_score = self._calculate_intent_score(frontend_data)
+            
+            # 4. Support/Resistance Levels
+            support_resistance = self._find_support_resistance(frontend_data)
+            
+            # 5. Volatility Regime
+            volatility_regime = self._analyze_volatility_regime(frontend_data)
+            
+            # 6. OI Velocity
+            oi_velocity = self._calculate_oi_velocity(symbol)
+            
+            # 7. Breach Probability
+            breach_probability = self._calculate_breach_probability(frontend_data, expected_move_data["expected_move"])
+            
+            # NEW: 8. Net Gamma Exposure (GEX)
+            gamma_metrics = self._calculate_net_gamma_exposure(frontend_data)
+            
+            # NEW: 9. Gamma Flip Level
+            gamma_flip_metrics = self._calculate_gamma_flip_level(frontend_data)
+            
+            # NEW: 10. OI Velocity Engine
+            flow_metrics = self._calculate_oi_flow_engine(symbol, frontend_data)
+            
+            # NEW: 11. Structural Regime Classifier
+            structural_metrics = self._classify_structural_regime(
+                gamma_metrics, flow_metrics, expected_move_data, volatility_regime
+            )
+
+            # NEW: 13. Compute Gamma Pressure Map
+            gamma_pressure_map = self.gamma_pressure_engine.compute_pressure_map(symbol, frontend_data)
+            formatted_pressure_map = self.gamma_pressure_engine.format_for_frontend(gamma_pressure_map)
+            
+            # NEW: 14. Compute Flow + Gamma Interaction
+            flow_gamma_interaction = self.flow_gamma_engine.compute_interaction({
+                "net_gamma": gamma_metrics.get("net_gamma", 0),
+                "flow_imbalance": flow_metrics.get("flow_imbalance", 0),
+                "flow_direction": flow_metrics.get("flow_direction", "neutral"),
+                "structural_regime": structural_metrics.get("structural_regime", "unknown"),
+                "regime_confidence": structural_metrics.get("regime_confidence", 50),
+                "spot": spot
+            })
+            formatted_interaction = self.flow_gamma_engine.format_for_frontend(flow_gamma_interaction)
+
+            # NEW: 16. Compute Expiry Magnet Analysis
+            expiry_magnet_analysis = self.expiry_magnet_engine.analyze_expiry_magnets(symbol, frontend_data)
+            formatted_expiry_analysis = self.expiry_magnet_engine.format_for_frontend(expiry_magnet_analysis)
+
+            return (expected_move_data, gamma_regime, intent_score, support_resistance,
+                    volatility_regime, oi_velocity, breach_probability, gamma_metrics,
+                    gamma_flip_metrics, flow_metrics, structural_metrics,
+                    formatted_pressure_map, formatted_interaction, formatted_expiry_analysis)
+
+        (expected_move_data, gamma_regime, intent_score, support_resistance,
+         volatility_regime, oi_velocity, breach_probability, gamma_metrics,
+         gamma_flip_metrics, flow_metrics, structural_metrics,
+         formatted_pressure_map, formatted_interaction, formatted_expiry_analysis) = await asyncio.to_thread(_sync_computations)
+
         # NEW: 12. Generate Structural Alerts
         alerts = await self.alert_engine.analyze_and_generate_alerts(symbol, {
             "net_gamma": gamma_metrics.get("net_gamma", 0),
@@ -326,22 +362,7 @@ class LiveStructuralEngine:
             "regime_confidence": structural_metrics.get("regime_confidence", 50),
             "spot": spot
         })
-        
-        # NEW: 13. Compute Gamma Pressure Map
-        gamma_pressure_map = self.gamma_pressure_engine.compute_pressure_map(symbol, frontend_data)
-        formatted_pressure_map = self.gamma_pressure_engine.format_for_frontend(gamma_pressure_map)
-        
-        # NEW: 14. Compute Flow + Gamma Interaction
-        flow_gamma_interaction = self.flow_gamma_engine.compute_interaction({
-            "net_gamma": gamma_metrics.get("net_gamma", 0),
-            "flow_imbalance": flow_metrics.get("flow_imbalance", 0),
-            "flow_direction": flow_metrics.get("flow_direction", "neutral"),
-            "structural_regime": structural_metrics.get("structural_regime", "unknown"),
-            "regime_confidence": structural_metrics.get("regime_confidence", 50),
-            "spot": spot
-        })
-        formatted_interaction = self.flow_gamma_engine.format_for_frontend(flow_gamma_interaction)
-        
+
         # NEW: 15. Compute Enhanced Regime Dynamics
         regime_dynamics = await self.regime_confidence_engine.analyze_regime_dynamics(symbol, {
             "structural_regime": structural_metrics.get("structural_regime", "unknown"),
@@ -352,10 +373,7 @@ class LiveStructuralEngine:
             "spot": spot
         })
         formatted_regime_dynamics = self.regime_confidence_engine.format_for_frontend(regime_dynamics)
-        
-        # NEW: 16. Compute Expiry Magnet Analysis
-        expiry_magnet_analysis = self.expiry_magnet_engine.analyze_expiry_magnets(symbol, frontend_data)
-        formatted_expiry_analysis = self.expiry_magnet_engine.format_for_frontend(expiry_magnet_analysis)
+
         # ================= AI LIVE SIGNAL INTEGRATION =================
         try:
             pcr = getattr(snapshot, "pcr", 0)

@@ -115,7 +115,7 @@ class AIScheduler:
                 return
                 
             from app.services.ai_signal_engine import ai_signal_engine
-            signals_generated = ai_signal_engine.generate_signals()
+            signals_generated = await ai_signal_engine.generate_signals()
             if signals_generated > 0:
                 logger.info(f"Signal generation job: {signals_generated} signals generated")
         except Exception as e:
@@ -160,7 +160,7 @@ class AIScheduler:
                 return
                 
             from app.services.ai_outcome_engine import ai_outcome_engine
-            outcomes_evaluated = ai_outcome_engine.evaluate_pending_outcomes()
+            outcomes_evaluated = await ai_outcome_engine.evaluate_pending_outcomes()
             if outcomes_evaluated > 0:
                 logger.info(f"Outcome checker job: {outcomes_evaluated} outcomes evaluated")
         except Exception as e:
@@ -175,7 +175,7 @@ class AIScheduler:
                 return
                 
             from app.services.ai_learning_engine import ai_learning_engine
-            formulas_updated = ai_learning_engine.update_all_formula_learning()
+            formulas_updated = await ai_learning_engine.update_all_formula_learning()
             if formulas_updated > 0:
                 logger.info(f"Learning update job: {formulas_updated} formulas updated")
         except Exception as e:
@@ -235,16 +235,28 @@ class AIScheduler:
                 pcr = total_put_oi / total_call_oi if total_call_oi > 0 else 1.0
                 atm_strike = round(spot_price / 50) * 50
                 
+                # Attempt to get advanced analytics
+                gamma_exposure = 0.0
+                expected_move = 0.0
+                try:
+                    from app.services.analytics_broadcaster import analytics_broadcaster
+                    cached = analytics_broadcaster.get_cached_analytics("NIFTY")
+                    if cached and 'data' in cached:
+                        expected_move = cached['data'].get('expected_move', {}).get('move_1sd', 0)
+                        gamma_exposure = cached['data'].get('structural', {}).get('net_gamma', 0)
+                except Exception as ex:
+                    logger.debug(f"Could not fetch advanced analytics for snapshot: {ex}")
+
                 from ai.ai_db import ai_db
                 
                 query = """
-                    INSERT INTO market_snapshot 
-                    (symbol, spot_price, pcr, total_call_oi, total_put_oi, atm_strike)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    INSERT INTO market_snapshots 
+                    (symbol, spot_price, pcr, total_call_oi, total_put_oi, atm_strike, gamma_exposure, expected_move)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """
                 
-                params = ("NIFTY", spot_price, pcr, total_call_oi, total_put_oi, atm_strike)
-                ai_db.execute_query(query, params)
+                params = ("NIFTY", spot_price, pcr, total_call_oi, total_put_oi, atm_strike, gamma_exposure, expected_move)
+                await ai_db.execute_query(query, params)
                 
                 logger.info(f"Market snapshot stored: NIFTY @ {spot_price}, PCR: {pcr:.2f}")
             else:
@@ -270,13 +282,15 @@ class AIScheduler:
             from ai.ai_db import ai_db
             
             query = """
-                INSERT INTO market_snapshot 
-                (symbol, spot_price, pcr, total_call_oi, total_put_oi, atm_strike)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO market_snapshots 
+                (symbol, spot_price, pcr, total_call_oi, total_put_oi, atm_strike, gamma_exposure, expected_move)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """
             
-            params = ("NIFTY", spot_price, pcr, total_call_oi, total_put_oi, atm_strike)
-            ai_db.execute_query(query, params)
+            gamma = random.uniform(-1000000, 1000000)
+            exp_move = random.uniform(50, 200)
+            params = ("NIFTY", spot_price, pcr, total_call_oi, total_put_oi, atm_strike, gamma, exp_move)
+            await ai_db.execute_query(query, params)
             
             logger.info(f"Sample market snapshot stored: NIFTY @ {spot_price:.2f}, PCR: {pcr:.2f}")
             

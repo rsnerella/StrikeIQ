@@ -6,16 +6,19 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { useMarketStore } from '@/stores/marketStore';
+import { useMarketContextStore } from '@/stores/marketContextStore';
 import { useOptionChainStore } from '@/core/ws/optionChainStore';
+import { resubscribeMarketWS } from '@/services/wsService';
 
 export const useExpirySelector = () => {
   const [expiryList, setExpiryList] = useState<string[]>([]);
-  const [selectedExpiry, setSelectedExpiry] = useState<string | null>(null);
   const [loadingExpiries, setLoadingExpiries] = useState(false);
   const [expiryError, setExpiryError] = useState<string | null>(null);
 
-  const currentSymbol = useMarketStore(state => state.currentSymbol);
+  const currentSymbol = useMarketContextStore(state => state.symbol);
+  const selectedExpiry = useMarketContextStore(state => state.expiry);
+  const setExpiry = useMarketContextStore(state => state.setExpiry);
+
   const { optionChainConnected } = useOptionChainStore();
 
   const lastFetchedSymbolRef = useRef<string | null>(null);
@@ -48,7 +51,7 @@ export const useExpirySelector = () => {
         setExpiryList(list);
 
         // Auto-select nearest future expiry
-        if (list.length > 0 && !selectedExpiry) {
+        if (list.length > 0) {
           const today = new Date();
           today.setHours(0, 0, 0, 0);
           const nearest = list
@@ -56,7 +59,10 @@ export const useExpirySelector = () => {
             .filter(({ date }) => date >= today)
             .sort((a, b) => a.date.getTime() - b.date.getTime())[0];
 
-          setSelectedExpiry(nearest?.str || list[0]);
+          const newExpiry = nearest?.str || list[0];
+          setExpiry(newExpiry);
+          localStorage.setItem('selectedExpiry', newExpiry);
+          resubscribeMarketWS(currentSymbol, newExpiry);
         }
 
         lastFetchedSymbolRef.current = currentSymbol;
@@ -74,8 +80,9 @@ export const useExpirySelector = () => {
   }, [currentSymbol]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleExpiryChange = (expiry: string) => {
-    setSelectedExpiry(expiry);
+    setExpiry(expiry);
     localStorage.setItem('selectedExpiry', expiry);
+    resubscribeMarketWS(currentSymbol, expiry);
   };
 
   return {

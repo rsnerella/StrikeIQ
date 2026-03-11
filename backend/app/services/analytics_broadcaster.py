@@ -13,6 +13,9 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# Global analytics cache to serve snapshots immediately to new clients
+LAST_ANALYTICS: Dict[str, Any] = {}
+
 
 class AnalyticsBroadcaster:
     """Broadcasts analytics results to websocket clients"""
@@ -38,6 +41,10 @@ class AnalyticsBroadcaster:
         self._structural_engine = None
         self._adv_strategies_enabled = True  # Step 14
         self._signal_scoring_enabled = True  # Step 15
+        
+        # hash cache for deduplication
+        self._last_analytics_hash: Dict[str, str] = {}
+        self._last_broadcast_times: Dict[str, float] = {}
 
     # --------------------------------------------------------
     # ANALYTICS COMPUTATION
@@ -141,7 +148,7 @@ class AnalyticsBroadcaster:
                     bias_value = getattr(bias, "bias_strength", 0) if hasattr(bias, 'bias_strength') else bias.get("bias_strength", 0)
 
                     analytics_results["bias"] = {
-                        "pcr": getattr(bias, "pcr", 0),
+                        "pcr_value": float(getattr(bias, "pcr_value", 1.0)),
                         "bias_strength": bias_value,
                         "price_vs_vwap": getattr(bias, "price_vs_vwap", 0),
                         "divergence_detected": getattr(bias, "divergence_detected", False),
@@ -246,6 +253,40 @@ class AnalyticsBroadcaster:
                 except Exception as e:
                     logger.debug(f"Signal scoring skipped: {e}")
 
+            # ── Trade Setup Engine (Rule Based Fallback) ──────────────────────────────────────
+            try:
+                from app.services.trade_setup_engine import trade_setup_engine
+                trade_setup = trade_setup_engine.compute(
+                    symbol=symbol,
+                    spot=engine_data["spot"],
+                    chain_data=chain_data,
+                    analytics=analytics_results,
+                )
+                if trade_setup:
+                    analytics_results["trade_setup"] = trade_setup
+            except Exception as e:
+                logger.debug(f"Trade setup skipped: {e}")
+
+            # ── AI Signal Integration (Primary) ──────────────────────────────────────
+            try:
+                from app.services.ai_signal_engine import ai_signal_engine
+                ai_signal = await ai_signal_engine.get_latest_signal(symbol)
+                if ai_signal:
+                    analytics_results["ai_signal"] = ai_signal
+                    # Map to trade_suggestion for frontend compatibility
+                    analytics_results["trade_suggestion"] = {
+                        "signal": "BULLISH" if ai_signal["direction"] == "CALL" else "BEARISH",
+                        "direction": ai_signal["direction"],
+                        "strike": ai_signal["strike"],
+                        "entry": ai_signal["entry"],
+                        "target": ai_signal["target"],
+                        "stop_loss": ai_signal["stop_loss"],
+                        "confidence": ai_signal["confidence"],
+                        "reason": ai_signal.get("signal_reason")
+                    }
+            except Exception as e:
+                logger.debug(f"AI signal fetch failed: {e}")
+
             analytics_payload = {
                 "type": "analytics_update",
                 "version": "2.0",
@@ -286,6 +327,27 @@ class AnalyticsBroadcaster:
             logger.warning("Analytics payload empty — skipping broadcast")
             return
 
+        import json
+        import hashlib
+        
+        symbol = analytics_payload.get("symbol")
+        
+        # Phase 5: Rate Limit (2 seconds)
+        now = time.time()
+        if symbol in self._last_broadcast_times:
+            if now - self._last_broadcast_times[symbol] < 2.0:
+                return # Skip broadcast if too frequent
+        
+        # Hash check to prevent flood
+        payload_str = json.dumps(analytics_payload.get("data", {}), sort_keys=True)
+        payload_hash = hashlib.md5(payload_str.encode()).hexdigest()
+        
+        if self._last_analytics_hash.get(symbol) == payload_hash:
+            return  # Skip identical broadcasts
+            
+        self._last_analytics_hash[symbol] = payload_hash
+        self._last_broadcast_times[symbol] = now
+
         try:
 
             from app.core.ws_manager import manager
@@ -306,6 +368,11 @@ class AnalyticsBroadcaster:
                 
                 logger.info(f"ANALYTICS BROADCAST SUCCESS → {analytics_payload.get('symbol','?')}")
                 logger.info(f"FINAL PAYLOAD → {analytics_message}")
+                
+                # Cache analytics snapshot for new connections
+                global LAST_ANALYTICS
+                if symbol:
+                    LAST_ANALYTICS[symbol] = analytics_message
                 
                 await manager.broadcast(analytics_message)
                 broadcast_ms = (time.time() - broadcast_start) * 1000
@@ -409,9 +476,9 @@ class AnalyticsBroadcaster:
                                             chain_data=chain_data,
                                             options_analytics=analytics,
                                         )
-                                        if chart_payload and chart_payload.get("signal") != "WAIT":
+                                        if chart_payload:
                                             broadcast_tasks.append(manager.broadcast(chart_payload))
-                                            signal_outcome_tracker.record_signal(
+                                            await signal_outcome_tracker.record_signal(
                                                 chart_payload,
                                                 extra={
                                                     "pcr": chain_data.get("pcr", 0),
@@ -434,6 +501,26 @@ class AnalyticsBroadcaster:
                                         await signal_outcome_tracker.evaluate_pending(symbol, spot)
                                 except Exception as e:
                                     logger.debug(f"Chart signal engine skipped: {e}")
+
+                                # ── Candle broadcasting ───────────────────────
+                                try:
+                                    from app.services.candle_builder import candle_builder
+                                    for tf in ["1m", "5m"]:
+                                        past_candles = candle_builder.get_candles_as_dicts(symbol, tf, 300)
+                                        current = candle_builder.get_current_candle(symbol, tf)
+                                        combo = list(past_candles)
+                                        if current:
+                                            combo.append(current)
+                                            
+                                        if combo:
+                                            broadcast_tasks.append(manager.broadcast({
+                                                "type": "candle_update",
+                                                "symbol": symbol,
+                                                "timeframe": tf,
+                                                "candles": combo
+                                            }))
+                                except Exception as e:
+                                    logger.debug(f"Candle broadcast skipped: {e}")
 
                                 # Execute all broadcasts in parallel
                                 if broadcast_tasks:

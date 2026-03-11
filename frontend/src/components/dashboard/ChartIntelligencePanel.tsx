@@ -8,7 +8,8 @@ import { TrendingUp, TrendingDown, Minus, Activity, Layers, Target, Shield, Zap 
 import { CARD, CARD_HOVER_BORDER } from './DashboardTypes';
 import { SectionLabel } from './StatCards';
 import { useWSStore } from '../../core/ws/wsStore';
-import StrikeIQChart from '../charts/StrikeIQChart';
+import { AdvancedPriceChart } from '../charts/AdvancedPriceChart';
+import type { LiveMarketData } from '../../hooks/useLiveMarketData';
 
 // ── Colours ────────────────────────────────────────────────────────────────────
 const BULL = '#4ade80';
@@ -92,7 +93,7 @@ function ZoneBadge({ label, zone, color }: { label: string; zone: number[]; colo
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
-export function ChartIntelligencePanel() {
+export function ChartIntelligencePanel({ data }: { data: LiveMarketData | null }) {
     const chartAnalysis = useWSStore(s => s.chartAnalysis);
     const optionChain = useWSStore(s => s.optionChainSnapshot);
 
@@ -133,8 +134,8 @@ export function ChartIntelligencePanel() {
             onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)'; }}
         >
             {/* Chart Section */}
-            <div style={{ marginBottom: 16 }}>
-                <StrikeIQChart />
+            <div style={{ marginBottom: 16, height: 400 }}>
+                <AdvancedPriceChart data={data} />
             </div>
 
             {/* Header */}

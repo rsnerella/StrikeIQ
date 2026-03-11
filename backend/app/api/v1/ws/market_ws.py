@@ -115,6 +115,12 @@ async def market_ws(websocket: WebSocket):
                         "expiry": expiry
                     })
 
+                    # ---------------- SEND CACHED SNAPSHOT ----------------
+                    from app.services.analytics_broadcaster import LAST_ANALYTICS
+                    if LAST_ANALYTICS and symbol in LAST_ANALYTICS:
+                        logger.info(f"📤 SENDING CACHED SNAPSHOT → {symbol}")
+                        await websocket.send_json(LAST_ANALYTICS[symbol])
+
             except WebSocketDisconnect:
 
                 logger.info("🔌 CLIENT DISCONNECTED")

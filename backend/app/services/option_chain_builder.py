@@ -49,6 +49,8 @@ class OptionChainBuilder:
         self.spot_prices: Dict[str, float] = {}
 
         self.last_snapshots: Dict[str, datetime] = {}
+        
+        self.stale_timeout = 300  # 5 minutes
 
         self._snapshot_task: Optional[asyncio.Task] = None
         self._running = False
@@ -123,8 +125,18 @@ class OptionChainBuilder:
     async def _generate_snapshots(self):
 
         now = datetime.utcnow()
+        from app.core.market_context import MARKET_CONTEXT
+        current_symbol = MARKET_CONTEXT.get("symbol", "NIFTY")
+
+        if getattr(self, "active_symbol", None) != current_symbol:
+            logger.info(f"CHAIN BUILDER → Symbol switched to {current_symbol}. Clearing stale caches.")
+            self.chains.clear()
+            self.spot_prices.clear()
+            self.active_symbol = current_symbol
 
         for symbol in list(self.spot_prices.keys()):
+            if symbol != current_symbol:
+                continue
 
             spot = self.spot_prices.get(symbol)
 
@@ -132,6 +144,8 @@ class OptionChainBuilder:
 
             if not chain:
                 continue
+
+            self.purge_stale_strikes(symbol)
 
             # Evict far strikes
             far = [s for s in chain.keys() if abs(s - spot) > 1500]
@@ -156,6 +170,22 @@ class OptionChainBuilder:
 
             await self._broadcast_snapshot(snapshot)
 
+    def purge_stale_strikes(self, symbol: str):
+        chain = self.chains.get(symbol)
+        if not chain:
+            return
+            
+        now = datetime.utcnow()
+        for strike in list(chain.keys()):
+            ce = chain[strike].get("CE")
+            pe = chain[strike].get("PE")
+            
+            ce_age = (now - ce.last_update).total_seconds() if ce else float('inf')
+            pe_age = (now - pe.last_update).total_seconds() if pe else float('inf')
+            
+            if ce_age > self.stale_timeout and pe_age > self.stale_timeout:
+                del chain[strike]
+
     # --------------------------------------------------
 
     def _create_snapshot(self, symbol: str) -> Optional[ChainSnapshot]:
@@ -172,6 +202,8 @@ class OptionChainBuilder:
         strike_keys = sorted(chain.keys())
 
         atm = self._find_atm_strike(spot, strike_keys)
+        
+        now = datetime.utcnow()
 
         for strike in strike_keys:
 
@@ -179,16 +211,22 @@ class OptionChainBuilder:
 
             ce = data.get("CE")
             pe = data.get("PE")
+            
+            ce_valid = ce and (now - ce.last_update).total_seconds() <= 30
+            pe_valid = pe and (now - pe.last_update).total_seconds() <= 30
+            
+            if not ce_valid and not pe_valid:
+                continue
 
             strikes.append(
                 {
                     "strike": strike,
-                    "call_oi": ce.oi if ce else 0,
-                    "call_ltp": ce.ltp if ce else 0,
-                    "call_volume": ce.volume if ce else 0,
-                    "put_oi": pe.oi if pe else 0,
-                    "put_ltp": pe.ltp if pe else 0,
-                    "put_volume": pe.volume if pe else 0,
+                    "call_oi": ce.oi if ce_valid else 0,
+                    "call_ltp": ce.ltp if ce_valid else 0,
+                    "call_volume": ce.volume if ce_valid else 0,
+                    "put_oi": pe.oi if pe_valid else 0,
+                    "put_ltp": pe.ltp if pe_valid else 0,
+                    "put_volume": pe.volume if pe_valid else 0,
                 }
             )
 
@@ -196,6 +234,8 @@ class OptionChainBuilder:
         total_call_oi = sum(strike.get("call_oi", 0) for strike in strikes)
         total_put_oi = sum(strike.get("put_oi", 0) for strike in strikes)
         pcr = total_put_oi / total_call_oi if total_call_oi > 0 else 0.0
+
+        logger.info(f"[CHAIN_OI_SUMMARY] strikes={len(strikes)} call_oi={total_call_oi} put_oi={total_put_oi}")
 
         mark_health("option_chain")
 
@@ -334,12 +374,13 @@ class OptionChainBuilder:
 
             opt = self.chains[symbol][strike][right]
 
-            if ltp is None or ltp < 0:
-                return
-
-            opt.ltp = ltp
-            opt.oi = max(0, oi)
-            opt.volume = max(0, volume)
+            if ltp is not None and ltp >= 0:
+                opt.ltp = ltp
+            if oi > 0:
+                opt.oi = oi
+            if volume > 0:
+                opt.volume = volume
+                
             opt.last_update = datetime.utcnow()
             
             logger.debug(f"OPTION TICK UPDATED → {symbol} {strike}{right} ltp={ltp} oi={oi}")
@@ -355,6 +396,18 @@ class OptionChainBuilder:
             logger.error("Option tick update failed: %s", e)
 
     # --------------------------------------------------
+
+    def get_option_ltp(self, symbol: str, strike: float, right: str) -> float:
+        """Helper to get LTP for a specific option contract"""
+        try:
+            if symbol not in self.chains: return 0.0
+            strike = float(round(strike, 2))
+            if strike not in self.chains[symbol]: return 0.0
+            if right not in self.chains[symbol][strike]: return 0.0
+            return self.chains[symbol][strike][right].ltp
+        except Exception as e:
+            logger.error(f"Error getting option ltp: {e}")
+            return 0.0
 
     def get_chain(self, symbol: str):
 

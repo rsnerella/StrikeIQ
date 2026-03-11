@@ -24,6 +24,10 @@ class MarketSnapshot(Base):
     rsi = Column(Float, nullable=True)
     momentum_score = Column(Float, nullable=True)
     regime = Column(String, nullable=True)
+    pcr = Column(Float, nullable=True)
+    total_call_oi = Column(BigInteger, nullable=True)
+    total_put_oi = Column(BigInteger, nullable=True)
+    atm_strike = Column(Float, nullable=True)
 
 
 class OptionChainSnapshot(Base):

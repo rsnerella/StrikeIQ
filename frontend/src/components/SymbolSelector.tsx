@@ -1,15 +1,24 @@
 "use client";
 import React from 'react';
-import { useMarketStore } from '@/stores/marketStore';
+import { useMarketContextStore } from '@/stores/marketContextStore';
 import { useExpirySelector } from '@/hooks/useExpirySelector';
+import { resubscribeMarketWS } from '@/services/wsService';
 import { PremiumDropdown } from '@/components/ui/PremiumDropdown';
 import { BarChart2, Calendar } from 'lucide-react';
 
 const SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY"];
 
 export default function SymbolSelector() {
-  const currentSymbol = useMarketStore(state => state.currentSymbol);
-  const setCurrentSymbol = useMarketStore(state => state.setCurrentSymbol);
+  const currentSymbol = useMarketContextStore(state => state.symbol);
+  const setCurrentSymbol = useMarketContextStore(state => state.setSymbol);
+  
+  const timeframe = useMarketContextStore(state => state.timeframe || '1m');
+  const setTimeframe = useMarketContextStore(state => state.setTimeframe);
+  
+  const handleSymbolChange = (sym: string) => {
+    setCurrentSymbol(sym);
+    // The expiry hook handles the resubscribe when it fetches the new expirylist and sets the new selected expiry
+  };
 
   const {
     expiryList,
@@ -61,7 +70,7 @@ export default function SymbolSelector() {
             return (
               <button
                 key={s}
-                onClick={() => setCurrentSymbol(s)}
+                onClick={() => handleSymbolChange(s)}
                 style={{
                   padding: '5px 16px',
                   borderRadius: 8,
@@ -81,6 +90,56 @@ export default function SymbolSelector() {
               </button>
             );
           })}
+        </div>
+
+        {/* Timeframe toggle */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 12 }}>
+          {/* Label */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 2 }}>
+            <span style={{
+              fontSize: 10,
+              fontFamily: "'JetBrains Mono', monospace",
+              fontWeight: 700,
+              letterSpacing: '0.20em',
+              textTransform: 'uppercase',
+              color: 'rgba(148,163,184,0.50)',
+            }}>
+              TF
+            </span>
+          </div>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 2,
+            padding: 3,
+            borderRadius: 10,
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.08)',
+          }}>
+            {['1m', '5m', '15m'].map(tf => {
+              const active = tf === timeframe;
+              return (
+                <button
+                  key={tf}
+                  onClick={() => setTimeframe(tf)}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    fontSize: 10,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    transition: 'all 0.18s ease',
+                    background: active ? 'rgba(0,229,255,0.12)' : 'transparent',
+                    color: active ? '#00E5FF' : 'rgba(148,163,184,0.60)',
+                    border: active ? '1px solid rgba(0,229,255,0.28)' : '1px solid transparent',
+                  }}
+                >
+                  {tf}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 

@@ -73,7 +73,7 @@ interface StatCardsRowProps {
 }
 
 export function StatCardsRow({ data, isAnalyticsEnabled }: StatCardsRowProps) {
-    const pcr = data?.analytics?.pcr ?? 1;
+    const pcr = data?.analytics?.bias?.pcr_value ?? data?.analytics?.pcr ?? 1;
     const totalOI = (data?.analytics?.total_call_oi || 0) + (data?.analytics?.total_put_oi || 0);
 
     return (

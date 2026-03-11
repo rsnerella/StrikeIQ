@@ -235,6 +235,7 @@ def _wave_result(pattern: str, prob: int, pts: List, note: str = "") -> Dict:
         "probability": prob,
         "waves":       {},
         "levels":      {},
+        "points":      [{"time": p["ts"], "price": p["price"]} for p in (pts or [])],
         "note":        note,
     }
 
@@ -352,6 +353,7 @@ class WaveEngine:
             return {
                 "symbol":  symbol,
                 "elliott": elliott,
+                "elliott_points": elliott.get("points", []),
                 "neo":     neo,
                 "swing_highs": [s["price"] for s in sh[-5:]],
                 "swing_lows":  [s["price"] for s in sl[-5:]],

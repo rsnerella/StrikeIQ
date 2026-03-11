@@ -1,98 +1,77 @@
-import psycopg2
-import os
-from typing import Optional
 import logging
+from typing import Optional, List, Dict, Any
+from sqlalchemy import text
+from app.models.database import engine, AsyncSessionLocal
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class AIDatabase:
+    """
+    Refactored AI Database wrapper using centralized SQLAlchemy AsyncSession.
+    Ensures all AI writes go to Supabase.
+    """
     def __init__(self):
-        self.db_config = {
-            'dbname': os.getenv('DB_NAME', 'strikeiq'),
-            'user': os.getenv('DB_USER', 'strikeiq'),
-            'password': os.getenv('DB_PASSWORD', 'strikeiq123'),
-            'host': os.getenv('DB_HOST', 'localhost'),
-            'port': os.getenv('DB_PORT', '5432')
-        }
-        self.connection = None
-        self.cursor = None
-        
-    def connect(self):
-        """Establish database connection"""
+        pass
+            
+    async def execute_query(self, query: str, params: tuple = None) -> bool:
+        """Execute a query with parameters (Async)"""
         try:
-            self.connection = psycopg2.connect(**self.db_config)
-            self.cursor = self.connection.cursor()
-            logger.info("Successfully connected to PostgreSQL database")
+            # Map %s to :name for SQLAlchemy text() if needed
+            # But simpler: just use text() and params
+            async with engine.begin() as conn:
+                # Basic conversion of %s to :param_N
+                if "%s" in query:
+                    query, params_dict = self._convert_params(query, params)
+                    await conn.execute(text(query), params_dict)
+                else:
+                    await conn.execute(text(query), params or {})
             return True
         except Exception as e:
-            logger.error(f"Failed to connect to database: {e}")
+            logger.error(f"AI DB execute failed: {e}")
             return False
             
-    def disconnect(self):
-        """Close database connection"""
+    async def fetch_query(self, query: str, params: tuple = None) -> List[Any]:
+        """Execute a query and fetch results (Async)"""
         try:
-            if self.cursor:
-                self.cursor.close()
-            if self.connection:
-                self.connection.close()
-            logger.info("Database connection closed")
+            async with engine.connect() as conn:
+                if "%s" in query:
+                    query, params_dict = self._convert_params(query, params)
+                    result = await conn.execute(text(query), params_dict)
+                else:
+                    result = await conn.execute(text(query), params or {})
+                return [list(row) for row in result.fetchall()]
         except Exception as e:
-            logger.error(f"Error closing database connection: {e}")
-            
-    def execute_query(self, query: str, params: tuple = None):
-        """Execute a query with parameters"""
-        try:
-            if not self.connection or self.connection.closed:
-                if not self.connect():
-                    logger.warning("AI DB connection unavailable — skipping query")
-                    return False
-            
-            self.cursor.execute(query, params or ())
-            self.connection.commit()
-            logger.info(f"Query executed successfully: {query[:50]}...")
-            return True
-        except Exception as e:
-            logger.error(f"Error executing query: {e}")
-            if self.connection:
-                try:
-                    self.connection.rollback()
-                    logger.info("Transaction rolled back")
-                except Exception as rollback_error:
-                    logger.error(f"Error during rollback: {rollback_error}")
-            return False
-            
-    def fetch_query(self, query: str, params: tuple = None):
-        """Execute a query and fetch results"""
-        try:
-            if not self.connection or self.connection.closed:
-                if not self.connect():
-                    logger.warning("AI DB connection unavailable — skipping query")
-                    return []
-            
-            self.cursor.execute(query, params or ())
-            results = self.cursor.fetchall()
-            logger.info(f"Fetched {len(results)} rows")
-            return results
-        except Exception as e:
-            logger.error(f"AI DB query failed: {e}")
+            logger.error(f"AI DB fetch failed: {e}")
             return []
             
-    def fetch_one(self, query: str, params: tuple = None):
-        """Execute a query and fetch single result"""
+    async def fetch_one(self, query: str, params: tuple = None) -> Optional[Any]:
+        """Execute a query and fetch single result (Async)"""
         try:
-            if not self.connection or self.connection.closed:
-                if not self.connect():
-                    logger.warning("AI DB connection unavailable — skipping query")
-                    return None
-            
-            self.cursor.execute(query, params or ())
-            result = self.cursor.fetchone()
-            return result
+            async with engine.connect() as conn:
+                if "%s" in query:
+                    query, params_dict = self._convert_params(query, params)
+                    result = await conn.execute(text(query), params_dict)
+                else:
+                    result = await conn.execute(text(query), params or {})
+                row = result.fetchone()
+                return list(row) if row else None
         except Exception as e:
-            logger.error(f"AI DB query failed: {e}")
+            logger.error(f"AI DB fetch_one failed: {e}")
             return None
+
+    def _convert_params(self, query: str, params: tuple) -> tuple:
+        """Helper to convert %s to named parameters for SQLAlchemy"""
+        if not params:
+            return query, {}
+        
+        new_query = query
+        params_dict = {}
+        for i, val in enumerate(params):
+            placeholder = f"p{i}"
+            new_query = new_query.replace("%s", f":{placeholder}", 1)
+            params_dict[placeholder] = val
+        return new_query, params_dict
 
 # Global database instance
 ai_db = AIDatabase()
+

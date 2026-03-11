@@ -7,7 +7,7 @@
 
 import { create } from "zustand"
 import { uiLog } from "@/utils/uiLogger"
-import { useMarketStore } from "@/stores/marketStore"
+import { useMarketContextStore } from "@/stores/marketContextStore"
 
 interface WSStore {
   connected: boolean
@@ -95,8 +95,8 @@ export const useWSStore = create<WSStore>((set, get) => ({
       })
       
       // PATCH 2: Filter WebSocket index ticks by selected symbol
-      const marketStore = useMarketStore.getState()
-      const selectedSymbol = marketStore?.currentSymbol || 'NIFTY'
+      const marketStore = useMarketContextStore.getState()
+      const selectedSymbol = marketStore?.symbol || 'NIFTY'
       
       // Use message.symbol instead of tick.symbol for filtering
       if (message.symbol !== selectedSymbol) {
@@ -122,8 +122,8 @@ export const useWSStore = create<WSStore>((set, get) => ({
       const tick = message.data
       
       // PERFORMANCE: Filter by selected symbol to prevent unnecessary updates
-      const marketStore = useMarketStore.getState()
-      const selectedSymbol = marketStore?.currentSymbol || 'NIFTY'
+      const marketStore = useMarketContextStore.getState()
+      const selectedSymbol = marketStore?.symbol || 'NIFTY'
       
       if (message.symbol !== selectedSymbol) {
         console.log("OPTION TICK FILTERED", {
@@ -189,8 +189,8 @@ export const useWSStore = create<WSStore>((set, get) => ({
       const store = get()
 
       // PERFORMANCE: Filter by selected symbol to prevent unnecessary updates
-      const marketStore = useMarketStore.getState()
-      const selectedSymbol = marketStore?.currentSymbol || 'NIFTY'
+      const marketStore = useMarketContextStore.getState()
+      const selectedSymbol = marketStore?.symbol || 'NIFTY'
       
       if (message.symbol !== selectedSymbol) {
         console.log("OPTION CHAIN UPDATE FILTERED", {
@@ -463,8 +463,8 @@ export const useWSStore = create<WSStore>((set, get) => ({
     if (!payload) return
 
     // PATCH 1: Prevent symbol mismatch from analytics
-    const marketStore = useMarketStore.getState()
-    const selectedSymbol = marketStore?.currentSymbol || 'NIFTY'
+    const marketStore = useMarketContextStore.getState()
+    const selectedSymbol = marketStore?.symbol || 'NIFTY'
     
     if (payload.symbol && payload.symbol !== selectedSymbol) {
       return

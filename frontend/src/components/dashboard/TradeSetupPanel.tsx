@@ -13,6 +13,7 @@ export function TradeSetupPanel({ data }: TradeSetupPanelProps) {
     // Extract trade setup metrics from intelligence and analytics data
     const bias = (data as any)?.intelligence?.bias?.label || 'neutral';
     const structuralRegime = (data as any)?.intelligence?.structural_regime || '';
+    const tradeSuggestion = (data as any)?.intelligence?.trade_suggestion;
     const expectedMove = (data as any)?.intelligence?.expected_move || 0;
     const supportLevel = (data as any)?.intelligence?.support_level || 0;
     const resistanceLevel = (data as any)?.intelligence?.resistance_level || 0;
@@ -25,6 +26,18 @@ export function TradeSetupPanel({ data }: TradeSetupPanelProps) {
 
     // Calculate trade setup
     const calculateTradeSetup = () => {
+        if (tradeSuggestion) {
+            return {
+                direction: tradeSuggestion.signal?.replace('BUY_', '') || 'NEUTRAL',
+                entryZone: tradeSuggestion.entry || spot,
+                target1: tradeSuggestion.target || spot,
+                target2: tradeSuggestion.target || spot, // Fallback to target1
+                stopLoss: tradeSuggestion.stop_loss || spot,
+                confidence: tradeSuggestion.confidence || (hasLiveData ? regimeConfidence : 0),
+                regime: tradeSuggestion.regime || (structuralRegime ? structuralRegime.replace(/_/g, ' ').toUpperCase() : 'SCANNING')
+            };
+        }
+
         const isBullish = bias?.toLowerCase() === 'bullish';
         const isBearish = bias?.toLowerCase() === 'bearish';
         const isPositiveGamma = structuralRegime?.toLowerCase() === 'positive_gamma';
@@ -244,10 +257,16 @@ export function TradeSetupPanel({ data }: TradeSetupPanelProps) {
                 </div>
 
                 <div className="text-[10px] font-bold font-mono tracking-widest text-center py-2 px-3 rounded-lg bg-blue-500/5 border border-blue-500/10 uppercase text-blue-400/80">
-                    {tradeSetup.direction === 'NEUTRAL'
-                        ? 'WAIT FOR STRUCTURAL CONFIRMATION'
-                        : `HIGH CONVICTION ${tradeSetup.direction} ASCERTAINED`
-                    }
+                    {tradeSuggestion?.reason ? (
+                        <span className="flex flex-col gap-1">
+                            <span className="opacity-60">{tradeSetup.direction === 'NEUTRAL' ? 'SCANNING' : `${tradeSetup.direction} CONFIRMED`}</span>
+                            <span className="text-[9px] lowercase italic">{tradeSuggestion.reason}</span>
+                        </span>
+                    ) : (
+                        tradeSetup.direction === 'NEUTRAL'
+                            ? 'WAIT FOR STRUCTURAL CONFIRMATION'
+                            : `HIGH CONVICTION ${tradeSetup.direction} ASCERTAINED`
+                    )}
                 </div>
             </div>
         </div>

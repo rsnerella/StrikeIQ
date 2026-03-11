@@ -19,7 +19,7 @@ class MarketBiasResult:
     vwap: float
     current_price: float
     oi_change_5min: float  # OI change over 5 minutes
-    pcr: float  # Put-Call Ratio
+    pcr_value: float  # Put-Call Ratio
     divergence_detected: bool
     divergence_type: str  # "bullish", "bearish", "none"
     bias_strength: float  # 0-100 bias strength
@@ -43,8 +43,9 @@ class MarketBiasEngine:
             calls = data.get("calls", [])
             puts = data.get("puts", [])
             
-            # Calculate VWAP from option chain
-            vwap = self._calculate_vwap(calls, puts, spot)
+            # Calculate VWAP from index ticks
+            index_vol = data.get("index_volume", 1.0)
+            vwap = self._calculate_vwap(symbol, spot, index_vol)
             price_vs_vwap = ((spot - vwap) / vwap) * 100 if vwap > 0 else 0
             
             # Calculate OI change over 5 minutes
@@ -69,7 +70,7 @@ class MarketBiasEngine:
                 vwap=vwap,
                 current_price=spot,
                 oi_change_5min=oi_change_5min,
-                pcr=pcr,
+                pcr_value=float(pcr),
                 divergence_detected=divergence_detected,
                 divergence_type=divergence_type,
                 bias_strength=bias_strength,
@@ -85,40 +86,26 @@ class MarketBiasEngine:
                 vwap=0,
                 current_price=data.get("spot", 0),
                 oi_change_5min=0,
-                pcr=1.0,
+                pcr_value=1.0,
                 divergence_detected=False,
                 divergence_type="none",
                 bias_strength=50,
                 timestamp=data.get("timestamp", "")
             )
     
-    def _calculate_vwap(self, calls: List[Dict], puts: List[Dict], spot: float) -> float:
-        """Calculate Volume Weighted Average Price from option chain"""
+    def _calculate_vwap(self, symbol: str, spot: float, volume: float) -> float:
+        """Calculate Volume Weighted Average Price using index price ticks only"""
         try:
-            total_volume = 0
-            weighted_sum = 0
+            if not hasattr(self, 'vwap_data'):
+                self.vwap_data = {}
+            if symbol not in self.vwap_data:
+                self.vwap_data[symbol] = {'sum_pv': 0.0, 'sum_v': 0.0}
             
-            # Include calls
-            for call in calls:
-                volume = call.get("volume", 0)
-                strike = call.get("strike", 0)
-                if volume > 0:
-                    weighted_sum += strike * volume
-                    total_volume += volume
+            vol = volume if volume > 0 else 1.0
+            self.vwap_data[symbol]['sum_pv'] += spot * vol
+            self.vwap_data[symbol]['sum_v'] += vol
             
-            # Include puts
-            for put in puts:
-                volume = put.get("volume", 0)
-                strike = put.get("strike", 0)
-                if volume > 0:
-                    weighted_sum += strike * volume
-                    total_volume += volume
-            
-            # Include spot price with minimum weight
-            weighted_sum += spot * 1
-            total_volume += 1
-            
-            return weighted_sum / total_volume if total_volume > 0 else spot
+            return self.vwap_data[symbol]['sum_pv'] / self.vwap_data[symbol]['sum_v']
             
         except Exception as e:
             logger.error(f"Error calculating VWAP: {e}")

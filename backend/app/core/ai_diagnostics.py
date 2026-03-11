@@ -62,7 +62,7 @@ def validate_oi(chain):
     diag("AI_TEST", f"PUT OI: {total_put_oi}")
 
     if total_call_oi == 0 and total_put_oi == 0:
-        diag("AI_TEST", "OI data invalid: both zero")
+        diag("AI_TEST", "OI data invalid: both Call and Put OI are zero")
         return False
 
     return True

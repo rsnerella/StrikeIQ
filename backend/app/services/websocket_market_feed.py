@@ -22,6 +22,7 @@ from app.services.market_session_manager import get_market_session_manager
 from app.services.upstox_protobuf_parser_v3 import decode_protobuf_message, extract_index_price
 from app.proto.MarketDataFeedV3_pb2 import FeedResponse
 from app.core.live_market_state import MarketStateManager
+from app.core.market_context import MARKET_CONTEXT
 from app.services.live_chain_manager import chain_manager
 from app.core.ws_manager import manager
 from app.services.instrument_registry import get_instrument_registry
@@ -609,6 +610,10 @@ class WebSocketMarketFeed:
 
         logger.info(f"Switching subscription → {symbol} {expiry}")
 
+        # UPDATE GLOBAL CONTEXT
+        MARKET_CONTEXT["symbol"] = symbol
+        MARKET_CONTEXT["expiry"] = expiry
+
         await self.unsubscribe_options()
         
         # Prevent race condition between unsub and sub
@@ -621,6 +626,8 @@ class WebSocketMarketFeed:
             index_key = "NSE_INDEX|Nifty 50"
         elif symbol == "BANKNIFTY":
             index_key = "NSE_INDEX|Nifty Bank"
+        elif symbol == "FINNIFTY":
+            index_key = "NSE_INDEX|Nifty Fin Service"
         else:
             logger.error(f"Unsupported symbol: {symbol}")
             index_key = None
@@ -1159,6 +1166,14 @@ class WebSocketMarketFeed:
                         float(ltp)
                     )
                     
+                    try:
+                        from app.services.candle_builder import candle_builder
+                        vol = data.get("volume", 0.0)
+                        ts = data.get("timestamp", time.time())
+                        candle_builder.push_tick(symbol, float(ltp), float(vol), ts)
+                    except Exception as e:
+                        logger.debug(f"Candle builder tick failed {e}")
+                    
                     logger.info(f"PIPELINE → chain updated {symbol}")
                     
                     # Store last spot price for ATM calculation
@@ -1224,8 +1239,8 @@ class WebSocketMarketFeed:
                 # CRITICAL DEBUG: Log raw Upstox payload
                 logger.info(f"RAW TICK PAYLOAD → {data}")
                 
-                if not all([strike, right, ltp]):
-                    return  # Skip malformed ticks
+                if not strike or not right:
+                    return  # Skip malformed ticks (LTP is optional for OI updates)
                 
                 # CRITICAL FIX: Parse OI from multiple possible field names
                 oi = (

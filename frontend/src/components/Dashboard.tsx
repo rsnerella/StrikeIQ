@@ -4,7 +4,7 @@ import React, { useEffect, memo } from 'react';
 import { AlertTriangle, Minus } from 'lucide-react';
 import { useLiveMarketData } from '../hooks/useLiveMarketData';
 import { useExpirySelector } from '../hooks/useExpirySelector';
-import { useMarketStore } from '../stores/marketStore';
+import { useMarketContextStore } from '../stores/marketContextStore';
 import { useModeGuard, useEffectiveSpot } from './SafeModeGuard';
 import SymbolSelector from './SymbolSelector';
 import dynamic from 'next/dynamic';
@@ -188,8 +188,8 @@ const DASHBOARD_CSS = `
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function Dashboard({ initialSymbol = 'NIFTY' }: DashboardProps) {
-  const setCurrentSymbol = useMarketStore(state => state.setCurrentSymbol);
-  const currentSymbol = useMarketStore(state => state.currentSymbol);
+  const setCurrentSymbol = useMarketContextStore(state => state.setSymbol);
+  const currentSymbol = useMarketContextStore(state => state.symbol);
 
   useEffect(() => {
     if (currentSymbol === 'NIFTY' && initialSymbol !== 'NIFTY') {
@@ -255,8 +255,8 @@ export default function Dashboard({ initialSymbol = 'NIFTY' }: DashboardProps) {
         <div className="dash-grid">
 
           {/* ROW 1 — Symbol Selector (full width) */}
-          <div className="col-12">
-            <div className="trading-panel">
+          <div className="col-12" style={{ position: 'relative', zIndex: 100 }}>
+            <div className="trading-panel" style={{ overflow: 'visible' }}>
               <SymbolSelector />
             </div>
           </div>
@@ -315,7 +315,7 @@ export default function Dashboard({ initialSymbol = 'NIFTY' }: DashboardProps) {
             <TradeSetupPanel data={data} />
           </div>
           <div className="col-4">
-            <ChartIntelligencePanel />
+            <ChartIntelligencePanel data={data} />
           </div>
 
           {/* ROW 8 — Volatility Regime (full width) */}

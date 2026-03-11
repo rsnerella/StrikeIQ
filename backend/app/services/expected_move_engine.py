@@ -266,10 +266,14 @@ class ExpectedMoveEngine:
             if combined_premium <= 0 or spot <= 0:
                 return 0
             
-            # Rough approximation: IV ≈ (premium / spot) * sqrt(365) * 100
-            iv_approx = (combined_premium / spot) * np.sqrt(365) * 100
+            dte = self._calculate_time_to_expiry(expiry)
+            if dte <= 0:
+                dte = 0.01  # use small fraction if expires today or in past
             
-            return min(max(iv_approx, 200), 0)  # Cap between 0-200%
+            # Correct approximation: IV ≈ (premium / spot) * sqrt(365 / DTE_days) * 100
+            iv_approx = (combined_premium / spot) * np.sqrt(365 / dte) * 100
+            
+            return float(min(max(iv_approx, 0), 200))  # Cap between 0-200%
             
         except Exception as e:
             logger.error(f"Error calculating IV: {e}")

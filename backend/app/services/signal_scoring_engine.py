@@ -149,7 +149,7 @@ class SignalScoringEngine:
         """Score OI flow: velocity and PCR."""
         try:
             structural = analytics.get("structural", {})
-            pcr = analytics.get("bias", {}).get("pcr", 1.0) or 1.0
+            pcr = float(analytics.get("bias", {}).get("pcr_value", 1.0) or 1.0)
             oi_velocity = structural.get("oi_velocity", 0)
 
             score = 0.0

@@ -120,7 +120,6 @@ export function connectMarketWS() {
       lastUpdate: Date.now()
     })
 
-    // P7: dynamic expiry fallback — next Thursday from today
     const getNextThursday = () => {
       const d = new Date()
       const day = d.getDay()
@@ -129,15 +128,21 @@ export function connectMarketWS() {
       return d.toISOString().split('T')[0]
     }
     const storedExpiry = localStorage.getItem("selectedExpiry")
-    const expiry = storedExpiry && storedExpiry.length > 5 ? storedExpiry : getNextThursday()
+    const fallbackExpiry = storedExpiry && storedExpiry.length > 5 ? storedExpiry : getNextThursday()
+
+    const stateSymbol = (window as any).__last_ws_symbol || "NIFTY";
+    const stateExpiry = (window as any).__last_ws_expiry || fallbackExpiry;
 
     socket.send(JSON.stringify({
       type: "subscribe",
-      symbol: "NIFTY",
-      expiry
+      symbol: stateSymbol,
+      expiry: stateExpiry
     }))
 
-    console.log("📤 SUBSCRIBE SENT", { symbol: "NIFTY", expiry })
+    ;(window as any).__last_ws_symbol = stateSymbol;
+    ;(window as any).__last_ws_expiry = stateExpiry;
+
+    console.log("📤 INITIAL SUBSCRIBE SENT", { symbol: stateSymbol, expiry: stateExpiry })
 
     if (!visibilityListenerAdded) {
 
@@ -319,5 +324,39 @@ export function getWSConnectionStatus() {
     connecting: isConnecting,
     reconnectAttempts,
     url: WS_URL
+  }
+}
+
+export function resubscribeMarketWS(symbol: string, expiry: string | null) {
+  if (!symbol) return;
+  
+  const oldSymbol = (window as any).__last_ws_symbol;
+  const oldExpiry = (window as any).__last_ws_expiry;
+  
+  if (oldSymbol === symbol && oldExpiry === expiry) {
+    return; // Prevent duplicate subscriptions
+  }
+
+  (window as any).__last_ws_symbol = symbol;
+  (window as any).__last_ws_expiry = expiry;
+  
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    if (oldSymbol) {
+      socket.send(JSON.stringify({
+        type: "unsubscribe",
+        symbol: oldSymbol,
+        expiry: oldExpiry
+      }));
+      console.log("📤 UNSUBSCRIBE SENT", { symbol: oldSymbol, expiry: oldExpiry });
+    }
+    
+    socket.send(JSON.stringify({
+      type: "subscribe",
+      symbol,
+      expiry
+    }));
+    console.log("📤 RESUBSCRIBE SENT", { symbol, expiry });
+  } else {
+    connectMarketWS();
   }
 }

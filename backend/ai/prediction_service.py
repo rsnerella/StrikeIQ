@@ -12,138 +12,96 @@ class PredictionService:
         # Use SQLAlchemy session instead of duplicate database connection
         pass
         
-    def store_prediction(self, formula_id: str, signal: str, confidence: float, spot: float):
-        """
-        Store a prediction signal using SQLAlchemy ORM
-        
-        Args:
-            formula_id: Formula identifier (e.g., F01, F02, etc.)
-            signal: Trading signal (BUY/SELL)
-            confidence: Confidence level (0.0 to 1.0)
-            spot: Current NIFTY spot price
-        """
+    async def store_prediction(self, formula_id: str, signal: str, confidence: float, spot: float, 
+                               snapshot_id: Optional[int] = None, strike: Optional[float] = None,
+                               direction: Optional[str] = None, entry: Optional[float] = None,
+                               stop_loss: Optional[float] = None, target: Optional[float] = None,
+                               reason: Optional[str] = None, entry_premium: Optional[float] = None,
+                               expected_move: Optional[float] = None):
         try:
-            # Get database session
-            db = SessionLocal()
-            
-            # Create signal log record
-            signal_log = AiSignalLog(
-                symbol="BANKNIFTY",  # Default symbol for now
-                signal=f"{formula_id}_{signal}",  # Combine formula and signal
-                confidence=confidence,
-                spot_price=spot,
-                metadata={
-                    'formula_id': formula_id,
-                    'raw_signal': signal,
-                    'prediction_type': 'formula_prediction'
-                }
-            )
-            
-            # Add to session and commit
-            db.add(signal_log)
-            db.commit()
-            
-            logger.info(f"Prediction stored: {formula_id} {signal} @ {spot} (confidence: {confidence})")
-            return True
-            
+            async with AsyncSessionLocal() as db:
+                signal_log = AiSignalLog(
+                    snapshot_id=snapshot_id,
+                    formula_id=formula_id,
+                    symbol="NIFTY", # Standardized to NIFTY
+                    signal=f"{formula_id}_{signal}",
+                    confidence=confidence,
+                    spot_price=spot,
+                    strike=strike,
+                    direction=direction or signal,
+                    entry=entry or spot,
+                    stop_loss=stop_loss,
+                    target=target,
+                    signal_reason=reason,
+                    entry_premium=entry_premium,
+                    signal_metadata={
+                        'formula_id': formula_id,
+                        'raw_signal': signal,
+                        'prediction_type': 'formula_prediction',
+                        'expected_move': expected_move
+                    }
+                )
+                db.add(signal_log)
+                await db.commit()
+                logger.info(f"Prediction stored: {formula_id} {signal} @ {spot} (Snapshot: {snapshot_id})")
+                return True
         except Exception as e:
             logger.error(f"Error storing prediction: {e}")
-            # Rollback on error
-            try:
-                db.rollback()
-            except:
-                pass
             return False
-        finally:
-            # Always close session
-            try:
-                db.close()
-            except:
-                pass
             
-    def get_pending_predictions(self):
-        """Get all predictions that haven't been checked for outcomes"""
+    async def get_pending_predictions(self):
+        """Get pending predictions using async SQLAlchemy"""
         try:
-            # Get database session
-            db = SessionLocal()
-            
-            # Query for recent formula predictions
+            from sqlalchemy import select
             from datetime import timedelta
-            cutoff_time = datetime.now() - timedelta(minutes=5)
+            cutoff_time = datetime.now() - timedelta(minutes=60) # Increased window
             
-            signals = db.query(AiSignalLog).filter(
-                AiSignalLog.metadata['prediction_type'].astext == 'formula_prediction'
-            ).filter(
-                AiSignalLog.timestamp >= cutoff_time
-            ).all()
-            
-            pending_predictions = []
-            for signal in signals:
-                # Extract formula info from metadata
-                metadata = signal.metadata or {}
-                formula_id = metadata.get('formula_id', 'UNKNOWN')
-                raw_signal = metadata.get('raw_signal', 'UNKNOWN')
+            async with AsyncSessionLocal() as db:
+                stmt = select(AiSignalLog).where(
+                    AiSignalLog.timestamp >= cutoff_time
+                )
+                result = await db.execute(stmt)
+                signals = result.scalars().all()
                 
-                pending_predictions.append({
-                    'id': signal.id,
-                    'formula_id': formula_id,
-                    'signal': raw_signal,
-                    'confidence': signal.confidence,
-                    'nifty_spot': signal.spot_price,
-                    'prediction_time': signal.timestamp
-                })
-                
-            logger.info(f"Found {len(pending_predictions)} pending predictions")
-            return pending_predictions
-            
+                pending = []
+                for s in signals:
+                    meta = s.signal_metadata or {}
+                    if meta.get('prediction_type') == 'formula_prediction' and not meta.get('outcome_checked'):
+                        pending.append({
+                            'id': s.id,
+                            'formula_id': meta.get('formula_id', 'UNKNOWN'),
+                            'signal': meta.get('raw_signal', 'UNKNOWN'),
+                            'confidence': s.confidence,
+                            'nifty_spot': s.spot_price,
+                            'prediction_time': s.timestamp
+                        })
+                return pending
         except Exception as e:
             logger.error(f"Error fetching pending predictions: {e}")
             return []
-        finally:
-            try:
-                db.close()
-            except:
-                pass
             
-    def mark_prediction_checked(self, prediction_id: int, outcome: str):
-        """Mark a prediction as checked and update its outcome"""
+    async def mark_prediction_checked(self, prediction_id: int, outcome: str):
         try:
-            # Get database session
-            db = SessionLocal()
-            
-            # Find the signal log record
-            signal_log = db.query(AiSignalLog).filter(AiSignalLog.id == prediction_id).first()
-            
-            if signal_log:
-                # Update metadata with outcome
-                metadata = signal_log.metadata or {}
-                metadata['outcome'] = outcome
-                metadata['outcome_time'] = datetime.now().isoformat()
-                metadata['outcome_checked'] = True
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import select
+                stmt = select(AiSignalLog).where(AiSignalLog.id == prediction_id)
+                result = await db.execute(stmt)
+                signal_log = result.scalar_one_or_none()
                 
-                signal_log.metadata = metadata
-                db.commit()
-                
-                logger.info(f"Prediction {prediction_id} marked as checked with outcome: {outcome}")
-                return True
-            else:
-                logger.error(f"Prediction {prediction_id} not found")
+                if signal_log:
+                    metadata = dict(signal_log.signal_metadata or {})
+                    metadata['outcome'] = outcome
+                    metadata['outcome_time'] = datetime.now().isoformat()
+                    metadata['outcome_checked'] = True
+                    
+                    signal_log.signal_metadata = metadata
+                    signal_log.outcome_checked = True
+                    await db.commit()
+                    return True
                 return False
-                
         except Exception as e:
-            logger.error(f"Error marking prediction as checked: {e}")
-            # Rollback on error
-            try:
-                db.rollback()
-            except:
-                pass
+            logger.error(f"Error marking prediction checked: {e}")
             return False
-        finally:
-            # Always close session
-            try:
-                db.close()
-            except:
-                pass
 
 # Global prediction service instance
 prediction_service = PredictionService()
