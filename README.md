@@ -17,6 +17,8 @@ AI-powered options market intelligence platform for Indian markets (NIFTY & BANK
 - **Axios**: 1.7.0
 - **Recharts**: 2.12.0
 - **Lucide React**: 0.379.0
+- **Lightweight-charts**: 4.2.1 (TradingView Engine)
+- **Zustand**: 4.5.2 (State Management)
 
 ### Backend
 - **Python**: 3.13.12 (Latest stable)
@@ -43,6 +45,7 @@ AI-powered options market intelligence platform for Indian markets (NIFTY & BANK
 - **Expiry Intelligence**: Pin probability modeling and magnet analysis
 - **Proactive Alerts**: Real-time structural alerts with severity levels
 - **Confidence Scoring**: Quantified conviction metrics for all signals
+- **Chart Analysis Engine**: Combines waves, zones, and structure for unified chart intelligence
 
 ### Market Bias Engine
 - Price vs VWAP analysis
@@ -69,6 +72,13 @@ AI-powered options market intelligence platform for Indian markets (NIFTY & BANK
 - **Intelligence Score Cards**: Conviction, directional pressure, instability
 - **Gamma Pressure Map**: Strike-level magnets and cliffs visualization
 - **OI Heatmap**: Interactive options interest visualization with smooth scrolling
+- **Advanced Price Chart**: Professional TradingView-grade charting with:
+  - **Elliott Wave Visualization**: Automatic wave point plotting
+  - **SMC Order Blocks**: Bullish/Bearish block level detection
+  - **ICT Equilibrium**: Premium/Discount zone equilibrium lines
+  - **Gamma Walls**: Real-time resistance (Call) and support (Put) walls
+  - **AI Trade Signals**: Visual entry, target, and stop-loss overlays
+  - **Liquidity Sweeps**: Market liquidity grab markers
 - **Structural Alerts Panel**: Proactive alerts with severity levels
 - **Flow + Gamma Interaction**: Decision-oriented interaction analysis
 - **Regime Dynamics Panel**: Enhanced regime stability and acceleration
@@ -190,6 +200,8 @@ StrikeIQ/
 │   └── main.py             # FastAPI application entry point
 ├── frontend/                # Next.js frontend
 │   ├── components/           # React components
+│   │   ├── charts/           # Professional Charting
+│   │   │   └── AdvancedPriceChart.tsx  # TradingView Lightweight Charts integration
 │   │   ├── intelligence/     # Intelligence UI components
 │   │   │   ├── StructuralBannerFinal.tsx    # Regime banner
 │   │   │   ├── ConvictionPanelFinal.tsx     # Intelligence score cards
@@ -198,10 +210,14 @@ StrikeIQ/
 │   │   │   ├── InteractionPanelFinal.tsx     # Flow + Gamma interaction
 │   │   │   ├── RegimeDynamicsPanelFinal.tsx # Regime dynamics
 │   │   │   └── ExpiryPanelFinal.tsx        # Expiry intelligence
+│   │   ├── dashboard/        # Dashboard layout parts
+│   │   │   ├── ChartIntelligencePanel.tsx # Container for Advanced Chart
+│   │   │   └── [others]...
 │   │   ├── layout/          # Layout components
 │   │   │   ├── Navbar.tsx      # Navigation with smooth scrolling
 │   │   │   └── Footer.tsx      # Footer component
 │   │   ├── Dashboard.tsx    # Main dashboard (streamlined)
+│   │   ├── SymbolSelector.tsx # Index and Timeframe toggle
 │   │   ├── OIHeatmap.tsx    # OI heatmap visualization
 │   │   └── MarketData.tsx   # Real-time market data
 │   ├── pages/                # Next.js pages
@@ -210,8 +226,11 @@ StrikeIQ/
 │   │   └── globals.css      # Global styles with smooth scrolling
 │   ├── public/               # Static assets
 │   ├── hooks/                # React hooks
-│   │   ├── useLiveMarketData.ts # WebSocket data hook
-│   │   └── useWSStore.ts      # WebSocket state management
+│   │   ├── useLiveMarketData.ts # WebSocket data hook with analytics mapping
+│   │   ├── useWSStore.ts      # WebSocket state management
+│   │   └── useExpirySelector.ts # Multi-expiry selection logic
+│   ├── stores/               # Global state
+│   │   └── marketContextStore.ts # Symbol, Timeframe, and Expiry state (PERSISTED)
 │   └── utils/                # Utility functions
 ├── docs/                   # Documentation
 │   ├── CLEANUP_SUMMARY.md           # Repository cleanup summary
