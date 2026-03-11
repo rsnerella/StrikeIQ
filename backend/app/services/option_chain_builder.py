@@ -252,7 +252,7 @@ class OptionChainBuilder:
                 logger.warning("[DATA_HEALTH_ALERT] OI values zero - feed issue possible")
             
             # Broadcast option chain update
-            pipeline_start = time.time()
+            pipeline_start = time.perf_counter()
             await manager.broadcast(
                 {
                     "type": "option_chain_update",
@@ -261,8 +261,11 @@ class OptionChainBuilder:
                     "data": snapshot.__dict__,
                 }
             )
-            pipeline_latency_ms = (time.time() - pipeline_start) * 1000
-            logger.info(f"[PIPELINE_LATENCY] {pipeline_latency_ms:.2f} ms")
+            pipeline_latency_ms = (time.perf_counter() - pipeline_start) * 1000
+            
+            # Log latency only if it exceeds threshold (noise reduction)
+            if pipeline_latency_ms > 5.0:
+                logger.warning(f"[PIPELINE_LATENCY] {pipeline_latency_ms:.2f} ms")
             
             logger.info(f"PIPELINE → analytics triggered {snapshot.symbol}")
             
