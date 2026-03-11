@@ -263,9 +263,16 @@ class OptionChainBuilder:
             )
             pipeline_latency_ms = (time.perf_counter() - pipeline_start) * 1000
             
+            # Add snapshot counter for sampling
+            if not hasattr(self, 'snapshot_counter'):
+                self.snapshot_counter = 0
+            self.snapshot_counter += 1
+            
             # Log latency only if it exceeds threshold (noise reduction)
             if pipeline_latency_ms > 5.0:
                 logger.warning(f"[PIPELINE_LATENCY] {pipeline_latency_ms:.2f} ms")
+            elif self.snapshot_counter % 500 == 0:
+                logger.info(f"[PIPELINE_LATENCY_OK] {pipeline_latency_ms:.2f} ms")
             
             logger.info(f"PIPELINE → analytics triggered {snapshot.symbol}")
             
