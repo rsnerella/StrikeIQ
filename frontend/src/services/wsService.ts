@@ -196,7 +196,7 @@ export function connectMarketWS() {
       }
       
       // STEP 3: Add WS message debug
-      console.log("WS MESSAGE RECEIVED", data);
+      console.log("WS TICK →", data);
 
       // Route analytics to handleAnalytics
       if (data.type === "analytics" || data.type === "analytics_update") {
