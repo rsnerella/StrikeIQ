@@ -24,27 +24,35 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x16MarketDataFeedV3.proto\x12\nmarketdata\"9\n\x04LTPC\x12\x0b\n\x03ltp\x18\x01 \x01(\x01\x12\x0b\n\x03ltt\x18\x02 \x01(\x01\x12\x0b\n\x03ltq\x18\x03 \x01(\x01\x12\n\n\x02\x63p\x18\x04 \x01(\x01\"N\n\x04\x46\x65\x65\x64\x12 \n\x04ltpc\x18\x01 \x01(\x0b\x32\x10.marketdata.LTPCH\x00\x12\x1c\n\x02\x66\x66\x18\x02 \x01(\x0b\x32\x0e.marketdata.FFH\x00\x42\x06\n\x04\x64\x61ta\"^\n\x02\x46\x46\x12&\n\x07indexFF\x18\x01 \x01(\x0b\x32\x13.marketdata.IndexFFH\x00\x12(\n\x08marketFF\x18\x02 \x01(\x0b\x32\x14.marketdata.MarketFFH\x00\x42\x06\n\x04\x64\x61ta\")\n\x07IndexFF\x12\x1e\n\x04ltpc\x18\x01 \x01(\x0b\x32\x10.marketdata.LTPC\"*\n\x08MarketFF\x12\x1e\n\x04ltpc\x18\x01 \x01(\x0b\x32\x10.marketdata.LTPC\":\n\nFeedsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x1f\n\x05value\x18\x02 \x01(\x0b\x32\x10.marketdata.Feed\"U\n\x0c\x46\x65\x65\x64Response\x12\x1e\n\x04type\x18\x01 \x01(\x0e\x32\x10.marketdata.Type\x12%\n\x05\x66\x65\x65\x64s\x18\x02 \x03(\x0b\x32\x16.marketdata.FeedsEntry*8\n\x04Type\x12\x10\n\x0cinitial_feed\x10\x00\x12\r\n\tlive_feed\x10\x01\x12\x0f\n\x0bmarket_info\x10\x02\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x16MarketDataFeedV3.proto\x12\nmarketdata\"9\n\x04LTPC\x12\x0b\n\x03ltp\x18\x01 \x01(\x01\x12\x0b\n\x03ltt\x18\x02 \x01(\x01\x12\x0b\n\x03ltq\x18\x03 \x01(\x01\x12\n\n\x02\x63p\x18\x04 \x01(\x01\"G\n\x0bMarketLevel\x12\x0b\n\x03\x62id\x18\x01 \x01(\x01\x12\x0b\n\x03\x61sk\x18\x02 \x01(\x01\x12\x0e\n\x06\x62idQty\x18\x03 \x01(\x03\x12\x0e\n\x06\x61skQty\x18\x04 \x01(\x03\"U\n\x0cOptionGreeks\x12\n\n\x02iv\x18\x01 \x01(\x01\x12\r\n\x05\x64\x65lta\x18\x02 \x01(\x01\x12\r\n\x05theta\x18\x03 \x01(\x01\x12\r\n\x05gamma\x18\x04 \x01(\x01\x12\x0c\n\x04vega\x18\x05 \x01(\x01\"D\n\nMarketOHLC\x12\x0c\n\x04open\x18\x01 \x01(\x01\x12\x0c\n\x04high\x18\x02 \x01(\x01\x12\x0b\n\x03low\x18\x03 \x01(\x01\x12\r\n\x05\x63lose\x18\x04 \x01(\x01\"P\n\x0c\x45\x46\x65\x65\x64\x44\x65tails\x12\x14\n\x0copenInterest\x18\x01 \x01(\x03\x12\x1a\n\x12openInterestChange\x18\x02 \x01(\x03\x12\x0e\n\x06volume\x18\x03 \x01(\x03\")\n\x07IndexFF\x12\x1e\n\x04ltpc\x18\x01 \x01(\x0b\x32\x10.marketdata.LTPC\"\xe4\x01\n\x08MarketFF\x12\x1e\n\x04ltpc\x18\x01 \x01(\x0b\x32\x10.marketdata.LTPC\x12,\n\x0bmarketLevel\x18\x02 \x01(\x0b\x32\x17.marketdata.MarketLevel\x12.\n\x0coptionGreeks\x18\x03 \x01(\x0b\x32\x18.marketdata.OptionGreeks\x12*\n\nmarketOHLC\x18\x04 \x01(\x0b\x32\x16.marketdata.MarketOHLC\x12.\n\x0c\x65\x46\x65\x65\x64\x44\x65tails\x18\x05 \x01(\x0b\x32\x18.marketdata.EFeedDetails\"^\n\x02\x46\x46\x12&\n\x07indexFF\x18\x01 \x01(\x0b\x32\x13.marketdata.IndexFFH\x00\x12(\n\x08marketFF\x18\x02 \x01(\x0b\x32\x14.marketdata.MarketFFH\x00\x42\x06\n\x04\x64\x61ta\"N\n\x04\x46\x65\x65\x64\x12 \n\x04ltpc\x18\x01 \x01(\x0b\x32\x10.marketdata.LTPCH\x00\x12\x1c\n\x02\x66\x66\x18\x02 \x01(\x0b\x32\x0e.marketdata.FFH\x00\x42\x06\n\x04\x64\x61ta\":\n\nFeedsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x1f\n\x05value\x18\x02 \x01(\x0b\x32\x10.marketdata.Feed\"U\n\x0c\x46\x65\x65\x64Response\x12\x1e\n\x04type\x18\x01 \x01(\x0e\x32\x10.marketdata.Type\x12%\n\x05\x66\x65\x65\x64s\x18\x02 \x03(\x0b\x32\x16.marketdata.FeedsEntry*8\n\x04Type\x12\x10\n\x0cinitial_feed\x10\x00\x12\r\n\tlive_feed\x10\x01\x12\x0f\n\x0bmarket_info\x10\x02\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'MarketDataFeedV3_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_TYPE']._serialized_start=507
-  _globals['_TYPE']._serialized_end=563
+  _globals['_TYPE']._serialized_start=1006
+  _globals['_TYPE']._serialized_end=1062
   _globals['_LTPC']._serialized_start=38
   _globals['_LTPC']._serialized_end=95
-  _globals['_FEED']._serialized_start=97
-  _globals['_FEED']._serialized_end=175
-  _globals['_FF']._serialized_start=177
-  _globals['_FF']._serialized_end=271
-  _globals['_INDEXFF']._serialized_start=273
-  _globals['_INDEXFF']._serialized_end=314
-  _globals['_MARKETFF']._serialized_start=316
-  _globals['_MARKETFF']._serialized_end=358
-  _globals['_FEEDSENTRY']._serialized_start=360
-  _globals['_FEEDSENTRY']._serialized_end=418
-  _globals['_FEEDRESPONSE']._serialized_start=420
-  _globals['_FEEDRESPONSE']._serialized_end=505
+  _globals['_MARKETLEVEL']._serialized_start=97
+  _globals['_MARKETLEVEL']._serialized_end=168
+  _globals['_OPTIONGREEKS']._serialized_start=170
+  _globals['_OPTIONGREEKS']._serialized_end=255
+  _globals['_MARKETOHLC']._serialized_start=257
+  _globals['_MARKETOHLC']._serialized_end=325
+  _globals['_EFEEDDETAILS']._serialized_start=327
+  _globals['_EFEEDDETAILS']._serialized_end=407
+  _globals['_INDEXFF']._serialized_start=409
+  _globals['_INDEXFF']._serialized_end=450
+  _globals['_MARKETFF']._serialized_start=453
+  _globals['_MARKETFF']._serialized_end=681
+  _globals['_FF']._serialized_start=683
+  _globals['_FF']._serialized_end=777
+  _globals['_FEED']._serialized_start=779
+  _globals['_FEED']._serialized_end=857
+  _globals['_FEEDSENTRY']._serialized_start=859
+  _globals['_FEEDSENTRY']._serialized_end=917
+  _globals['_FEEDRESPONSE']._serialized_start=919
+  _globals['_FEEDRESPONSE']._serialized_end=1004
 # @@protoc_insertion_point(module_scope)

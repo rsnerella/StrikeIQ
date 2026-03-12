@@ -15,11 +15,44 @@ message LTPC {
   double cp = 4;
 }
 
-message Feed {
-  oneof data {
-    LTPC ltpc = 1;
-    FF ff = 2;
-  }
+message MarketLevel {
+  double bid = 1;
+  double ask = 2;
+  int64 bidQty = 3;
+  int64 askQty = 4;
+}
+
+message OptionGreeks {
+  double iv = 1;
+  double delta = 2;
+  double theta = 3;
+  double gamma = 4;
+  double vega = 5;
+}
+
+message MarketOHLC {
+  double open = 1;
+  double high = 2;
+  double low = 3;
+  double close = 4;
+}
+
+message EFeedDetails {
+  int64 openInterest = 1;
+  int64 openInterestChange = 2;
+  int64 volume = 3;
+}
+
+message IndexFF {
+  LTPC ltpc = 1;
+}
+
+message MarketFF {
+  LTPC ltpc = 1;
+  MarketLevel marketLevel = 2;
+  OptionGreeks optionGreeks = 3;
+  MarketOHLC marketOHLC = 4;
+  EFeedDetails eFeedDetails = 5;
 }
 
 message FF {
@@ -29,12 +62,11 @@ message FF {
   }
 }
 
-message IndexFF {
-  LTPC ltpc = 1;
-}
-
-message MarketFF {
-  LTPC ltpc = 1;
+message Feed {
+  oneof data {
+    LTPC ltpc = 1;
+    FF ff = 2;
+  }
 }
 
 message FeedsEntry {

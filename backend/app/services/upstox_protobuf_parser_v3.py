@@ -1,20 +1,12 @@
-"""
-Upstox V3 Protobuf Parser for StrikeIQ
-Parses websocket binary frames into normalized tick dictionaries
-"""
-
-import logging
 import time
-from typing import List, Dict, Optional
+import logging
+from typing import List, Dict
 
 from app.proto.MarketDataFeedV3_pb2 import FeedResponse
+from app.services.instrument_registry import get_instrument_registry
 
 logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------
-# MAIN DECODER
-# ---------------------------------------------------------
 
 async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]:
 
@@ -25,193 +17,241 @@ async def decode_protobuf_message(message: bytes, tick_queue=None) -> List[Dict]
         response = FeedResponse()
         response.ParseFromString(message)
 
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug("PROTOBUF FRAME RECEIVED size=%d", len(message))
-
-        feeds = getattr(response, "feeds", None)
+        feeds = response.feeds
 
         if not feeds:
             return []
 
-        # feeds is a protobuf map
-        if hasattr(feeds, "items"):
-            feed_items = feeds.items()
-        else:
-            feed_items = []
-            for entry in feeds:
-                k = getattr(entry, "key", None)
-                v = getattr(entry, "value", entry)
-                if k:
-                    feed_items.append((k, v))
+        registry = get_instrument_registry()
+        now = time.time()
 
-        for instrument_key, feed in feed_items:
+        for entry in feeds:
 
-            if not instrument_key:
-                continue
-
-            is_index = instrument_key.startswith("NSE_INDEX")
-
-            ltp: Optional[float] = None
-            oi: int = 0
-            volume: int = 0
-
-            # =================================================
-            # PRIMARY LTPC (FAST PATH)
-            # =================================================
-
-            try:
-                if feed.HasField("ltpc"):
-                    val = getattr(feed.ltpc, "ltp", None)
-                    if val:
-                        ltp = float(val)
-            except Exception:
-                pass
-
-            # =================================================
-            # FALLBACK: FEED UNION SAFE ACCESS
-            # =================================================
+            instrument_key = entry.key
+            feed = entry.value
 
             try:
 
-                ff = getattr(feed, "ff", None)
+                # -----------------------------
+                # DEFAULT VALUES
+                # -----------------------------
 
-                if ff:
+                ltp = None
+                oi = 0
+                oi_change = 0
+                volume = 0
 
-                    market_ff = getattr(ff, "marketFF", None)
-                    index_ff = getattr(ff, "indexFF", None)
+                bid = 0.0
+                ask = 0.0
+                bid_qty = 0
+                ask_qty = 0
 
-                    # -----------------------------------------
-                    # MARKET FF (options / equities)
-                    # -----------------------------------------
+                iv = 0.0
+                delta = 0.0
+                theta = 0.0
+                gamma = 0.0
+                vega = 0.0
 
-                    if market_ff:
+                # -----------------------------
+                # DETERMINE FEED TYPE
+                # -----------------------------
 
-                        if getattr(market_ff, "ltpc", None) and getattr(market_ff.ltpc, "ltp", None):
-                            ltp = float(market_ff.ltpc.ltp)
+                data_type = feed.WhichOneof("data")
 
-                        if not is_index:
-                            # DEBUG: Log raw protobuf structure to find OI field
-                            logger.info(
-                                f"[UPSTOX_DEBUG] optionGreeks={getattr(market_ff, 'optionGreeks', None)} "
-                                f"openInterest={getattr(market_ff, 'openInterest', None)} "
-                                f"marketOHLC={getattr(market_ff, 'marketOHLC', None)}"
-                            )
-                            
-                            # CRITICAL FIX: Extract OI with production-safe fallback logic
-                            try:
-                                oi = 0
-                                if getattr(market_ff, "optionGreeks", None):
-                                    oi = getattr(market_ff.optionGreeks, "openInterest", 0)
-                                
-                                if not oi:
-                                    oi = getattr(market_ff, "openInterest", 0)
-                                
-                                if not oi and getattr(market_ff, "marketOHLC", None):
-                                    oi = getattr(market_ff.marketOHLC, "openInterest", 0)
-                                
-                                if not oi and getattr(market_ff, "marketOHLC", None):
-                                    oi = getattr(market_ff.marketOHLC, "oi", 0)
-                                    
-                            except Exception as e:
-                                logger.error(f"[UPSTOX_OI_ERROR] Failed to extract OI: {e}", exc_info=True)
-                                oi = 0
+                # --------------------------------
+                # DIRECT LTPC FEED
+                # --------------------------------
 
-                            if getattr(market_ff, "marketOHLC", None):
-                                volume = getattr(market_ff.marketOHLC, "volume", 0)
+                if data_type == "ltpc":
 
-                    # -----------------------------------------
-                    # INDEX FF
-                    # -----------------------------------------
+                    if feed.HasField("ltpc"):
+                        ltp = feed.ltpc.ltp
 
-                    if index_ff:
+                # --------------------------------
+                # FULL FEED WRAPPER
+                # --------------------------------
 
-                        if getattr(index_ff, "ltpc", None) and getattr(index_ff.ltpc, "ltp", None):
-                            ltp = float(index_ff.ltpc.ltp)
+                elif data_type == "ff":
 
-            except Exception:
-                pass
+                    ff = feed.ff
+                    ff_type = ff.WhichOneof("data")
 
-            # =================================================
-            # DROP INVALID TICKS
-            # =================================================
+                    # INDEX FEED
+                    if ff_type == "indexFF":
 
-            if (ltp is None or ltp <= 0) and oi <= 0:
-                continue
+                        index = ff.indexFF
 
-            # =================================================
-            # BUILD NORMALIZED TICK
-            # =================================================
+                        if index.HasField("ltpc"):
+                            ltp = index.ltpc.ltp
 
-            tick = {
-                "instrument_key": instrument_key,
-                "ltp": float(ltp) if ltp is not None else 0.0,
-                "oi": oi,
-                "volume": volume,
-                "timestamp": time.time()
-            }
+                    # OPTION / FUTURE FEED
+                    elif ff_type == "marketFF":
 
-            ticks.append(tick)
+                        market = ff.marketFF
 
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(
-                    "TICK PARSED → %s LTP=%s OI=%s VOL=%s",
-                    instrument_key,
-                    ltp,
-                    oi,
-                    volume
-                )
+                        # LTP
+                        if market.HasField("ltpc"):
+                            ltp = market.ltpc.ltp
 
-            # -------------------------------------------------
-            # OPTIONAL QUEUE PUSH
-            # -------------------------------------------------
+                        # ---------------------
+                        # OI / VOLUME
+                        # ---------------------
 
-            if tick_queue:
-                try:
+                        if market.HasField("eFeedDetails"):
+
+                            details = market.eFeedDetails
+
+                            oi = details.openInterest
+                            oi_change = details.openInterestChange
+                            volume = details.volume
+
+                        # ---------------------
+                        # BID / ASK
+                        # ---------------------
+
+                        if market.HasField("marketLevel"):
+
+                            level = market.marketLevel
+
+                            bid = level.bid
+                            ask = level.ask
+                            bid_qty = level.bidQty
+                            ask_qty = level.askQty
+
+                        # ---------------------
+                        # GREEKS
+                        # ---------------------
+
+                        if market.HasField("optionGreeks"):
+
+                            greeks = market.optionGreeks
+
+                            iv = greeks.iv
+                            delta = greeks.delta
+                            theta = greeks.theta
+                            gamma = greeks.gamma
+                            vega = greeks.vega
+
+                # --------------------------------
+                # ALLOW OI UPDATES WITHOUT LTP
+                # --------------------------------
+
+                if ltp is None and oi == 0 and volume == 0 and oi_change == 0:
+                    continue
+
+                # --------------------------------
+                # RESOLVE INSTRUMENT
+                # --------------------------------
+
+                if instrument_key.startswith("NSE_INDEX"):
+
+                    if "Nifty Bank" in instrument_key:
+                        symbol = "BANKNIFTY"
+                    else:
+                        symbol = "NIFTY"
+
+                    strike = 0.0
+                    right = ""
+                    expiry = None
+                    segment = "INDEX"
+
+                else:
+
+                    parts = instrument_key.split("|")
+                    token = parts[1] if len(parts) > 1 else instrument_key
+
+                    instrument = (
+                        registry.get_by_token(token)
+                        or registry.get_option_meta(instrument_key)
+                    )
+
+                    if not instrument:
+
+                        logger.warning(
+                            "COULD NOT RESOLVE INSTRUMENT → %s",
+                            instrument_key
+                        )
+                        continue
+
+                    symbol = instrument.get("symbol")
+                    strike = instrument.get("strike", 0.0)
+                    right = instrument.get("option_type")
+                    expiry = instrument.get("expiry")
+                    segment = "FO"
+
+                # --------------------------------
+                # NORMALIZED TICK
+                # --------------------------------
+
+                tick = {
+                    "instrument_key": instrument_key,
+                    "symbol": symbol,
+                    "type": "option" if segment == "FO" else "index",
+                    "data": {
+                        "strike": strike,
+                        "right": right,
+                        "expiry": expiry,
+                        "ltp": float(ltp) if ltp is not None else 0.0,
+                        "oi": int(oi),
+                        "oi_change": int(oi_change),
+                        "volume": int(volume),
+                        "bid": bid,
+                        "ask": ask,
+                        "bid_qty": bid_qty,
+                        "ask_qty": ask_qty,
+                        "iv": iv,
+                        "delta": delta,
+                        "theta": theta,
+                        "gamma": gamma,
+                        "vega": vega,
+                        "timestamp": now
+                    }
+                }
+
+                ticks.append(tick)
+
+                # --------------------------------
+                # DEBUG LOGGING
+                # --------------------------------
+
+                if oi > 0 or volume > 0:
+                    logger.debug(
+                        "OPTION FEED DETAILS → %s strike=%s oi=%s vol=%s",
+                        symbol,
+                        strike,
+                        oi,
+                        volume
+                    )
+
+                if segment == "FO":
+                    logger.debug(
+                        "OPTION TICK → %s strike=%s ltp=%s oi=%s",
+                        symbol,
+                        strike,
+                        ltp,
+                        oi
+                    )
+
+                if tick_queue:
                     await tick_queue.put(tick)
-                except Exception as e:
-                    logger.warning("Queue push failed: %s", e)
+
+            except Exception as e:
+
+                logger.error(
+                    "FEED PROCESSING ERROR for %s: %s",
+                    instrument_key,
+                    e,
+                    exc_info=True
+                )
+                continue
 
     except Exception as e:
-        logger.error("PROTOBUF DECODE ERROR: %s", e, exc_info=True)
+
+        logger.error(
+            "PROTOBUF DECODE ERROR: %s",
+            e,
+            exc_info=True
+        )
         return []
 
-    # Tick throughput counter for observability (thread-safe)
-    if not hasattr(decode_protobuf_message, 'tick_counter'):
-        decode_protobuf_message.tick_counter = 0
-    decode_protobuf_message.tick_counter += len(ticks)
-    
-    # Log throughput every 1000 ticks
-    if decode_protobuf_message.tick_counter % 1000 == 0:
-        logger.info(f"[PIPELINE] ticks_processed={decode_protobuf_message.tick_counter}")
-
     return ticks
-
-
-# ---------------------------------------------------------
-# INDEX PRICE EXTRACTOR
-# ---------------------------------------------------------
-
-def extract_index_price(feed) -> Optional[float]:
-
-    try:
-
-        if feed.HasField("ltpc"):
-            return float(feed.ltpc.ltp)
-
-        ff = getattr(feed, "ff", None)
-
-        if ff:
-
-            market_ff = getattr(ff, "marketFF", None)
-            index_ff = getattr(ff, "indexFF", None)
-
-            if index_ff and getattr(index_ff, "ltpc", None):
-                return float(index_ff.ltpc.ltp)
-
-            if market_ff and getattr(market_ff, "ltpc", None):
-                return float(market_ff.ltpc.ltp)
-
-    except Exception:
-        pass
-
-    return None

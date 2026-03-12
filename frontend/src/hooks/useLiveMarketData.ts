@@ -150,6 +150,20 @@ export function useLiveMarketData(symbol: string, expiry: string | null) {
           gamma_exposure: analyticsCore?.structural?.net_gamma ?? snapshot?.gamma_exposure ?? 0
         },
         trade_suggestion: safeAnalytics?.trade_setup || analyticsCore?.trade_suggestion || analyticsCore?.trade_setup,
+        
+        // Map new AI signals from structural core for initial display
+        options_trap: analyticsCore?.structural?.options_trap,
+        liquidity_vacuum: analyticsCore?.structural?.liquidity_vacuum,
+        expiry_magnet_analysis: analyticsCore?.structural?.expiry_magnet_analysis,
+        gamma_pressure: {
+          level: (analyticsCore?.structural?.gamma_pressure_map?.pressure_distribution?.call_pressure || 50) / 100,
+          ...analyticsCore?.structural?.gamma_pressure_map
+        },
+        liquidity_pressure: 1.0 - (analyticsCore?.structural?.liquidity_vacuum?.probability || 0) / 100,
+        
+        // NEW: Merge intelligence updates from LiveStructuralEngine
+        ...(safeAnalytics?.intelligence || {}),
+        
         // Keep existing optionChain intelligence if available
         ...optionChainData?.intelligence
       }

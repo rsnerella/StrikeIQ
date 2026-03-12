@@ -19,6 +19,8 @@ from app.services.flow_gamma_interaction import FlowGammaInteractionEngine
 from app.services.regime_confidence_engine import RegimeConfidenceEngine
 from app.services.expiry_magnet_model import ExpiryMagnetModel
 from ai.ai_orchestrator import AIOrchestrator
+from ai.options_trap_engine import OptionsTrapEngine
+from ai.liquidity_engine import LiquidityEngine
 from app.core.ws_manager import manager
 
 logger = logging.getLogger(__name__)
@@ -45,6 +47,10 @@ class LiveMetrics:
     total_oi: int
     timestamp: datetime
     
+    # Price metadata for display logic
+    open: float = 0.0
+    prev_close: float = 0.0
+    
     # New Gamma + Flow metrics
     net_gamma: Optional[float] = None
     gamma_flip_level: Optional[float] = None
@@ -55,6 +61,7 @@ class LiveMetrics:
     flow_direction: Optional[str] = None
     structural_regime: Optional[str] = None
     regime_confidence: Optional[float] = None
+    dealer_positioning: Optional[str] = None
     
     # NEW: Productized Intelligence metrics
     alerts: Optional[List[Dict[str, Any]]] = None
@@ -63,6 +70,10 @@ class LiveMetrics:
     regime_dynamics: Optional[Dict[str, Any]] = None
     expiry_magnet_analysis: Optional[Dict[str, Any]] = None
     trade_suggestion: Optional[Dict[str, Any]] = None
+    
+    # NEW: Trap + Liquidity metrics
+    options_trap: Optional[Dict[str, Any]] = None
+    liquidity_vacuum: Optional[Dict[str, Any]] = None
 
 # Global instance for app-wide access
 structural_engine_instance = None
@@ -84,7 +95,13 @@ class LiveStructuralEngine:
         self.ai_orchestrator = AIOrchestrator()
         
         # Constants for calculations
-        self.CONTRACT_MULTIPLIER = 75  # NFO options contract multiplier
+        # NEW: Dynamic contract multiplier for accurate risk and profit calculations
+        self.lot_sizes = {
+            "NIFTY": 25,
+            "BANKNIFTY": 15,
+            "FINNIFTY": 40
+        }
+        self.CONTRACT_MULTIPLIER = self.lot_sizes.get(market_state.active_symbol, 25)
         
         # NEW: Initialize productized intelligence engines
         self.alert_engine = StructuralAlertEngine()
@@ -92,6 +109,10 @@ class LiveStructuralEngine:
         self.flow_gamma_engine = FlowGammaInteractionEngine()
         self.regime_confidence_engine = RegimeConfidenceEngine()
         self.expiry_magnet_engine = ExpiryMagnetModel()
+        
+        # NEW: Initialize AI trap and liquidity engines
+        self.trap_engine = OptionsTrapEngine()
+        self.liquidity_engine = LiquidityEngine()
         
     async def update_market_state(self, market_data: Dict[str, Any]):
         """
@@ -341,21 +362,48 @@ class LiveStructuralEngine:
             expiry_magnet_analysis = self.expiry_magnet_engine.analyze_expiry_magnets(symbol, frontend_data)
             formatted_expiry_analysis = self.expiry_magnet_engine.format_for_frontend(expiry_magnet_analysis)
 
+            # NEW: 17. Compute Options Trap Detection
+            trap_metrics = {
+                "spot_price": spot,
+                "support": support_resistance["support"],
+                "resistance": support_resistance["resistance"],
+                "pcr": snapshot.get("pcr", 1.0),
+                "net_gamma": gamma_metrics.get("net_gamma", 0),
+                "gamma_flip_level": gamma_flip_metrics.get("gamma_flip_level", 0),
+                "volatility_regime": volatility_regime,
+                "oi_change": flow_metrics.get("total_velocity", 0)
+            }
+            options_trap = self.trap_engine.detect_trap(trap_metrics)
+            
+            # NEW: 18. Compute Liquidity Vacuum
+            liquidity_input = {
+                "spot": spot,
+                "support_level": support_resistance["support"],
+                "resistance_level": support_resistance["resistance"],
+                "volatility_regime": volatility_regime,
+                "expected_move": expected_move_data.get("expected_move", 0)
+            }
+            liquidity_vacuum = self.liquidity_engine.analyze(liquidity_input)
+
             return (expected_move_data, gamma_regime, intent_score, support_resistance,
                     volatility_regime, oi_velocity, breach_probability, gamma_metrics,
                     gamma_flip_metrics, flow_metrics, structural_metrics,
-                    formatted_pressure_map, formatted_interaction, formatted_expiry_analysis)
+                    formatted_pressure_map, formatted_interaction, formatted_expiry_analysis,
+                    options_trap, liquidity_vacuum)
 
         (expected_move_data, gamma_regime, intent_score, support_resistance,
          volatility_regime, oi_velocity, breach_probability, gamma_metrics,
          gamma_flip_metrics, flow_metrics, structural_metrics,
-         formatted_pressure_map, formatted_interaction, formatted_expiry_analysis) = await asyncio.to_thread(_sync_computations)
+         formatted_pressure_map, formatted_interaction, formatted_expiry_analysis,
+         options_trap, liquidity_vacuum) = await asyncio.to_thread(_sync_computations)
 
         # NEW: 12. Generate Structural Alerts
         alerts = await self.alert_engine.analyze_and_generate_alerts(symbol, {
             "net_gamma": gamma_metrics.get("net_gamma", 0),
             "gamma_flip_level": gamma_flip_metrics.get("gamma_flip_level", 0),
             "distance_from_flip": gamma_flip_metrics.get("distance_from_flip", 0),
+            "dealer_positioning": gamma_metrics.get("dealer_positioning", "neutral"),
+            "options_trap": options_trap,
             "flow_imbalance": flow_metrics.get("flow_imbalance", 0),
             "flow_direction": flow_metrics.get("flow_direction", "neutral"),
             "structural_regime": structural_metrics.get("structural_regime", "unknown"),
@@ -403,9 +451,15 @@ class LiveStructuralEngine:
             logger.error(f"AI Integration Error: {e}")
         # =============================================================
 
+        # Capture price metadata for frontend display logic
+        open_price = getattr(snapshot, "open", spot)
+        prev_close = getattr(snapshot, "prev_close", spot)
+
         return LiveMetrics(
             symbol=symbol,
             spot=spot,
+            open=open_price,
+            prev_close=prev_close,
             expected_move=expected_move_data["expected_move"],
             upper_1sd=expected_move_data["upper_1sd"],
             lower_1sd=expected_move_data["lower_1sd"],
@@ -432,13 +486,18 @@ class LiveStructuralEngine:
             flow_direction=flow_metrics.get("flow_direction"),
             structural_regime=structural_metrics.get("structural_regime"),
             regime_confidence=structural_metrics.get("regime_confidence"),
+            dealer_positioning=gamma_metrics.get("dealer_positioning"),
             
             # NEW: Productized Intelligence metrics
             alerts=[alert.__dict__ for alert in alerts] if alerts else [],
             gamma_pressure_map=formatted_pressure_map,
             flow_gamma_interaction=formatted_interaction,
             regime_dynamics=formatted_regime_dynamics,
-            expiry_magnet_analysis=formatted_expiry_analysis
+            expiry_magnet_analysis=formatted_expiry_analysis,
+            
+            # NEW: Trap + Liquidity metrics
+            options_trap=options_trap,
+            liquidity_vacuum=liquidity_vacuum
         )
     
     def _calculate_expected_move(self, frontend_data: Dict) -> Dict[str, float]:
@@ -480,15 +539,26 @@ class LiveStructuralEngine:
             if put_data.get("iv"):
                 avg_iv += put_data["iv"]
                 iv_count += 1
-            
             if iv_count > 0:
                 avg_iv /= iv_count
-                # Convert IV percentage to decimal and annualize
+                # Professional Expected Move Formula: spot * IV * sqrt(DTE / 365)
                 iv_decimal = avg_iv / 100
-                # Expected move = straddle price * sqrt(365/252) * iv_adjustment
-                expected_move = straddle_price * 1.5  # Simplified calculation
+                
+                # Dynamic DTE calculation
+                from app.core.market_context import MARKET_CONTEXT
+                expiry_str = MARKET_CONTEXT.get("expiry")
+                dte = 4.0 # Default fallback
+                if expiry_str:
+                    try:
+                        expiry_date = datetime.strptime(expiry_str, "%Y-%m-%d").date()
+                        today = datetime.now().date()
+                        dte = max(0.5, (expiry_date - today).days)
+                    except Exception:
+                        pass
+                
+                expected_move = spot * iv_decimal * math.sqrt(dte / 365)
             else:
-                expected_move = straddle_price * 1.5
+                expected_move = spot * 0.015 # 1.5% default fallback
             
             return {
                 "expected_move": expected_move,
@@ -816,6 +886,7 @@ class LiveStructuralEngine:
             "flow_direction": metrics.flow_direction,
             "structural_regime": metrics.structural_regime,
             "regime_confidence": metrics.regime_confidence,
+            "dealer_positioning": metrics.dealer_positioning,
             
             # NEW: Productized Intelligence metrics
             "alerts": metrics.alerts,
@@ -838,20 +909,34 @@ class LiveStructuralEngine:
             total_call_gex = 0
             total_put_gex = 0
             
+            # Resolve symbol for multiplier
+            symbol = frontend_data.get("symbol", "NIFTY")
+            multiplier = self.lot_sizes.get(symbol, 25)
+
             for strike_data in strikes.values():
                 # Calculate call GEX
                 call_data = strike_data.get("call", {})
                 if call_data.get("gamma") and call_data.get("oi"):
-                    call_gex = call_data["gamma"] * call_data["oi"] * self.CONTRACT_MULTIPLIER
+                    # Institutional Formula: GEX = gamma * OI * multiplier * spot^2
+                    call_gex = call_data["gamma"] * call_data["oi"] * multiplier * (frontend_data.get("spot", 0)**2)
                     total_call_gex += call_gex
                 
                 # Calculate put GEX
                 put_data = strike_data.get("put", {})
                 if put_data.get("gamma") and put_data.get("oi"):
-                    put_gex = put_data["gamma"] * put_data["oi"] * self.CONTRACT_MULTIPLIER
+                    # Institutional Formula: GEX = gamma * OI * multiplier * spot^2
+                    put_gex = put_data["gamma"] * put_data["oi"] * multiplier * (frontend_data.get("spot", 0)**2)
                     total_put_gex += put_gex
             
             net_gamma = total_call_gex - total_put_gex
+            
+            # 19. Identify Dealer Positioning based on GEX
+            if net_gamma > 10000000: # Threshold for clarity
+                dealer_pos = "LONG_GAMMA (Supportive)"
+            elif net_gamma < -10000000:
+                dealer_pos = "SHORT_GAMMA (Explosive)"
+            else:
+                dealer_pos = "NEUTRAL (Stability)"
             
             # Determine gamma regime
             if net_gamma > 0:
@@ -864,6 +949,7 @@ class LiveStructuralEngine:
             return {
                 "net_gamma": net_gamma,
                 "gamma_regime": gamma_regime,
+                "dealer_positioning": dealer_pos,
                 "total_call_gex": total_call_gex,
                 "total_put_gex": total_put_gex
             }
@@ -896,11 +982,11 @@ class LiveStructuralEngine:
                 # Calculate GEX for this strike
                 call_data = strike_data.get("call", {})
                 if call_data.get("gamma") and call_data.get("oi"):
-                    call_gex = call_data["gamma"] * call_data["oi"] * self.CONTRACT_MULTIPLIER
+                    call_gex = call_data["gamma"] * call_data["oi"] * self.CONTRACT_MULTIPLIER * (spot**2)
                 
                 put_data = strike_data.get("put", {})
                 if put_data.get("gamma") and put_data.get("oi"):
-                    put_gex = put_data["gamma"] * put_data["oi"] * self.CONTRACT_MULTIPLIER
+                    put_gex = put_data["gamma"] * put_data["oi"] * self.CONTRACT_MULTIPLIER * (spot**2)
                 
                 # Net GEX for this strike
                 net_strike_gex = call_gex - put_gex
@@ -1006,12 +1092,16 @@ class LiveStructuralEngine:
             # Update previous snapshot
             self.previous_oi_snapshot[symbol] = current_oi
             
+            # Institutional Flow Score (0-100)
+            flow_score = min(abs(flow_imbalance) * 100 + (total_velocity / 100000), 100)
+            
             return {
                 "call_oi_velocity": total_call_velocity,
                 "put_oi_velocity": total_put_velocity,
                 "flow_imbalance": flow_imbalance,
                 "flow_direction": flow_direction,
-                "total_velocity": total_velocity
+                "total_velocity": total_velocity,
+                "institutional_flow_score": flow_score
             }
             
         except Exception as e:
@@ -1137,27 +1227,34 @@ class LiveStructuralEngine:
                         "market_regime": ai_result.get("regime", "NEUTRAL"),
                         "volatility_regime": metrics.volatility_regime,
                         "trend_regime": ai_result.get("trend", "SIDEWAYS"),
-                        "confidence": ai_result.get("confidence", 0.0)
+                        "confidence": ai_result.get("confidence", 0.0),
+                        "structural_regime": metrics.structural_regime,
+                        "intent_score": metrics.intent_score
+                    },
+                    "flow": {
+                        "imbalance": metrics.flow_imbalance or 0.0,
+                        "direction": metrics.flow_direction or "NEUTRAL",
+                        "velocity": metrics.oi_velocity or 0.0
                     },
                     "bias": {
-                        "score": 0.0,  # Calculate from metrics if needed
-                        "label": "NEUTRAL",
-                        "confidence": 0.0,
-                        "signal": "NEUTRAL",
-                        "direction": "NONE",
-                        "strength": 0.0
+                        "score": ai_result.get("bias_score", 0.0),
+                        "label": ai_result.get("bias_label", "NEUTRAL"),
+                        "confidence": ai_result.get("confidence", 0.0),
+                        "signal": ai_result.get("bias_label", "NEUTRAL"),
+                        "direction": ai_result.get("direction", "NONE"),
+                        "strength": ai_result.get("confidence", 0.0)
                     },
                     "gamma": {
                         "net_gamma": metrics.net_gamma or 0,
                         "gamma_flip": metrics.gamma_flip_level or 0,
-                        "dealer_gamma": "NEUTRAL",
-                        "gamma_exposure": 0.0
+                        "dealer_gamma": metrics.gamma_regime or "NEUTRAL",
+                        "gamma_exposure": metrics.net_gamma or 0.0
                     },
                     "signals": {
-                        "stoploss_hunt": False,
-                        "trap_detection": False,
-                        "liquidity_event": False,
-                        "gamma_squeeze": False
+                        "stoploss_hunt": metrics.liquidity_vacuum.get("signal") != "NONE" if metrics.liquidity_vacuum else False,
+                        "trap_detection": metrics.options_trap.get("signal") != "NONE" if metrics.options_trap else False,
+                        "liquidity_event": metrics.liquidity_vacuum.get("signal") != "NONE" if metrics.liquidity_vacuum else False,
+                        "gamma_squeeze": metrics.gamma_regime == "negative"
                     },
                     "probability": {
                         "expected_move": metrics.expected_move,
@@ -1167,10 +1264,44 @@ class LiveStructuralEngine:
                         "lower_2sd": metrics.lower_2sd,
                         "breach_probability": metrics.breach_probability,
                         "range_hold_probability": metrics.range_hold_probability,
-                        "volatility_state": "normal"
+                        "volatility_state": metrics.volatility_regime
                     },
                     "trade_suggestion": ai_result,
-                    "reasoning": ai_result.get("explanation", [])
+                    "reasoning": ai_result.get("explanation", []),
+                    
+                    # NEW: Explicit mappings for premium panels
+                    "options_trap": {
+                        "probability": metrics.options_trap.get("confidence", 0) * 100 if metrics.options_trap else 0,
+                        "direction": metrics.options_trap.get("direction", "NONE") if metrics.options_trap else "NONE",
+                        "strength": metrics.options_trap.get("strength", 0) * 100 if metrics.options_trap else 0,
+                        "signal": metrics.options_trap.get("signal", "NONE") if metrics.options_trap else "NONE",
+                        "reason": metrics.options_trap.get("reason", "") if metrics.options_trap else ""
+                    },
+                    "gamma_pressure": {
+                        "level": metrics.gamma_pressure_map.get("pressure_distribution", {}).get("call_pressure", 50) / 100 if metrics.gamma_pressure_map else 0.5,
+                        "net_gamma": metrics.net_gamma,
+                        "gamma_flip_level": metrics.gamma_flip_level,
+                        "distance_from_flip": metrics.distance_from_flip
+                    },
+                    "liquidity_vacuum": {
+                        "signal": metrics.liquidity_vacuum.get("signal", "NONE") if metrics.liquidity_vacuum else "NONE",
+                        "probability": metrics.liquidity_vacuum.get("confidence", 0) * 100 if metrics.liquidity_vacuum else 0,
+                        "zone_start": metrics.support_level,
+                        "zone_end": metrics.resistance_level
+                    },
+                    "liquidity_pressure": 1.0 - (metrics.liquidity_vacuum.get("confidence", 0)) if metrics.liquidity_vacuum else 0.5,
+                    "expiry_magnet_analysis": {
+                        "magnet_strike": metrics.expiry_magnet_analysis.get("max_oi_strike", 0) if metrics.expiry_magnet_analysis else 0,
+                        "pin_probability": metrics.expiry_magnet_analysis.get("pin_probability", 0) if metrics.expiry_magnet_analysis else 0,
+                        "distance_from_strike": metrics.expiry_magnet_analysis.get("distance_to_max_oi", 0) if metrics.expiry_magnet_analysis else 0,
+                        "days_to_expiry": metrics.expiry_magnet_analysis.get("days_to_expiry", 0) if metrics.expiry_magnet_analysis else 0
+                    },
+                    "net_gamma": metrics.net_gamma,
+                    "gamma_flip_level": metrics.gamma_flip_level,
+                    "distance_from_flip": metrics.distance_from_flip,
+                    "structural_regime": metrics.structural_regime,
+                    "support_level": metrics.support_level,
+                    "resistance_level": metrics.resistance_level
                 }
                 
                 # TASK 9: Store trade suggestion back into metrics for API retrieval

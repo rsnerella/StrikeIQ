@@ -83,8 +83,9 @@ class ExpectedMoveEngine:
             combined_premium = atm_call_premium + atm_put_premium
             
             # Validate premiums
-            if combined_premium <= 0:
-                logger.warning("ExpectedMoveEngine: Invalid ATM premiums, returning safe default")
+            # PATCH 4: HARDEN ATM PREMIUM VALIDATION
+            if atm_call_premium <= 0 or atm_put_premium <= 0:
+                logger.warning("ExpectedMoveEngine: Invalid ATM premiums")
                 return self._get_safe_default_result(symbol)
             
             # Calculate expected moves

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { createChart, CandlestickSeries } from "lightweight-charts";
+import { createChart } from "lightweight-charts";
 import { useWSStore } from "../../core/ws/wsStore";
 
 export default function StrikeIQChart() {
@@ -29,23 +29,31 @@ export default function StrikeIQChart() {
       crosshair: {
         mode: 0,
       },
+      rightPriceScale: {
+        visible: true,
+        borderVisible: false,
+      },
+      leftPriceScale: {
+        visible: false,
+      },
       timeScale: {
-        borderColor: "#334155",
+        borderVisible: false,
         timeVisible: true,
         secondsVisible: false,
       },
-      rightPriceScale: {
-        borderColor: "#334155",
-      },
     });
+    
+    console.log("CHART INIT → chart created");
 
-    const candleSeries = chart.addSeries(CandlestickSeries, {
+    const candleSeries = chart.addCandlestickSeries({
       upColor: "#10b981",
       downColor: "#ef4444",
       borderVisible: false,
       wickUpColor: "#10b981",
       wickDownColor: "#ef4444",
     });
+    
+    console.log("SERIES INIT → candlestick series created");
 
     chartInstanceRef.current = chart;
     candleSeriesRef.current = candleSeries;
@@ -71,45 +79,52 @@ export default function StrikeIQChart() {
     };
   }, []);
 
-  // Update candle data when available
-  useEffect(() => {
-    if (!chartReady || !candleSeriesRef.current || !candles || candles.length === 0) return;
+    // Update candle data when available
+    useEffect(() => {
+      if (!chartReady || !candleSeriesRef.current || !candles || candles.length === 0) return;
 
-    // Convert candle data to lightweight-charts format
-    const formattedCandles = candles.map(candle => ({
-      time: candle.time,
-      open: candle.open,
-      high: candle.high,
-      low: candle.low,
-      close: candle.close,
-    }));
-
-    candleSeriesRef.current.setData(formattedCandles);
-  }, [candles, chartReady]);
+      // Convert candle data to lightweight-charts format
+      const formattedCandles = candles.map(candle => ({
+        time: candle.time,
+        open: candle.open,
+        high: candle.high,
+        low: candle.low,
+        close: candle.close,
+      }));
+      
+      console.log("CANDLE UPDATE →", formattedCandles.slice(0, 3));
+      candleSeriesRef.current.setData(formattedCandles);
+    }, [candles, chartReady]);
 
   // AI Overlay Hooks
   useEffect(() => {
     if (!chartReady) return;
+    
+    console.log("PATTERN ENGINE RUNNING → chartAnalysis:", chartAnalysis ? "found" : "none");
 
     if (chartAnalysis?.signal === "BUY") {
       console.log("AI BUY SIGNAL", chartAnalysis.price);
+      console.log("OVERLAY DRAWN → BUY signal");
       // TODO: Add BUY signal overlay
     }
     
     if (chartAnalysis?.signal === "SELL") {
       console.log("AI SELL SIGNAL", chartAnalysis.price);
+      console.log("OVERLAY DRAWN → SELL signal");
       // TODO: Add SELL signal overlay
     }
 
     // Elliott wave labels
     if (chartAnalysis?.wave) {
       console.log("Elliott Wave:", chartAnalysis.wave);
+      console.log("OVERLAY DRAWN → Elliott Wave");
       // TODO: Add Elliott wave overlay
     }
 
     // NeoWave patterns
     if (chartAnalysis?.neo_pattern) {
       console.log("NeoWave Pattern:", chartAnalysis.neo_pattern);
+      console.log("OVERLAY DRAWN → NeoWave Pattern");
       // TODO: Add NeoWave pattern overlay
     }
 
@@ -117,8 +132,11 @@ export default function StrikeIQChart() {
     if (chartAnalysis?.supply_zone || chartAnalysis?.demand_zone) {
       console.log("Supply Zone:", chartAnalysis.supply_zone);
       console.log("Demand Zone:", chartAnalysis.demand_zone);
+      console.log("OVERLAY DRAWN → Supply/Demand Zones");
       // TODO: Add zone overlays
     }
+    
+    console.log("STRIKEIQ CHART PIPELINE OK");
   }, [chartAnalysis, chartReady]);
 
   return (

@@ -8,13 +8,20 @@ Stable production version
 import asyncio
 import logging
 import time
+import json
+import datetime
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime as dt_class
 
 logger = logging.getLogger(__name__)
 
 # Global analytics cache to serve snapshots immediately to new clients
 LAST_ANALYTICS: Dict[str, Any] = {}
+
+def json_safe(obj):
+    if isinstance(obj, (datetime.date, datetime.datetime)):
+        return obj.isoformat()
+    return str(obj)
 
 
 class AnalyticsBroadcaster:
@@ -32,7 +39,7 @@ class AnalyticsBroadcaster:
         self.update_interval = 3.0
         
         # analytics broadcast interval control
-        self.ANALYTICS_INTERVAL = 3  # seconds
+        self.ANALYTICS_INTERVAL = 0.5  # Real-time institutional cycle (500ms)
         self._last_analytics_time = 0
 
         # engines (lazy loaded)
@@ -55,25 +62,21 @@ class AnalyticsBroadcaster:
     ) -> Optional[Dict[str, Any]]:
 
         try:
+            # PATCH 2: FIX ANALYTICS ENGINE INPUT
+            if not isinstance(chain_data, dict):
+                if hasattr(chain_data, "to_dict"):
+                    chain_data = chain_data.to_dict()
+                elif hasattr(chain_data, "__dict__"):
+                    chain_data = chain_data.__dict__
 
             logger.info(f"ANALYTICS ENGINE RUNNING → {symbol}")
-            logger.info(f"CHAIN DEBUG → chain_data type: {type(chain_data)}")
-
-            # Handle both ChainSnapshot object and dict
-            if hasattr(chain_data, '__dict__'):
-                # ChainSnapshot object - convert to dict
-                chain_dict = {
-                    "symbol": getattr(chain_data, "symbol", None),
-                    "spot": getattr(chain_data, "spot", None),
-                    "atm_strike": getattr(chain_data, "atm_strike", None),
-                    "strikes": getattr(chain_data, "strikes", []),
-                    "pcr": getattr(chain_data, "pcr", 0),
-                    "total_oi_calls": getattr(chain_data, "total_oi_calls", 0),
-                    "total_oi_puts": getattr(chain_data, "total_oi_puts", 0)
-                }
-            else:
-                # Already a dict
-                chain_dict = chain_data
+            
+            # Use chain_data as dict from here on
+            chain_dict = chain_data
+            
+            # Fallback extraction if missing fields
+            if "strikes" not in chain_dict and hasattr(chain_dict, "strikes"):
+                 chain_dict["strikes"] = chain_dict.strikes
 
             strikes = chain_dict.get("strikes", [])
             
@@ -204,6 +207,9 @@ class AnalyticsBroadcaster:
 
                     if structural:
                         analytics_results["structural"] = {
+                            "spot": getattr(structural, "spot", 0),
+                            "open": getattr(structural, "open", 0),
+                            "prev_close": getattr(structural, "prev_close", 0),
                             "expected_move": getattr(structural, "expected_move", 0),
                             "upper_1sd": getattr(structural, "upper_1sd", 0),
                             "lower_1sd": getattr(structural, "lower_1sd", 0),
@@ -221,6 +227,11 @@ class AnalyticsBroadcaster:
                             "net_gamma": getattr(structural, "net_gamma", 0),
                             "gamma_flip_level": getattr(structural, "gamma_flip_level", 0),
                             "distance_from_flip": getattr(structural, "distance_from_flip", 0),
+                            "dealer_positioning": getattr(structural, "dealer_positioning", "neutral"),
+                            "options_trap": getattr(structural, "options_trap", {}),
+                            "liquidity_vacuum": getattr(structural, "liquidity_vacuum", {}),
+                            "expiry_magnet_analysis": getattr(structural, "expiry_magnet_analysis", {}),
+                            "gamma_pressure_map": getattr(structural, "gamma_pressure_map", {}),
                         }
                     else:
                         analytics_results["structural"] = {}
@@ -357,7 +368,7 @@ class AnalyticsBroadcaster:
                 return # Skip broadcast if too frequent
         
         # Hash check to prevent flood
-        payload_str = json.dumps(analytics_payload.get("data", {}), sort_keys=True)
+        payload_str = json.dumps(analytics_payload.get("data", {}), sort_keys=True, default=json_safe)
         payload_hash = hashlib.md5(payload_str.encode()).hexdigest()
         
         if self._last_analytics_hash.get(symbol) == payload_hash:
@@ -393,7 +404,10 @@ class AnalyticsBroadcaster:
                     # Phase 8: Store full bundled payload
                     LAST_ANALYTICS[symbol] = analytics_message
                 
-                await manager.broadcast(analytics_message)
+                # PATCH 3: FIX DATETIME SERIALIZATION
+                payload_json = json.dumps(analytics_message, default=json_safe)
+                await manager.broadcast(payload_json)
+                
                 broadcast_ms = (time.time() - broadcast_start) * 1000
                 logger.info(
                     f"ANALYTICS BROADCAST → {analytics_payload.get('symbol','?')} "

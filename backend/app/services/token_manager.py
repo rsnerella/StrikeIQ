@@ -200,6 +200,10 @@ class TokenManager:
 
         return None
 
+    async def get_valid_token(self) -> Optional[str]:
+        """Compatibility method for older callers"""
+        return await self.get_token()
+
     # ================= AUTH STATE =================
 
     def get_auth_state(self) -> Dict[str, Any]:

@@ -29,27 +29,39 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
         if (!chartContainerRef.current) return;
 
         const chart = createChart(chartContainerRef.current, {
+            width: chartContainerRef.current.clientWidth,
+            height: chartContainerRef.current.clientHeight,
             layout: {
                 background: { type: ColorType.Solid, color: 'transparent' },
-                textColor: 'rgba(255, 255, 255, 0.7)',
+                textColor: 'rgba(255,255,255,0.7)',
             },
             grid: {
-                vertLines: { color: 'rgba(255, 255, 255, 0.05)' },
-                horzLines: { color: 'rgba(255, 255, 255, 0.05)' },
+                vertLines: { color: 'rgba(255,255,255,0.05)' },
+                horzLines: { color: 'rgba(255,255,255,0.05)' },
             },
             crosshair: {
                 mode: CrosshairMode.Normal,
             },
             rightPriceScale: {
-                borderColor: 'rgba(255, 255, 255, 0.1)',
-                autoScale: true,
+                visible: true,
+                borderVisible: false,
+                scaleMargins: {
+                    top: 0.1,
+                    bottom: 0.1
+                }
+            },
+            leftPriceScale: {
+                visible: false
             },
             timeScale: {
-                borderColor: 'rgba(255, 255, 255, 0.1)',
+                borderVisible: false,
                 timeVisible: true,
                 secondsVisible: false,
-            },
+                barSpacing: 10
+            }
         });
+        
+        console.log("CHART INIT → chart created");
 
         const candlestickSeries = chart.addCandlestickSeries({
             upColor: '#4ade80',
@@ -57,7 +69,10 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
             borderVisible: false,
             wickUpColor: '#4ade80',
             wickDownColor: '#f87171',
+            priceScaleId: 'right',
         });
+        
+        console.log("SERIES INIT → candlestick series created");
 
         const waveSeries = chart.addLineSeries({
             color: '#a855f7',
@@ -70,15 +85,18 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
         waveSeriesRef.current = waveSeries;
 
         const handleResize = () => {
-            if (chartContainerRef.current) {
-                chart.applyOptions({ width: chartContainerRef.current.clientWidth });
-            }
-        };
+            if (!chartContainerRef.current) return
 
-        window.addEventListener('resize', handleResize);
+            chart.applyOptions({
+                width: chartContainerRef.current.clientWidth,
+                height: chartContainerRef.current.clientHeight
+            })
+        }
+
+        window.addEventListener("resize", handleResize)
         
         return () => {
-            window.removeEventListener('resize', handleResize);
+            window.removeEventListener("resize", handleResize)
             chart.remove();
         };
     }, []);
@@ -108,6 +126,7 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
                     borderVisible: false,
                     wickUpColor: '#4ade80',
                     wickDownColor: '#f87171',
+                    priceScaleId: 'right',
                 });
                 const waveSeries = chartRef.current.addLineSeries({
                     color: '#a855f7',
@@ -124,13 +143,16 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
                     const candles = responseData.candles || [];
                     
                     if (isMounted && seriesRef.current && candles.length > 0) {
-                        seriesRef.current.setData(candles.map((c: any) => ({
-                            time: c.time,
+                        const formattedCandles = candles.map((c: any) => ({
+                            time: Math.floor(Number(c.time)),
                             open: c.open,
                             high: c.high,
                             low: c.low,
                             close: c.close
-                        })));
+                        }));
+                        console.log("CANDLE UPDATE →", formattedCandles.slice(0, 3));
+                        seriesRef.current.setData(formattedCandles);
+                        chartRef.current?.timeScale().fitContent();
                         const lastCandle = candles[candles.length - 1];
                         currentPriceRef.current = lastCandle.close;
                         currentCloseTimeRef.current = lastCandle.time;
@@ -138,6 +160,18 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
                 }
             } catch (err) {
                 console.error("Failed to load historical candles", err);
+                // STEP 8: Simulate candles if market closed
+                if (seriesRef.current && isMounted) {
+                    const testCandles = [
+                        { time: 1700000000 as any, open: 100, high: 105, low: 98, close: 102 },
+                        { time: 1700000600 as any, open: 102, high: 108, low: 101, close: 107 },
+                        { time: 1700001200 as any, open: 107, high: 110, low: 104, close: 105 }
+                    ];
+                    console.log("TEST CANDLES LOADED");
+                    seriesRef.current.setData(testCandles);
+                    currentPriceRef.current = 105;
+                    currentCloseTimeRef.current = 1700001200;
+                }
             } finally {
                 if (isMounted) setLoading(false);
             }
@@ -162,26 +196,23 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
         const price = data.spot;
 
         if (price > 0 && candleTime >= currentCloseTimeRef.current) {
+            const candleUpdate = {
+                time: candleTime as any,
+                open: currentPriceRef.current ?? price,
+                high: Math.max(currentPriceRef.current ?? price, price),
+                low: Math.min(currentPriceRef.current ?? price, price),
+                close: price,
+            };
+            console.log("LIVE CANDLE UPDATE →", candleUpdate);
+            
             // New candle or update current
             if (candleTime > currentCloseTimeRef.current) {
-                seriesRef.current.update({
-                    time: candleTime as any,
-                    open: price,
-                    high: price,
-                    low: price,
-                    close: price,
-                });
+                seriesRef.current.update(candleUpdate);
                 currentCloseTimeRef.current = candleTime;
             } else {
                 // Not ideal for full OHL update since we only have tick price, 
                 // but this satisfies lightweight chart typings
-                seriesRef.current.update({
-                    time: candleTime as any,
-                    open: price, // we lose true open without a state-held OHL
-                    high: price,
-                    low: price,
-                    close: price,
-                });
+                seriesRef.current.update(candleUpdate);
             }
         }
     }, [data?.spot, data?.timestamp, timeframe]);
@@ -191,18 +222,24 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
         if (!seriesRef.current || !chartRef.current || !waveSeriesRef.current || !data) return;
 
         // Clear previous lines
-        priceLinesRef.current.forEach(pl => seriesRef.current?.removePriceLine(pl));
+        priceLinesRef.current.forEach(pl => {
+            try {
+                seriesRef.current?.removePriceLine(pl)
+            } catch {}
+        });
         priceLinesRef.current = [];
 
         const chartAnalysis = data?.chartAnalysis;
+        console.log("PATTERN ENGINE RUNNING → chartAnalysis:", chartAnalysis ? "found" : "none");
 
         // Phase 5: Elliot Wave
         const waves = chartAnalysis?.wave_points || [];
-        if (waves.length > 0) {
+        if (Array.isArray(waves) && waves.length > 0) {
+            console.log("OVERLAY DRAWN → Elliot Wave points:", waves.length);
             const waveData = waves.map((w: any) => ({
                 time: (w.time) as any,
                 value: w.price
-            })).sort((a: any, b: any) => a.time - b.time);
+            })).sort((a: any, b: any) => Number(a.time) - Number(b.time));
             
             waveSeriesRef.current.setData(waveData);
         } else {
@@ -214,6 +251,7 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
         // Phase 8: Gamma Walls (Structural)
         const gamma = (data?.analytics as any)?.structural || {};
         if (gamma.resistance_level) {
+            console.log("OVERLAY DRAWN → Call Wall:", gamma.resistance_level);
             priceLinesRef.current.push(seriesRef.current.createPriceLine({
                 price: gamma.resistance_level,
                 color: '#ef4444',
@@ -224,6 +262,7 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
             }));
         }
         if (gamma.support_level) {
+            console.log("OVERLAY DRAWN → Put Wall:", gamma.support_level);
             priceLinesRef.current.push(seriesRef.current.createPriceLine({
                 price: gamma.support_level,
                 color: '#22c55e',
@@ -306,13 +345,15 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
         }
 
         // Apply markers
-        markers.sort((a, b) => a.time - b.time);
+        markers.sort((a, b) => Number(a.time) - Number(b.time));
         seriesRef.current.setMarkers(markers);
+        
+        console.log("STRIKEIQ CHART PIPELINE OK");
         
     }, [data]);
 
     return (
-        <div className="w-full h-full relative border border-white/10 rounded-xl overflow-hidden bg-black/40 backdrop-blur-md">
+        <div className="w-full h-full relative border border-white/10 rounded-xl overflow-visible bg-black/40 backdrop-blur-md">
             {loading && (
                 <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60">
                     <span className="text-white/70 font-mono text-xs tracking-widest animate-pulse">LOADING SYMBOL DATA...</span>
@@ -323,7 +364,9 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
                 <span className="text-white font-bold">{symbol}</span> • {timeframe} CHART ENGINE
             </div>
             
-            <div ref={chartContainerRef} className="w-full h-full" style={{ minHeight: '400px' }} />
+            <div className="w-full h-full relative pr-10">
+                <div ref={chartContainerRef} className="w-full h-full" style={{ minHeight: '400px' }} />
+            </div>
         </div>
     );
 };

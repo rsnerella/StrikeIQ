@@ -30,8 +30,14 @@ def generate_option_trade(snapshot, chain_data):
             return None # Neutral - skip
             
         # 2 strike selection
-        # ATM = round(spot/100)*100
-        atm_strike = int(round(spot / 100) * 100)
+        # Dynamic ATM calculation based on symbol-specific steps
+        config = {
+            "NIFTY": {"step": 50},
+            "BANKNIFTY": {"step": 100},
+            "FINNIFTY": {"step": 50}
+        }
+        step = config.get(symbol, {"step": 50})["step"]
+        atm_strike = int(round(spot / step) * step)
         
         # 3 fetch option premium
         if hasattr(chain_data, 'strikes'):
@@ -74,11 +80,11 @@ def generate_option_trade(snapshot, chain_data):
         
         # 5 lot sizing
         lot_sizes = {
-            "NIFTY": 50,
+            "NIFTY": 25,
             "BANKNIFTY": 15,
             "FINNIFTY": 40
         }
-        lot_size = lot_sizes.get(symbol, 50)
+        lot_size = lot_sizes.get(symbol, 25)
         risk_per_trade = 3000
         
         # lots = floor(risk_per_trade / ((entry-stop_loss) * lot_size))
@@ -87,10 +93,14 @@ def generate_option_trade(snapshot, chain_data):
             return None
             
         lots = math.floor(risk_per_trade / (diff * lot_size))
+        if lots <= 0: lots = 1 # Minimum 1 lot
         
         # 6 profit/loss
         max_loss = round((entry - stop_loss) * lot_size * lots, 2)
         expected_profit = round((target - entry) * lot_size * lots, 2)
+        
+        # 7 Format formal signal message
+        buy_message = f"BUY {symbol} {atm_strike} {option_type}"
         
         # Return structure (Phase 6.6)
         return {
@@ -98,6 +108,7 @@ def generate_option_trade(snapshot, chain_data):
             "strike": atm_strike,
             "option_type": option_type,
             "option_ltp": option_ltp,
+            "signal_text": buy_message,
             "entry": entry,
             "stop_loss": stop_loss,
             "target": target,

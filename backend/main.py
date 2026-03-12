@@ -120,7 +120,7 @@ async def token_watcher():
 
             while not token:
                 await asyncio.sleep(2)
-                token = await token_manager.get_valid_token()
+                token = await token_manager.get_token()
 
         logger.info("Upstox token detected")
 
@@ -250,7 +250,10 @@ async def lifespan(app: FastAPI):
     try:
 
         from app.services.live_structural_engine import LiveStructuralEngine, structural_engine_instance
-        app.state.live_engine = LiveStructuralEngine(ws_feed_manager)
+        from app.core.live_market_state import get_market_state_manager
+        
+        market_state_mgr = get_market_state_manager()
+        app.state.live_engine = LiveStructuralEngine(market_state_mgr)
         structural_engine_instance = app.state.live_engine
         
         task = asyncio.create_task(

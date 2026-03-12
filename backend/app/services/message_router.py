@@ -34,18 +34,19 @@ class MessageRouter:
         try:
 
             instrument_key = tick.get("instrument_key")
+            
+            # STAGE 6: VERIFY ROUTER INPUT
+            logger.info("ROUTER RECEIVED → %s", tick)
 
             if not instrument_key:
                 logger.debug("Tick missing instrument_key")
                 return None
 
-            # -------------------------------------------------
-            # SAFE NUMERIC CONVERSION
-            # -------------------------------------------------
-
-            raw_ltp = tick.get("ltp")
-            raw_oi = tick.get("oi")
-            raw_volume = tick.get("volume")
+            # Handle Stage 5 nested structure
+            data = tick.get("data", {})
+            raw_ltp = data.get("ltp") if data else tick.get("ltp")
+            raw_oi = data.get("oi") if data else tick.get("oi")
+            raw_volume = data.get("volume") if data else tick.get("volume")
 
             if raw_ltp is None:
                 ltp = 0.0
@@ -88,6 +89,9 @@ class MessageRouter:
             # -------------------------------------------------
 
             if instrument_type == "INDEX":
+                
+                # STAGE 3: ROUTER TYPE
+                logger.info("ROUTER TYPE → index_tick")
 
                 # push price history
                 if ltp > 0:
@@ -116,12 +120,20 @@ class MessageRouter:
                 if ltp <= 0:
                     return None
 
-                return self._create_index_tick(
+                message = self._create_index_tick(
                     symbol,
                     ltp,
                     timestamp,
                     instrument_key=instrument_key
                 )
+                
+                # STAGE 6: ROUTER TYPE LOG
+                logger.info(
+                    "ROUTER TYPE → %s",
+                    message.get("type") if message else "None"
+                )
+                
+                return message
 
             # -------------------------------------------------
             # OPTION ROUTING
@@ -137,6 +149,24 @@ class MessageRouter:
 
                 # direct call (NO async task creation)
                 try:
+
+                    message = {
+                        "type": "option_tick",
+                        "symbol": meta["symbol"],
+                        "data": {
+                            "strike": meta["strike"],
+                            "option_type": meta["option_type"],
+                            "ltp": ltp,
+                            "oi": oi,
+                            "timestamp": timestamp
+                        }
+                    }
+
+                    # STAGE 6: ROUTER TYPE LOG
+                    logger.info(
+                        "ROUTER TYPE → %s",
+                        message.get("type") if message else "None"
+                    )
 
                     option_chain_builder.update_option_tick(
                         symbol=meta["symbol"],

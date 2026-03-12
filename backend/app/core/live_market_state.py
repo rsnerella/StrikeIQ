@@ -154,6 +154,10 @@ class MarketStateManager:
         self.market_states: Dict[str, SymbolMarketState] = {}
         self._lock = asyncio.Lock()
         
+        # Current active subscription state (Institutional Sync)
+        self.active_symbol: Optional[str] = "NIFTY"
+        self.active_expiry: Optional[str] = None
+        
     async def get_symbol_state(self, symbol: str) -> Optional[SymbolMarketState]:
         """Get market state for a symbol"""
         async with self._lock:

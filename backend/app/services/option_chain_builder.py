@@ -17,13 +17,29 @@ from app.core.ai_health_state import mark_health
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------
+# INDEX CONFIGURATION (Institutional Standard)
+# ---------------------------------------------------------
+INDEX_CONFIG = {
+    "NIFTY": {"step": 50, "lot": 25},
+    "BANKNIFTY": {"step": 100, "lot": 15},
+    "FINNIFTY": {"step": 50, "lot": 40}
+}
 
 @dataclass
 class OptionData:
     strike: float
     ltp: float = 0.0
     oi: int = 0
+    oi_prev: int = 0
+    bid: float = 0.0
+    ask: float = 0.0
+    bid_qty: int = 0
+    ask_qty: int = 0
     iv: float = 0.0
+    delta: float = 0.0
+    theta: float = 0.0
+    vega: float = 0.0
     gamma: float = 0.0
     volume: int = 0
     last_update: datetime = field(default_factory=datetime.utcnow)
@@ -40,6 +56,8 @@ class ChainSnapshot:
     pcr: float = 0.0
     total_oi_calls: int = 0
     total_oi_puts: int = 0
+    open: float = 0.0
+    prev_close: float = 0.0
 
 
 class OptionChainBuilder:
@@ -149,14 +167,22 @@ class OptionChainBuilder:
 
             self.purge_stale_strikes(symbol)
 
-            # Evict far strikes
-            far = [s for s in chain.keys() if abs(s - spot) > 1500]
-
+            # PHASE 1: Calculate ATM strike
+            config = INDEX_CONFIG.get(symbol, {"step": 50, "lot": 25})
+            step = config["step"]
+            atm = round(spot / step) * step
+            
+            # PHASE 2: Select strikes dynamically (ATM ± 20 strikes)
+            # This ensures we always have a professional depth of 41 strikes (ATM + 20 ITM + 20 OTM)
+            lower_bound = atm - (20 * step)
+            upper_bound = atm + (20 * step)
+            
+            # PHASE 3: Evict strikes outside the dynamic active window
+            far = [s for s in chain.keys() if s < lower_bound or s > upper_bound]
             for s in far:
                 chain.pop(s, None)
-
+ 
             last = self.last_snapshots.get(symbol, datetime.min)
-
             if (now - last).total_seconds() < 0.5:
                 continue
 
@@ -201,7 +227,9 @@ class OptionChainBuilder:
 
         strikes = []
 
-        strike_keys = sorted(chain.keys())
+        # FIX: avoid repeated expensive sorting
+        strike_keys = list(chain.keys())
+        strike_keys.sort()
 
         atm = self._find_atm_strike(spot, strike_keys)
         
@@ -224,11 +252,31 @@ class OptionChainBuilder:
                 {
                     "strike": strike,
                     "call_oi": ce.oi if ce_valid else 0,
+                    "call_oi_change": ce.oi - ce.oi_prev if ce_valid and ce.oi_prev > 0 else 0,
                     "call_ltp": ce.ltp if ce_valid else 0,
+                    "call_bid": ce.bid if ce_valid else 0,
+                    "call_ask": ce.ask if ce_valid else 0,
+                    "call_bid_qty": ce.bid_qty if ce_valid else 0,
+                    "call_ask_qty": ce.ask_qty if ce_valid else 0,
                     "call_volume": ce.volume if ce_valid else 0,
+                    "call_iv": ce.iv if ce_valid else 0,
+                    "call_delta": ce.delta if ce_valid else 0,
+                    "call_theta": ce.theta if ce_valid else 0,
+                    "call_vega": ce.vega if ce_valid else 0,
+                    "call_gamma": ce.gamma if ce_valid else 0,
                     "put_oi": pe.oi if pe_valid else 0,
+                    "put_oi_change": pe.oi - pe.oi_prev if pe_valid and pe.oi_prev > 0 else 0,
                     "put_ltp": pe.ltp if pe_valid else 0,
+                    "put_bid": pe.bid if pe_valid else 0,
+                    "put_ask": pe.ask if pe_valid else 0,
+                    "put_bid_qty": pe.bid_qty if pe_valid else 0,
+                    "put_ask_qty": pe.ask_qty if pe_valid else 0,
                     "put_volume": pe.volume if pe_valid else 0,
+                    "put_iv": pe.iv if pe_valid else 0,
+                    "put_delta": pe.delta if pe_valid else 0,
+                    "put_theta": pe.theta if pe_valid else 0,
+                    "put_vega": pe.vega if pe_valid else 0,
+                    "put_gamma": pe.gamma if pe_valid else 0,
                 }
             )
 
@@ -241,16 +289,21 @@ class OptionChainBuilder:
 
         mark_health("option_chain")
 
+        # Capture price metadata
+        meta = getattr(self, "price_metadata", {}).get(symbol, {})
+
         return ChainSnapshot(
             symbol=symbol,
             spot=spot,
+            open=meta.get("open", spot),
+            prev_close=meta.get("prev_close", spot),
             atm_strike=atm,
             expiry=self.default_expiry,
             strikes=strikes,
-            timestamp=int(datetime.utcnow().timestamp()),
+            timestamp=int(now.timestamp()),
             pcr=pcr,
             total_oi_calls=total_call_oi,
-            total_oi_puts=total_put_oi
+            total_oi_puts=total_put_oi,
         )
 
     # --------------------------------------------------
@@ -289,9 +342,11 @@ class OptionChainBuilder:
             # OI SANITY CHECK - Permanent debug metric
             logger.info(f"[DATA_HEALTH] strikes={len(snapshot.strikes)} call_oi={snapshot.total_oi_calls:,} put_oi={snapshot.total_oi_puts:,} pcr={snapshot.pcr:.2f}")
             
-            # OI Data Health Alert
-            if len(snapshot.strikes) > 0 and snapshot.total_oi_calls == 0 and snapshot.total_oi_puts == 0:
-                logger.warning("[DATA_HEALTH_ALERT] OI values zero - feed issue possible")
+            # PATCH 5: PIPELINE HEALTH CHECK
+            if snapshot.total_oi_calls == 0 and snapshot.total_oi_puts == 0:
+                logger.warning(
+                    "[DATA_HEALTH_ALERT] OI values zero - parser issue likely"
+                )
             
             # Broadcast option chain update
             pipeline_start = time.perf_counter()
@@ -332,7 +387,14 @@ class OptionChainBuilder:
 
     # --------------------------------------------------
 
-    def update_index_price(self, symbol: str, price: float):
+    def update_index_price(self, symbol: str, price: float, open_price: float = 0.0, prev_close: float = 0.0):
+        
+        # STAGE 4: OPTION CHAIN BUILDER TRACE
+        logger.info(
+            "CHAIN BUILDER UPDATE → %s spot=%s",
+            symbol,
+            price
+        )
 
         symbol = symbol.upper().replace(" ", "")
 
@@ -343,6 +405,14 @@ class OptionChainBuilder:
             symbol = "NIFTY"
 
         self.spot_prices[symbol] = price
+        
+        if not hasattr(self, "price_metadata"):
+            self.price_metadata = {}
+        
+        self.price_metadata[symbol] = {
+            "open": open_price,
+            "prev_close": prev_close
+        }
 
     # --------------------------------------------------
 
@@ -370,7 +440,7 @@ class OptionChainBuilder:
                 self.chains[symbol] = {}
 
             # Phase 5 GUARD: skip if ltp <= 0
-            if ltp is None or ltp <= 0:
+            if ltp is None:
                 return
 
             if strike not in self.chains[symbol]:
@@ -383,18 +453,35 @@ class OptionChainBuilder:
 
             opt.ltp = ltp
             if oi > 0:
+                if opt.oi > 0 and opt.oi != oi:
+                    opt.oi_prev = opt.oi
                 opt.oi = oi
             if volume > 0:
                 opt.volume = volume
             
+            # Update bid/ask
+            if "bid" in kwargs: opt.bid = kwargs["bid"]
+            if "ask" in kwargs: opt.ask = kwargs["ask"]
+            if "bid_qty" in kwargs: opt.bid_qty = kwargs["bid_qty"]
+            if "ask_qty" in kwargs: opt.ask_qty = kwargs["ask_qty"]
+            
             # Update greeks if provided
-            if "iv" in kwargs:
-                opt.iv = kwargs["iv"]
-            if "gamma" in kwargs:
-                opt.gamma = kwargs["gamma"]
+            if "iv" in kwargs: opt.iv = kwargs["iv"]
+            if "delta" in kwargs: opt.delta = kwargs["delta"]
+            if "theta" in kwargs: opt.theta = kwargs["theta"]
+            if "vega" in kwargs: opt.vega = kwargs["vega"]
+            if "gamma" in kwargs: opt.gamma = kwargs["gamma"]
                 
             opt.last_update = datetime.utcnow()
             
+            # STAGE 4: OPTION UPDATE
+            logger.info(
+                "OPTION UPDATE → %s %s strike=%s",
+                symbol,
+                right,
+                strike
+            )
+
             logger.debug(f"OPTION TICK UPDATED → {symbol} {strike}{right} ltp={ltp} oi={oi}")
 
             instrument_key = f"{symbol}_{strike}{right}"
