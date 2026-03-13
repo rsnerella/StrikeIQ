@@ -21,7 +21,12 @@ class TrainingDatasetBuilder:
                 query = text("""
                     SELECT 
                         l.id as signal_id,
-                        l.price, l.pcr, l.gamma, l.oi_velocity, l.wave, l.trend,
+                        l.spot_price as price,
+                        (l.metadata->>'pcr')::FLOAT as pcr,
+                        (l.metadata->>'gamma')::FLOAT as gamma,
+                        (l.metadata->>'oi_velocity')::FLOAT as oi_velocity,
+                        l.metadata->>'wave' as wave,
+                        l.metadata->>'trend' as trend,
                         o.result
                     FROM ai_signal_logs l
                     JOIN signal_outcomes o ON l.id = o.signal_id

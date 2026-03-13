@@ -1,0 +1,6 @@
+Checking ML dataset availability...
+Total entries in ai_signal_logs: 8
+Total entries in signal_outcomes: 0
+Total labeled dataset size (signals with outcomes): 0
+
+Label Distribution:

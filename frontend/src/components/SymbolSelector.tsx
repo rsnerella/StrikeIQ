@@ -28,20 +28,13 @@ export default function SymbolSelector() {
   } = useExpirySelector();
 
   return (
-    <div style={{
-      display: 'flex',
-      flexWrap: 'wrap',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      width: '100%',
-      gap: 16,
-    }}>
+    <div className="flex flex-wrap items-center gap-2">
 
       {/* ── Left: Symbol toggle ───────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div className="flex flex-wrap items-center gap-2 sm:gap-4">
 
         {/* Label */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 2 }}>
+        <div className="flex items-center gap-1 sm:gap-2">
           <BarChart2 size={14} style={{ color: 'rgba(0,229,255,0.70)' }} />
           <span style={{
             fontSize: 10,
@@ -56,34 +49,20 @@ export default function SymbolSelector() {
         </div>
 
         {/* Toggle pills */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 4,
-          padding: 4,
-          borderRadius: 12,
-          background: 'rgba(255,255,255,0.04)',
-          border: '1px solid rgba(255,255,255,0.08)',
-        }}>
+        <div className="flex items-center gap-1 sm:gap-2 p-1 sm:p-2 rounded-xl bg-white/4 border border-white/8">
           {SYMBOLS.map(s => {
             const active = s === currentSymbol;
             return (
               <button
                 key={s}
                 onClick={() => handleSymbolChange(s)}
+                className="px-2 py-1 sm:px-4 sm:py-1.5 text-xs sm:text-sm rounded-lg font-bold font-mono tracking-wider cursor-pointer transition-all duration-180 ease-in-out"
                 style={{
-                  padding: '5px 16px',
-                  borderRadius: 8,
-                  fontSize: 11,
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontWeight: 700,
-                  letterSpacing: '0.08em',
-                  cursor: 'pointer',
-                  transition: 'all 0.18s ease',
                   background: active ? 'rgba(0,229,255,0.12)' : 'transparent',
                   color: active ? '#00E5FF' : 'rgba(148,163,184,0.60)',
                   border: active ? '1px solid rgba(0,229,255,0.28)' : '1px solid transparent',
                   boxShadow: active ? '0 0 12px rgba(0,229,255,0.14), inset 0 1px 0 rgba(255,255,255,0.06)' : 'none',
+                  letterSpacing: '0.08em',
                 }}
               >
                 {s}
@@ -93,9 +72,9 @@ export default function SymbolSelector() {
         </div>
 
         {/* Timeframe toggle */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 12 }}>
+        <div className="flex flex-wrap items-center gap-1 sm:gap-2 mt-2 sm:mt-0">
           {/* Label */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 2 }}>
+          <div className="flex items-center gap-1 sm:gap-2">
             <span style={{
               fontSize: 10,
               fontFamily: "'JetBrains Mono', monospace",
@@ -107,29 +86,15 @@ export default function SymbolSelector() {
               TF
             </span>
           </div>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 2,
-            padding: 3,
-            borderRadius: 10,
-            background: 'rgba(255,255,255,0.04)',
-            border: '1px solid rgba(255,255,255,0.08)',
-          }}>
+          <div className="flex items-center gap-0.5 sm:gap-1 p-0.5 sm:p-1 rounded-lg bg-white/4 border border-white/8">
             {['1m', '5m', '15m'].map(tf => {
               const active = tf === timeframe;
               return (
                 <button
                   key={tf}
                   onClick={() => setTimeframe(tf)}
+                  className="px-2 py-1 sm:px-3 sm:py-1.5 text-xs sm:text-sm rounded-md font-bold font-mono cursor-pointer transition-all duration-180 ease-in-out"
                   style={{
-                    padding: '4px 10px',
-                    borderRadius: 6,
-                    fontSize: 10,
-                    fontFamily: "'JetBrains Mono', monospace",
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    transition: 'all 0.18s ease',
                     background: active ? 'rgba(0,229,255,0.12)' : 'transparent',
                     color: active ? '#00E5FF' : 'rgba(148,163,184,0.60)',
                     border: active ? '1px solid rgba(0,229,255,0.28)' : '1px solid transparent',
@@ -144,8 +109,8 @@ export default function SymbolSelector() {
       </div>
 
       {/* ── Right: Expiry dropdown ────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+      <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-2 sm:mt-0 w-full sm:w-auto">
+        <div className="flex items-center gap-1 sm:gap-2">
           <Calendar size={12} style={{ color: 'rgba(148,163,184,0.45)' }} />
           <span style={{
             fontSize: 10,
@@ -165,7 +130,7 @@ export default function SymbolSelector() {
           options={expiryList}
           placeholder="Select expiry"
           loading={loadingExpiries}
-          minWidth={148}
+          minWidth={120}
         />
       </div>
 

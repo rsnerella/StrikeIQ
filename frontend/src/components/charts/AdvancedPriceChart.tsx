@@ -57,7 +57,14 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
                 borderVisible: false,
                 timeVisible: true,
                 secondsVisible: false,
-                barSpacing: 10
+                barSpacing: 10,
+                tickMarkFormatter: (time) => {
+                    const date = new Date(time * 1000);
+                    return date.toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit"
+                    });
+                }
             }
         });
         
@@ -107,6 +114,9 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
         const loadHistoricalCandles = async () => {
             if (!chartRef.current || !symbol) return;
             
+            // STEP 1 — Log timeframe selector behavior
+            console.log("TIMEFRAME SWITCH →", timeframe);
+            
             setLoading(true);
             try {
                 // PHASE 1: Reset chart before loading new symbol
@@ -137,29 +147,73 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
                 seriesRef.current = candlestickSeries;
                 waveSeriesRef.current = waveSeries;
 
+                // STEP 2 — Log API request
+                console.log("FETCHING CANDLES →", {
+                    symbol,
+                    timeframe
+                });
+                
                 const res = await fetch(`/api/v1/market/candles?symbol=${symbol}&tf=${timeframe}&limit=300`);
+                
+                // STEP 3 — Log backend response
+                const responseData = await res.json();
+                console.log("CANDLE API RESPONSE →", responseData);
+                
                 if (res.ok) {
-                    const responseData = await res.json();
                     const candles = responseData.candles || [];
                     
+                    // STEP 3 continued — Check response structure
+                    console.log("CANDLES ARRAY EXISTS →", !!responseData.candles);
+                    console.log("CANDLES ARRAY LENGTH →", candles.length);
+                    console.log("CANDLES ARRAY EMPTY →", candles.length === 0);
+                    
                     if (isMounted && seriesRef.current && candles.length > 0) {
-                        const formattedCandles = candles.map((c: any) => ({
+                        // Filter candles to NSE trading hours (09:15 → 15:30)
+                        const SESSION_START = 9 * 60 + 15; // 9:15 AM in minutes
+                        const SESSION_END = 15 * 60 + 30; // 3:30 PM in minutes
+                        
+                        const filteredCandles = candles.filter((c: any) => {
+                            const date = new Date(c.time * 1000);
+                            const minutes = date.getHours() * 60 + date.getMinutes();
+                            return minutes >= SESSION_START && minutes <= SESSION_END;
+                        });
+                        
+                        console.log("FILTERED CANDLES COUNT →", filteredCandles.length);
+                        
+                        const formattedCandles = filteredCandles.map((c: any) => ({
                             time: Math.floor(Number(c.time)),
                             open: c.open,
                             high: c.high,
                             low: c.low,
                             close: c.close
                         }));
-                        console.log("CANDLE UPDATE →", formattedCandles.slice(0, 3));
+                        
+                        // STEP 4 — Log candle transformation
+                        console.log("FORMATTED CANDLES →", formattedCandles.slice(0,5));
+                        console.log("TOTAL CANDLES →", formattedCandles.length);
+                        
+                        // STEP 5 — Check time ordering
+                        console.log("FIRST TIME", formattedCandles[0]?.time);
+                        console.log("LAST TIME", formattedCandles.at(-1)?.time);
+                        
+                        // STEP 6 — Check chart update
+                        console.log("UPDATING CHART WITH", formattedCandles.length, "candles");
+                        
                         seriesRef.current.setData(formattedCandles);
                         chartRef.current?.timeScale().fitContent();
-                        const lastCandle = candles[candles.length - 1];
+                        const lastCandle = filteredCandles[filteredCandles.length - 1];
                         currentPriceRef.current = lastCandle.close;
                         currentCloseTimeRef.current = lastCandle.time;
                     }
+                } else {
+                    console.log("API RESPONSE NOT OK →", res.status, res.statusText);
                 }
             } catch (err) {
                 console.error("Failed to load historical candles", err);
+                // STEP 8 — Detect aggregation issue
+                if (timeframe !== "1m") {
+                    console.warn("Backend must aggregate candles for timeframe:", timeframe);
+                }
                 // STEP 8: Simulate candles if market closed
                 if (seriesRef.current && isMounted) {
                     const testCandles = [
@@ -174,6 +228,8 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
                 }
             } finally {
                 if (isMounted) setLoading(false);
+                // STEP 8 — Final diagnosis output
+                console.log("STRIKEIQ DIAGNOSIS COMPLETE");
             }
         };
 
