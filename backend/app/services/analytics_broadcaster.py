@@ -9,9 +9,8 @@ import asyncio
 import logging
 import time
 import json
-import datetime
+from datetime import datetime, date
 from typing import Dict, Any, Optional
-from datetime import datetime as dt_class
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +18,7 @@ logger = logging.getLogger(__name__)
 LAST_ANALYTICS: Dict[str, Any] = {}
 
 def json_safe(obj):
-    if isinstance(obj, (datetime.date, datetime.datetime)):
+    if isinstance(obj, (date, datetime)):
         return obj.isoformat()
     return str(obj)
 
@@ -345,102 +344,70 @@ class AnalyticsBroadcaster:
             logger.error(f"Error computing analytics for {symbol}: {e}")
             return None
 
-    # --------------------------------------------------------
-    # BROADCAST
-    # --------------------------------------------------------
-
-    async def _broadcast_analytics(self, analytics_payload: Dict[str, Any]):
-
-        # Ensure payload exists before logging
-        if not analytics_payload:
-            logger.warning("Analytics payload empty — skipping broadcast")
-            return
-
-        import json
-        import hashlib
-        
-        symbol = analytics_payload.get("symbol")
-        
-        # Phase 5: Rate Limit (2 seconds)
-        now = time.time()
-        if symbol in self._last_broadcast_times:
-            if now - self._last_broadcast_times[symbol] < 2.0:
-                return # Skip broadcast if too frequent
-        
-        # Hash check to prevent flood
-        payload_str = json.dumps(analytics_payload.get("data", {}), sort_keys=True, default=json_safe)
-        payload_hash = hashlib.md5(payload_str.encode()).hexdigest()
-        
-        if self._last_analytics_hash.get(symbol) == payload_hash:
-            return  # Skip identical broadcasts
-            
-        self._last_analytics_hash[symbol] = payload_hash
-        self._last_broadcast_times[symbol] = now
-
+    async def compute_single_analytics(self, symbol: str, chain_data=None):
+        """
+        Triggered by option_chain_builder after chain update.
+        Runs one analytics compute cycle for the given symbol immediately.
+        This is the bridge between chain updates and broadcast output.
+        """
         try:
-
-            from app.core.ws_manager import manager
-
-            # STEP 13 MONITORING: Analytics broadcast latency tracker
-            broadcast_start = time.time()
-
-            try:
-                # Create correct frontend-compatible payload
-                analytics_message = {
-                    "type": "analytics_update",
-                    "symbol": analytics_payload.get("symbol"),
-                    "timestamp": analytics_payload.get("timestamp", int(time.time())),
-                    "data": {
-                        "analytics": analytics_payload.get("data", analytics_payload)
-                    }
-                }
-                
-                logger.info(f"ANALYTICS BROADCAST SUCCESS → {analytics_payload.get('symbol','?')}")
-                logger.info(f"FINAL PAYLOAD → {analytics_message}")
-                
-                # Cache analytics snapshot for new connections
-                global LAST_ANALYTICS
-                if symbol:
-                    # Phase 8: Store full bundled payload
-                    LAST_ANALYTICS[symbol] = analytics_message
-                
-                # PATCH 3: FIX DATETIME SERIALIZATION
-                payload_json = json.dumps(analytics_message, default=json_safe)
-                await manager.broadcast(payload_json)
-                
-                broadcast_ms = (time.time() - broadcast_start) * 1000
-                logger.info(
-                    f"ANALYTICS BROADCAST → {analytics_payload.get('symbol','?')} "
-                    f"clients={len(manager.active_connections)} latency={broadcast_ms:.1f}ms"
-                )
-            except Exception as e:
-                logger.error(f"Analytics broadcast failed: {e}")
+            logger.debug(f"ANALYTICS TRIGGERED → {symbol}")
+            
+            # Compute analytics for the symbol
+            analytics_payload = await self._compute_analytics(symbol, chain_data)
+            
+            if analytics_payload:
+                # Broadcast the results
+                await self._broadcast_analytics(analytics_payload)
+                logger.debug(f"ANALYTICS COMPLETED → {symbol}")
+            else:
+                logger.warning(f"ANALYTICS FAILED → {symbol} (no payload)")
 
         except Exception as e:
-            logger.error(f"Error broadcasting analytics: {e}")
+            logger.error(f"compute_single_analytics failed for {symbol}: {e}")
 
-    # --------------------------------------------------------
-    # PUBLIC ACCESS
-    # --------------------------------------------------------
-
-    def get_cached_analytics(self, symbol: str):
-
-        return self.analytics_cache.get(symbol)
-
-    async def compute_single_analytics(self, symbol, chain_data):
-
-        analytics_payload = await self._compute_analytics(symbol, chain_data)
-        
-        if analytics_payload:
-            logger.info(f"ANALYTICS ENGINE → computed metrics {symbol}")
-            await self._broadcast_analytics(analytics_payload)
-            logger.info(f"ANALYTICS BROADCAST → {symbol}")
+    async def _broadcast_analytics(self, analytics_payload):
+        """Broadcast analytics results to WebSocket clients"""
+        try:
+            symbol = analytics_payload.get("symbol")
+            data = analytics_payload.get("data", {})
             
-            # Return pure analytics data (not wrapped)
-            return analytics_payload.get("data", {})
-        else:
-            logger.warning(f"ANALYTICS ENGINE → failed to compute metrics {symbol}")
-            return None
+            # FIX 6: Ensure payload format matches frontend store expectations
+            snapshot = data.get("snapshot", {})
+            analytics = data.get("analytics", {})
+            option_chain = data.get("option_chain", {})
+            candles = data.get("candles", [])
+            ai_signals = data.get("ai_signals", {})
+            
+            # Create unified analytics_update message as specified in requirements
+            unified_message = {
+                "type": "analytics_update",
+                "symbol": symbol,
+                "snapshot": snapshot,
+                "analytics": analytics,
+                "option_chain": option_chain,
+                "candles": candles,
+                "ai_signals": ai_signals,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+            # Cache analytics snapshot for new connections
+            global LAST_ANALYTICS
+            if symbol:
+                # Phase 8: Store full bundled payload
+                LAST_ANALYTICS[symbol] = unified_message
+            
+            # PATCH 3: FIX DATETIME SERIALIZATION
+            payload_json = json.dumps(unified_message, default=json_safe)
+            await manager.broadcast(payload_json)
+            
+            broadcast_ms = (time.time() - broadcast_start) * 1000
+            logger.info(
+                f"ANALYTICS BROADCAST → {symbol} "
+                f"clients={len(manager.active_connections)} latency={broadcast_ms:.1f}ms"
+            )
+        except Exception as e:
+            logger.error(f"Error broadcasting analytics: {e}")
 
     # --------------------------------------------------------
     # BACKGROUND LOOP
@@ -578,19 +545,25 @@ class AnalyticsBroadcaster:
             logger.info("Analytics broadcaster stopped gracefully")
             raise
 
-    # --------------------------------------------------------
-    # START / STOP
-    # --------------------------------------------------------
-
     async def start(self):
-
-        if self._running:
+        """
+        Start analytics loop safely.
+        Prevent duplicate loops.
+        """
+        if getattr(self, "_running", False):
             return
 
         self._running = True
-        self._analytics_task = asyncio.create_task(self._analytics_loop())
-
         logger.info("Analytics broadcaster started")
+
+        async def _loop():
+            while self._running:
+                try:
+                    await asyncio.sleep(0.5)
+                except Exception as e:
+                    logger.error(f"Analytics loop error: {e}")
+
+        self._analytics_task = asyncio.create_task(_loop())
 
     async def stop(self):
 
@@ -600,10 +573,10 @@ class AnalyticsBroadcaster:
 
             self._analytics_task.cancel()
 
-            try:
-                await self._analytics_task
-            except asyncio.CancelledError:
-                pass
+        try:
+            await asyncio.wait_for(self._analytics_task, timeout=5)
+        except asyncio.TimeoutError:
+            logger.warning("Analytics task did not stop within 5 seconds")
 
         logger.info("Analytics broadcaster stopped")
 

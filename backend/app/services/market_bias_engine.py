@@ -143,11 +143,14 @@ class MarketBiasEngine:
             total_call_oi = sum(call.get("open_interest", 0) for call in calls)
             total_put_oi = sum(put.get("open_interest", 0) for put in puts)
             
+            # Guard against division by zero
+            pcr = (total_put_oi or 0) / max((total_call_oi or 1), 1)
+            
             if total_call_oi == 0 or total_put_oi == 0:
                 logger.warning("OI data not ready for PCR calculation")
                 return 1.0  # Return neutral PCR as float, not dict
             
-            return total_put_oi / total_call_oi if total_call_oi > 0 else 1.0
+            return pcr
             
         except Exception as e:
             logger.error(f"Error calculating PCR: {e}")
@@ -185,7 +188,7 @@ class MarketBiasEngine:
                 strength += 10
             
             # OI change factor
-            strength += min(max(oi_change / 1000, 10), -10)
+            strength += min(max((oi_change or 0) / 1000, 10), -10)
             
             # Divergence bonus
             if divergence:

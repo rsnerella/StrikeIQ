@@ -8,7 +8,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useWSStore } from '../core/ws/wsStore';
 import { useOptionChainStore } from '../core/ws/optionChainStore';
-import { useShallow } from 'zustand/shallow';
 import throttle from "lodash/throttle"
 import { uiLog } from "@/utils/uiLogger"
 
@@ -50,16 +49,12 @@ export function useLiveMarketData(symbol: string, expiry: string | null) {
     })
   }
 
-  // READ ONLY from stores with grouped selectors to prevent unnecessary re-renders
-  const { spot, lastUpdate, connected, analytics } = useWSStore(
-    useShallow(state => ({
-      spot: state.spot,
-      lastUpdate: state.lastUpdate,
-      connected: state.connected,
-      analytics: state.analytics,
-      chartAnalysis: state.chartAnalysis
-    }))
-  )
+  // READ ONLY from stores with granular selectors to prevent unnecessary re-renders
+  const spot = useWSStore((s) => s.spot)
+  const lastUpdate = useWSStore((s) => s.lastUpdate)
+  const connected = useWSStore((s) => s.connected)
+  const analytics = useWSStore((s) => s.analytics)
+  const chartAnalysis = useWSStore((s) => s.chartAnalysis)
   const { optionChainData, optionChainLastUpdate } = useOptionChainStore()
 
   // Spot fallback logic

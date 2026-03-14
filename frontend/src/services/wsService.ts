@@ -178,7 +178,13 @@ export function connectMarketWS() {
 
   socket.onmessage = (event) => {
     try {
-      const data = JSON.parse(event.data)
+      // Guard: skip non-JSON frames (plain text status/error messages)
+      const raw = event.data
+      if (typeof raw !== 'string' || !raw.trim().startsWith('{')) {
+        console.warn('WS NON-JSON FRAME SKIPPED:', raw?.substring(0, 100))
+        return
+      }
+      const data = JSON.parse(raw)
       
       // PERFORMANCE: Count message rate to detect performance issues
       console.count("WS_MESSAGE")
@@ -217,8 +223,10 @@ export function connectMarketWS() {
       if (wsStore.handleMessage) {
         wsStore.handleMessage(data)
       }
-    } catch (e) {
-      console.warn("Invalid WS message", event.data)
+    } catch (err) {
+      console.warn('WS JSON PARSE ERROR:', err, 'raw:', event.data?.substring(0, 200))
+      // Do NOT rethrow — just skip this frame
+      return
     }
   }
 

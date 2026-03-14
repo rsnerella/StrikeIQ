@@ -152,61 +152,64 @@ async def get_expiries(symbol: str):
 async def get_historical_candles(symbol: str, tf: str = "1m", limit: int = 300):
     """Get historical candles for chart rendering"""
     try:
-        # Map timeframes to upstox format
-        tf_map = {
-            "1m": "1minute",
-            "5m": "5minute",
-            "15m": "15minute",
-            "30m": "30minute",
+        # Map tf to Upstox interval
+        interval_map = {
+            '1m': '1minute', 
+            '5m': '5minute', 
+            '15m': '15minute',
+            '30m': '30minute',
+            '1h': '60minute', 
+            '1d': 'day'
         }
-        interval = tf_map.get(tf, "1minute")
-        
-        # Map symbols to instrument_keys
-        if symbol.upper() == "NIFTY":
-            instrument_key = "NSE_INDEX|Nifty 50"
-        elif symbol.upper() == "BANKNIFTY":
-            instrument_key = "NSE_INDEX|Nifty Bank"
-        elif symbol.upper() == "FINNIFTY":
-            instrument_key = "NSE_INDEX|Nifty Fin Service"
-        else:
-            raise HTTPException(status_code=400, detail="Invalid symbol")
+        interval = interval_map.get(tf, '1minute')
+
+        instrument_key = {
+            'NIFTY': 'NSE_INDEX|Nifty 50',
+            'BANKNIFTY': 'NSE_INDEX|Nifty Bank',
+            'FINNIFTY': 'NSE_INDEX|Nifty Fin Service',
+        }.get(symbol.upper(), 'NSE_INDEX|Nifty 50')
+
+        # URL encode the instrument key
+        encoded_key = instrument_key.replace('|', '%7C').replace(' ', '%20')
 
         token = await token_manager.get_token()
         if not token:
             raise HTTPException(status_code=401, detail="No valid upstox token")
 
         async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"https://api.upstox.com/v2/historical-candle/intraday/{instrument_key}/{interval}",
-                headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}
-            )
-            
-            if resp.status_code != 200:
-                logger.error(f"Candle API error: {resp.text}")
-                return []
-                
-            data = resp.json().get("data", {}).get("candles", [])
-            
-            # Upstox returns: [timestamp, open, high, low, close, volume, oi]
-            # Must format for lightweigh-charts: {time: UNIX, open, high, low, close}
-            formatted = []
-            for c in reversed(data[:limit]):
-                # timestamp is ISO 8601 string "2024-03-12T10:00:00+05:30"
+            # Try intraday first
+            url = f"https://api.upstox.com/v2/historical-candle/intraday/{encoded_key}/{interval}"
+            resp = await client.get(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
+            data = resp.json().get('data', {}).get('candles', [])
+
+            # If intraday is empty (market closed), fetch last 5 days historical
+            if not data:
+                from datetime import date, timedelta
+                to_date   = date.today().strftime('%Y-%m-%d')
+                from_date = (date.today() - timedelta(days=5)).strftime('%Y-%m-%d')
+                url = f"https://api.upstox.com/v2/historical-candle/{encoded_key}/{interval}/{to_date}/{from_date}"
+                resp = await client.get(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
+                data = resp.json().get('data', {}).get('candles', [])
+
+            # Convert to frontend format: [timestamp, open, high, low, close, volume]
+            candles = []
+            for c in data[-limit:]:
+                # Upstox returns: [timestamp, open, high, low, close, volume, oi]
                 dt = datetime.fromisoformat(c[0])
                 unix_time = int(dt.timestamp())
-                formatted.append({
-                    "time": unix_time,
-                    "open": c[1],
-                    "high": c[2],
-                    "low": c[3],
-                    "close": c[4]
+                candles.append({
+                    'time': unix_time,
+                    'open': c[1],
+                    'high': c[2],
+                    'low': c[3],
+                    'close': c[4],
+                    'volume': c[5] if len(c) > 5 else 0,
                 })
 
-            # Phase 2: Professional format and min candles check
             return {
-                "symbol": symbol.upper(),
-                "tf": tf,
-                "candles": formatted
+                'symbol': symbol.upper(), 
+                'tf': tf, 
+                'candles': candles
             }
 
     except Exception as e:

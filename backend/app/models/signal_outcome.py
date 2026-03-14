@@ -18,7 +18,7 @@ class SignalOutcome(Base):
     accuracy = Column(Float, nullable=True)
     result = Column(String)  # WIN, LOSS, HOLD
     
-    metadata = Column("metadata", JSON)  # Additional flags or prices
+    outcome_metadata = Column("metadata", JSON)  # Additional flags or prices
 
     def __repr__(self):
         return f"<SignalOutcome(id={self.id}, signal_id={self.signal_id}, result={self.result})>"

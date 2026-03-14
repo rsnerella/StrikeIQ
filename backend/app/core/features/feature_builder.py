@@ -12,6 +12,8 @@ from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass
 from collections import defaultdict
 import json
+from sqlalchemy.orm import Session
+from app.models.ai_features import AIFeature
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +59,10 @@ class FeatureBuilder:
     - Regime classification features
     """
     
-    def __init__(self):
+    def __init__(self, db_session: Optional[Session] = None):
+        # Database session for feature persistence
+        self.db_session = db_session
+        
         # Feature calculation parameters
         self.price_window_sizes = [5, 10, 20, 50]  # For moving averages, etc.
         self.volume_window_sizes = [5, 10, 20]
@@ -125,6 +130,10 @@ class FeatureBuilder:
             
             # Store in history
             self._store_features(symbol, features)
+            
+            # Store features in database
+            if self.db_session:
+                await self._persist_features_to_db(symbol, features)
             
             logger.debug(f"Built features for {symbol}: {len(price_features)} price, {len(volume_features)} volume features")
             return features
@@ -712,6 +721,58 @@ class FeatureBuilder:
         else:
             self.feature_history.clear()
             logger.info("Cleared all features")
+    
+    async def _persist_features_to_db(self, symbol: str, features: MarketFeatures) -> None:
+        """Persist features to database"""
+        try:
+            if not self.db_session:
+                return
+            
+            # Extract key features for ML
+            pcr = features.options_features.get('pcr', 0)
+            gamma_exposure = features.options_features.get('net_gamma', 0)
+            oi_velocity = features.options_features.get('oi_change', 0)
+            volatility = features.volatility_features.get('volatility_20', 0)
+            trend_strength = features.momentum_features.get('trend_strength', 0)
+            liquidity_score = features.volume_features.get('volume_trend', 0)
+            market_regime = features.regime_features.get('regime_score', 0)
+            
+            # Create full feature vector
+            feature_vector = {
+                'price_features': features.price_features,
+                'volume_features': features.volume_features,
+                'volatility_features': features.volatility_features,
+                'momentum_features': features.momentum_features,
+                'technical_features': features.technical_features,
+                'options_features': features.options_features,
+                'sentiment_features': features.sentiment_features,
+                'regime_features': features.regime_features
+            }
+            
+            # Create AI feature record
+            ai_feature = AIFeature(
+                symbol=symbol,
+                timestamp=features.timestamp,
+                pcr=pcr,
+                gamma_exposure=gamma_exposure,
+                oi_velocity=oi_velocity,
+                volatility=volatility,
+                trend_strength=trend_strength,
+                liquidity_score=liquidity_score,
+                market_regime=str(market_regime),
+                feature_vector_json=feature_vector
+            )
+            
+            # Save to database
+            self.db_session.add(ai_feature)
+            self.db_session.commit()
+            
+            logger.debug(f"Persisted features for {symbol} to database")
+            
+        except Exception as e:
+            logger.error(f"Error persisting features to database: {e}")
+            if self.db_session:
+                self.db_session.rollback()
     
     async def shutdown(self) -> None:
         """Graceful shutdown"""

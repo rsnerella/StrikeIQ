@@ -93,6 +93,15 @@ interface MarketStore {
   analytics: Analytics | null;
   aiSignals: any[];
   
+  // Data quality tracking
+  dataQuality: {
+    hasSpot: boolean;
+    hasOi: boolean;
+    hasGreeks: boolean;
+    lastUpdate: number | null;
+    source: 'waiting' | 'ltp_only' | 'full';
+  };
+  
   // Actions
   setConnected: (connected: boolean) => void;
   setMarketOpen: (open: boolean) => void;
@@ -104,6 +113,7 @@ interface MarketStore {
   updateAnalytics: (data: Analytics & { timestamp: number }) => void;
   setAISignals: (signals: any[]) => void;
   updateMarketData: (data: Partial<MarketStore> & { connected?: boolean; lastUpdate?: number; marketOpen?: boolean }) => void;
+  updateDataQuality: (payload: any) => void;
   clearData: () => void;
 }
 
@@ -123,6 +133,15 @@ export const useMarketStore = create<MarketStore>()(
     heatmap: null,
     analytics: null,
     aiSignals: [],
+    
+    // Data quality tracking
+    dataQuality: {
+      hasSpot: false,
+      hasOi: false,
+      hasGreeks: false,
+      lastUpdate: null,
+      source: 'waiting' as 'waiting' | 'ltp_only' | 'full',
+    },
     
     // Actions with logging
     setConnected: (connected) => {
@@ -168,6 +187,10 @@ export const useMarketStore = create<MarketStore>()(
       const traceId = getTraceId();
       uiLog("STORE UPDATE", { traceId, store: "marketStore", field: "optionChain", size: chainData.strikes?.length || 0 });
       
+      // Update data quality
+      const { updateDataQuality } = get();
+      updateDataQuality(chainData);
+      
       set((state) => ({
         optionChain: chainData,
         lastUpdate: timestamp,
@@ -192,6 +215,10 @@ export const useMarketStore = create<MarketStore>()(
       const traceId = getTraceId();
       uiLog("STORE UPDATE", { traceId, store: "marketStore", field: "analytics", keys: Object.keys(analyticsData) });
       
+      // Update data quality
+      const { updateDataQuality } = get();
+      updateDataQuality(analyticsData);
+      
       set((state) => ({
         analytics: analyticsData,
         lastUpdate: timestamp,
@@ -215,6 +242,29 @@ export const useMarketStore = create<MarketStore>()(
       }));
     },
     
+    updateDataQuality: (payload: any) => {
+      const calls = payload?.calls || []
+      const callValues = Object.values(calls) as any[]
+
+      const hasSpot   = typeof payload?.spot === 'number' && payload.spot > 0
+      const hasOi     = callValues.some((c: any) => (c?.oi ?? 0) > 0)
+      const hasGreeks = callValues.some((c: any) => (c?.delta ?? 0) !== 0)
+
+      let source: 'waiting' | 'ltp_only' | 'full' = 'waiting'
+      if (hasSpot && hasOi && hasGreeks) source = 'full'
+      else if (hasSpot) source = 'ltp_only'
+
+      set({
+        dataQuality: {
+          hasSpot,
+          hasOi,
+          hasGreeks,
+          lastUpdate: Date.now(),
+          source,
+        }
+      })
+    },
+    
     clearData: () => {
       const traceId = getTraceId();
       uiLog("STORE UPDATE", { traceId, store: "marketStore", field: "clearData" });
@@ -226,7 +276,14 @@ export const useMarketStore = create<MarketStore>()(
         analytics: null,
         aiSignals: [],
         connected: false,
-        lastUpdate: 0
+        lastUpdate: 0,
+        dataQuality: {
+          hasSpot: false,
+          hasOi: false,
+          hasGreeks: false,
+          lastUpdate: null,
+          source: 'waiting' as 'waiting' | 'ltp_only' | 'full',
+        }
       });
     }
   }))
@@ -241,6 +298,8 @@ export const useConnectionStatus = () => useMarketStore((state) => ({
   connected: state.connected,
   lastUpdate: state.lastUpdate
 }));
+
+export const useDataQuality = () => useMarketStore((state) => state.dataQuality);
 
 // Computed selectors
 export const useMarketStatus = () => useMarketStore((state) => {

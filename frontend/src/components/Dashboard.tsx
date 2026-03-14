@@ -7,6 +7,7 @@ import { useExpirySelector } from '../hooks/useExpirySelector';
 import { useMarketContextStore } from '../stores/marketContextStore';
 import { useModeGuard, useEffectiveSpot } from './SafeModeGuard';
 import SymbolSelector from './SymbolSelector';
+import { DataQualityBanner } from './DataQualityBanner';
 import dynamic from 'next/dynamic';
 const LoadingPlaceholder = () => (
   <div className="animate-pulse flex flex-col gap-4 p-4 grayscale opacity-50">
@@ -187,7 +188,7 @@ const DASHBOARD_CSS = `
 
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
-export default function Dashboard({ initialSymbol = 'NIFTY' }: DashboardProps) {
+function DashboardComponent({ initialSymbol = 'NIFTY' }: DashboardProps) {
   const setCurrentSymbol = useMarketContextStore(state => state.setSymbol);
   const currentSymbol = useMarketContextStore(state => state.symbol);
 
@@ -241,6 +242,9 @@ export default function Dashboard({ initialSymbol = 'NIFTY' }: DashboardProps) {
   // ── Main render ──────────────────────────────────────────────────────────────
   return (
     <div className="w-full">
+      {/* Data Quality Banner */}
+      <DataQualityBanner />
+      
       {/* Subtle grid overlay */}
       <div
         className="pointer-events-none fixed inset-0 z-0"
@@ -378,3 +382,7 @@ export default function Dashboard({ initialSymbol = 'NIFTY' }: DashboardProps) {
     </div>
   );
 }
+
+const Dashboard = memo(DashboardComponent);
+
+export default Dashboard;

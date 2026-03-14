@@ -46,7 +46,10 @@ from app.api.v1 import (
     market_session_router,
     ws_router,
     ai_status_router,
+    redis_health_router,
 )
+
+from app.api.v1.diagnostics import router as diagnostics_router
 
 from app.api.v1.ws.live_options import router as ui_ws_router
 
@@ -457,6 +460,8 @@ app.include_router(market_session_router, prefix="/api/v1/market")
 app.include_router(ws_router)
 app.include_router(ai_status_router, prefix="/api/v1/ai")
 app.include_router(ui_ws_router)
+app.include_router(diagnostics_router)
+app.include_router(redis_health_router, prefix="/api/v1/redis")
 
 
 # ================= RUN =================

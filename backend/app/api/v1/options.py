@@ -3,8 +3,8 @@ from sqlalchemy.orm import Session
 from typing import Dict, Any, List, Optional
 from ...services.market_data.option_chain_service import OptionChainService
 from ...services.market_data.upstox_client import APIResponseError
-from ...services.market_data.smart_money_engine import SmartMoneyEngine
-from ...services.market_data.smart_money_engine_v2 import SmartMoneyEngineV2
+# from ...services.market_data.smart_money_engine import SmartMoneyEngine
+# from ...services.market_data.smart_money_engine_v2 import SmartMoneyEngineV2
 from ...services.market_data.performance_tracking_service import PerformanceTrackingService
 from ...models.database import get_db
 from ...core.config import settings
@@ -116,11 +116,13 @@ def get_option_chain_service():
 
 def get_smart_money_engine():
     """Dependency injection for SmartMoneyEngine"""
-    return SmartMoneyEngine()
+    # return SmartMoneyEngine()
+    return None
 
 def get_smart_money_engine_v2():
     """Dependency injection for SmartMoneyEngineV2"""
-    return SmartMoneyEngineV2()
+    # return SmartMoneyEngineV2()
+    return None
 
 def get_performance_tracking_service():
     """Dependency injection for PerformanceTrackingService"""
@@ -414,10 +416,13 @@ async def get_greeks(
 @router.get("/smart-money/{symbol}", response_model=Dict[str, Any])
 async def get_smart_money_signal(
     symbol: str,
-    engine: SmartMoneyEngine = Depends(get_smart_money_engine),
+    engine = Depends(get_smart_money_engine),
     db: Session = Depends(get_db)
 ):
     """Get smart money directional bias signal for a symbol"""
+    if engine is None:
+        raise HTTPException(status_code=503, detail="Smart money engine not available")
+    # ... rest of the implementation
     try:
         logger.info(f"API request: Smart money signal for {symbol}")
         
@@ -444,10 +449,13 @@ async def get_smart_money_signal(
 @router.get("/smart-money-v2/{symbol}", response_model=Dict[str, Any])
 async def get_smart_money_signal_v2(
     symbol: str,
-    engine: SmartMoneyEngineV2 = Depends(get_smart_money_engine_v2),
+    engine = Depends(get_smart_money_engine_v2),
     db: Session = Depends(get_db)
 ):
     """Get smart money directional bias signal v2 (statistically stable)"""
+    if engine is None:
+        raise HTTPException(status_code=503, detail="Smart money engine v2 not available")
+    # ... rest of the implementation
     try:
         logger.info(f"API request: Smart money v2 signal for {symbol}")
         

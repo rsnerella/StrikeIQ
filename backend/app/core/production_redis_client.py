@@ -1,228 +1,130 @@
 """
-Production Redis Client with Connection Pooling
-Optimized for high-performance async operations
+Production Redis Client with Upstash Support
+Optimized for high-performance async operations with Upstash Redis integration
 """
 
-import redis.asyncio as redis
 import logging
 from typing import Optional, Any, Union, List
 import json
 from contextlib import asynccontextmanager
-from ..core.config import settings
+
+from app.core.config import settings
+from app.core.unified_redis_client import unified_redis_client, UnifiedRedisClient
 
 logger = logging.getLogger(__name__)
 
 class ProductionRedisClient:
-    """Production-grade Redis client with connection pooling"""
+    """Production-grade Redis client with Upstash support"""
     
     def __init__(self):
-        self.pool: Optional[redis.ConnectionPool] = None
-        self.client: Optional[redis.Redis] = None
-        self._initialized = False
+        self._unified_client = unified_redis_client
     
     async def initialize(self):
-        """Initialize Redis connection pool"""
-        if self._initialized:
-            return
-        
-        try:
-            # Create connection pool
-            self.pool = redis.ConnectionPool.from_url(
-                settings.REDIS_URL,
-                max_connections=20,
-                retry_on_timeout=True,
-                socket_connect_timeout=5,
-                socket_timeout=5,
-                decode_responses=True
-            )
-            
-            self.client = redis.Redis(connection_pool=self.pool)
-            
-            # Test connection
-            await self.client.ping()
-            self._initialized = True
-            logger.info("✅ Production Redis pool initialized")
-            
-        except Exception as e:
-            logger.error(f"❌ Redis pool initialization failed: {e}")
-            raise
+        """Initialize Redis connection (delegated to unified client)"""
+        await self._unified_client.initialize()
     
     async def close(self):
-        """Close Redis connection pool"""
-        if self.client:
-            await self.client.close()
-        if self.pool:
-            await self.pool.disconnect()
-        self._initialized = False
-        logger.info("✅ Redis pool closed")
+        """Close Redis connection (delegated to unified client)"""
+        await self._unified_client.close()
     
     @asynccontextmanager
     async def get_client(self):
-        """Get Redis client from pool"""
-        if not self._initialized:
-            await self.initialize()
-        yield self.client
+        """Get Redis client from unified client"""
+        async with self._unified_client.get_redis_client() as client:
+            yield client
     
     async def get(self, key: str) -> Optional[str]:
         """Get value from Redis"""
-        async with self.get_client() as client:
-            try:
-                return await client.get(key)
-            except Exception as e:
-                logger.error(f"Redis GET failed for {key}: {e}")
-                return None
+        return await self._unified_client.get(key)
     
     async def set(self, key: str, value: str, ex: Optional[int] = None) -> bool:
         """Set value in Redis with optional expiration"""
-        async with self.get_client() as client:
-            try:
-                return await client.set(key, value, ex=ex)
-            except Exception as e:
-                logger.error(f"Redis SET failed for {key}: {e}")
-                return False
+        return await self._unified_client.set(key, value, ex)
     
     async def set_json(self, key: str, data: dict, ex: Optional[int] = None) -> bool:
         """Set JSON data in Redis"""
-        try:
-            json_str = json.dumps(data)
-            return await self.set(key, json_str, ex)
-        except Exception as e:
-            logger.error(f"Redis SET JSON failed for {key}: {e}")
-            return False
+        return await self._unified_client.set_json(key, data, ex)
     
     async def get_json(self, key: str) -> Optional[dict]:
         """Get JSON data from Redis"""
-        try:
-            value = await self.get(key)
-            if value:
-                return json.loads(value)
-            return None
-        except Exception as e:
-            logger.error(f"Redis GET JSON failed for {key}: {e}")
-            return None
+        return await self._unified_client.get_json(key)
     
     async def delete(self, key: str) -> bool:
         """Delete key from Redis"""
-        async with self.get_client() as client:
-            try:
-                return await client.delete(key) > 0
-            except Exception as e:
-                logger.error(f"Redis DELETE failed for {key}: {e}")
-                return False
+        return await self._unified_client.delete(key)
     
     async def exists(self, key: str) -> bool:
         """Check if key exists in Redis"""
-        async with self.get_client() as client:
-            try:
-                return await client.exists(key) > 0
-            except Exception as e:
-                logger.error(f"Redis EXISTS failed for {key}: {e}")
-                return False
+        return await self._unified_client.exists(key)
     
     async def expire(self, key: str, seconds: int) -> bool:
         """Set expiration for key"""
-        async with self.get_client() as client:
-            try:
-                return await client.expire(key, seconds)
-            except Exception as e:
-                logger.error(f"Redis EXPIRE failed for {key}: {e}")
-                return False
+        return await self._unified_client.expire(key, seconds)
     
     async def keys(self, pattern: str) -> List[str]:
         """Get keys matching pattern"""
-        async with self.get_client() as client:
-            try:
-                return await client.keys(pattern)
-            except Exception as e:
-                logger.error(f"Redis KEYS failed for pattern {pattern}: {e}")
-                return []
+        return await self._unified_client.keys(pattern)
     
     async def hget(self, key: str, field: str) -> Optional[str]:
         """Get hash field"""
-        async with self.get_client() as client:
-            try:
-                return await client.hget(key, field)
-            except Exception as e:
-                logger.error(f"Redis HGET failed for {key}.{field}: {e}")
-                return None
+        return await self._unified_client.hget(key, field)
     
     async def hset(self, key: str, field: str, value: str) -> bool:
         """Set hash field"""
-        async with self.get_client() as client:
-            try:
-                return await client.hset(key, field, value) > 0
-            except Exception as e:
-                logger.error(f"Redis HSET failed for {key}.{field}: {e}")
-                return False
+        return await self._unified_client.hset(key, field, value)
     
     async def hgetall(self, key: str) -> dict:
         """Get all hash fields"""
-        async with self.get_client() as client:
-            try:
-                return await client.hgetall(key)
-            except Exception as e:
-                logger.error(f"Redis HGETALL failed for {key}: {e}")
-                return {}
+        return await self._unified_client.hgetall(key)
     
     async def lpush(self, key: str, *values) -> int:
         """Push values to list head"""
-        async with self.get_client() as client:
-            try:
-                return await client.lpush(key, *values)
-            except Exception as e:
-                logger.error(f"Redis LPUSH failed for {key}: {e}")
-                return 0
+        return await self._unified_client.lpush(key, *values)
     
     async def rpop(self, key: str) -> Optional[str]:
         """Pop value from list tail"""
-        async with self.get_client() as client:
-            try:
-                return await client.rpop(key)
-            except Exception as e:
-                logger.error(f"Redis RPOP failed for {key}: {e}")
-                return None
+        return await self._unified_client.rpop(key)
     
     async def lrange(self, key: str, start: int, end: int) -> List[str]:
         """Get range of list values"""
-        async with self.get_client() as client:
-            try:
-                return await client.lrange(key, start, end)
-            except Exception as e:
-                logger.error(f"Redis LRANGE failed for {key}: {e}")
-                return []
+        return await self._unified_client.lrange(key, start, end)
     
     async def publish(self, channel: str, message: str) -> int:
         """Publish message to channel"""
-        async with self.get_client() as client:
-            try:
-                return await client.publish(channel, message)
-            except Exception as e:
-                logger.error(f"Redis PUBLISH failed for {channel}: {e}")
-                return 0
+        try:
+            client = await self._unified_client.get_client()
+            result = await client.publish(channel, message)
+            return result or 0
+        except Exception as e:
+            logger.error(f"Redis PUBLISH failed for {channel}: {e}")
+            return 0
     
     async def subscribe(self, *channels) -> Any:
         """Subscribe to channels"""
-        async with self.get_client() as client:
-            try:
-                return await client.subscribe(*channels)
-            except Exception as e:
-                logger.error(f"Redis SUBSCRIBE failed: {e}")
-                return None
+        try:
+            client = await self._unified_client.get_client()
+            return await client.subscribe(*channels)
+        except Exception as e:
+            logger.error(f"Redis SUBSCRIBE failed: {e}")
+            return None
     
     async def pipeline(self):
         """Get Redis pipeline for batch operations"""
-        async with self.get_client() as client:
+        try:
+            client = await self._unified_client.get_client()
             return client.pipeline()
+        except Exception as e:
+            logger.error(f"Redis pipeline creation failed: {e}")
+            return None
     
     async def test_connection(self) -> bool:
         """Test Redis connection"""
-        try:
-            async with self.get_client() as client:
-                await client.ping()
-                return True
-        except Exception as e:
-            logger.error(f"Redis connection test failed: {e}")
-            return False
+        return await self._unified_client.ping()
+    
+    async def get_provider_info(self) -> dict:
+        """Get information about Redis provider"""
+        return await self._unified_client.get_provider_info()
+
 
 # Global Redis client instance
 production_redis = ProductionRedisClient()

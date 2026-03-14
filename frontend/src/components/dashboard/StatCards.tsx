@@ -89,13 +89,17 @@ export function StatCardsRow({ data, isAnalyticsEnabled }: StatCardsRowProps) {
             />
             <StatCard
                 label="MARKET PCR"
-                value={data?.analytics?.pcr?.toFixed(2) ?? '—'}
+                value={typeof data?.analytics?.pcr === 'number' && data.analytics.pcr > 0
+                    ? data.analytics.pcr.toFixed(2)
+                    : <span className="text-gray-600">—</span>}
                 sub={pcr > 1 ? 'SENTIMENT: BULLISH' : pcr < 1 ? 'SENTIMENT: BEARISH' : 'SENTIMENT: NEUTRAL'}
                 accent={pcr > 1.2 ? '#4ade80' : pcr < 0.8 ? '#f87171' : '#94a3b8'}
             />
             <StatCard
                 label="TOTAL OI"
-                value={totalOI > 1e6 ? `${(totalOI / 1e6).toFixed(1)}M` : totalOI.toLocaleString()}
+                value={totalOI > 0
+                    ? totalOI > 1e6 ? `${(totalOI / 1e6).toFixed(1)}M` : totalOI.toLocaleString()
+                    : <span className="text-gray-600">—</span>}
                 sub={`VOL: ${((data?.analytics?.total_volume || 0) / 1e6).toFixed(1)}M UNITS`}
                 accent="#a78bfa"
             />

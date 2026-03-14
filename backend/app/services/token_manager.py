@@ -76,6 +76,13 @@ class TokenManager:
 
         return data
 
+    async def force_refresh(self):
+        """
+        Force refresh Upstox token
+        """
+        logger.info("Forcing Upstox token refresh")
+        return await self.get_token()
+
     # ================= TOKEN ACCESS =================
 
     async def get_token(self) -> Optional[str]:

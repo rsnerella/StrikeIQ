@@ -167,6 +167,19 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
                     console.log("CANDLES ARRAY LENGTH →", candles.length);
                     console.log("CANDLES ARRAY EMPTY →", candles.length === 0);
                     
+                    // Show empty chart message if no candles
+                    if (!candles || candles.length === 0) {
+                        if (isMounted && chartContainerRef.current) {
+                            chartContainerRef.current.innerHTML = `
+                                <div class="flex items-center justify-center h-full text-gray-500 text-sm">
+                                    <span>Chart data loading... (market may be closed)</span>
+                                </div>
+                            `;
+                        }
+                        setLoading(false);
+                        return;
+                    }
+                    
                     if (isMounted && seriesRef.current && candles.length > 0) {
                         // Filter candles to NSE trading hours (09:15 → 15:30)
                         const SESSION_START = 9 * 60 + 15; // 9:15 AM in minutes
@@ -187,6 +200,9 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
                             low: c.low,
                             close: c.close
                         }));
+                        
+                        // Sort candles by time (lightweight-charts requirement)
+                        formattedCandles.sort((a, b) => a.time - b.time);
                         
                         // STEP 4 — Log candle transformation
                         console.log("FORMATTED CANDLES →", formattedCandles.slice(0,5));

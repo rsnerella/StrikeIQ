@@ -68,8 +68,14 @@ function ChartTooltip({ active, payload }: any) {
             fontSize: 10, fontFamily: 'monospace',
         }}>
             <div style={{ color: CYAN, fontWeight: 700, marginBottom: 4 }}>{d?.label}</div>
-            <div style={{ color: NEUT }}>O: {d?.open?.toFixed(2)}  C: {d?.close?.toFixed(2)}</div>
-            <div style={{ color: NEUT }}>H: {d?.high?.toFixed(2)}  L: {d?.low?.toFixed(2)}</div>
+            <div style={{ color: NEUT }}>
+                O: {typeof d?.open === 'number' && d.open > 0 ? d.open.toFixed(2) : '—'}  
+                C: {typeof d?.close === 'number' && d.close > 0 ? d.close.toFixed(2) : '—'}
+              </div>
+            <div style={{ color: NEUT }}>
+                H: {typeof d?.high === 'number' && d.high > 0 ? d.high.toFixed(2) : '—'}  
+                L: {typeof d?.low === 'number' && d.low > 0 ? d.low.toFixed(2) : '—'}
+              </div>
         </div>
     );
 }

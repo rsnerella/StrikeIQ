@@ -50,6 +50,13 @@ async def get_option_chain(
         print(f"🔍 DEBUG: Service returned successfully to API endpoint")
         
         # Service already handles HTTPException properly, no need to check for "error"
+        option_chain = chain_data
+        
+        logger.info(
+            f"OPTION_CHAIN_API_RESPONSE strikes={len(option_chain.get('strikes', []))} "
+            f"spot={option_chain.get('spot')}"
+        )
+        
         return {
             "status": "success",
             "data": chain_data,

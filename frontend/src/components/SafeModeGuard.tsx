@@ -23,7 +23,9 @@ const SafeModeGuard: React.FC<SafeModeGuardProps> = ({
     const store = useWSStore.getState();
 
     const wsSpot =
+        store.spot ??
         store.liveData?.spot_price ??
+        store.optionChainSnapshot?.spot ??
         store.optionChainSnapshot?.spot_price ??
         0;
 
@@ -84,7 +86,7 @@ export const useEffectiveSpot = (data: any, engineMode: string) => {
     const store = useWSStore.getState();
 
     // STEP 2: Enable live mode - prioritize liveData over snapshot
-    const spot = store.liveData?.spot_price ?? store.optionChainSnapshot?.spot_price ?? 0;
+    const spot = store.spot ?? store.liveData?.spot_price ?? store.optionChainSnapshot?.spot ?? store.optionChainSnapshot?.spot_price ?? 0;
 
     const restSpotPrice =
         data?.spot_price ??

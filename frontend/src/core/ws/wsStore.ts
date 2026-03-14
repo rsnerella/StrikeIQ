@@ -22,6 +22,7 @@ interface WSStore {
   liveData: any
   wsLiveData: any
   analytics: any
+  liveMarketData: any  // FIX 8: Add liveMarketData property
   advancedStrategies: any        // Step 14: SMC/ICT/CRT/MSNR
   signalScore: any               // Step 15: unified score
   chartAnalysis: any             // Chart intelligence: waves, zones, signals
@@ -52,6 +53,7 @@ export const useWSStore = create<WSStore>((set, get) => ({
   liveData: null,
   wsLiveData: null,
   analytics: null,
+  liveMarketData: null,  // FIX 8: Initialize liveMarketData property
   advancedStrategies: null,   // Step 14
   signalScore: null,          // Step 15
   chartAnalysis: null,        // Chart intelligence
@@ -203,8 +205,8 @@ export const useWSStore = create<WSStore>((set, get) => ({
       // DEBUG: Log option chain update details
       console.log("OPTION CHAIN UPDATE RECEIVED", {
         symbol: message.symbol,
-        spot: message.data?.spot,
-        strikesCount: message.data?.strikes?.length,
+        spot: message.spot,
+        strikesCount: message.strikesCount,
         timestamp: message.timestamp
       })
 
@@ -213,11 +215,21 @@ export const useWSStore = create<WSStore>((set, get) => ({
         return
       }
 
-      const data = message.data
+      // Update market context if symbol changed
+      const marketContextStore = useMarketContextStore.getState()
+      if (message.symbol !== marketContextStore.symbol) {
+        marketContextStore.setSymbol(message.symbol)
+        console.log("SYMBOL CONTEXT UPDATED", message.symbol)
+      }
+      if (message.expiry && message.expiry !== marketContextStore.expiry) {
+        marketContextStore.setExpiry(message.expiry)
+        console.log("EXPIRY CONTEXT UPDATED", message.expiry)
+      }
+
       set({
-        spot: data.spot ?? 0,
-        marketData: data,
-        optionChainSnapshot: data,
+        spot: message.spot ?? 0,
+        marketData: message.data,
+        optionChainSnapshot: message.data,
         lastUpdate: now,
         _lastChainUpdate: now,
         error: null
@@ -467,13 +479,22 @@ export const useWSStore = create<WSStore>((set, get) => ({
       console.log("Analytics stored in Zustand")
     }
 
-    // Unpack data if it's a wrapped payload (Phase 8 format)
-    const renderableData = payload.data 
-      ? { ...payload.data, symbol: payload.symbol, _timestamp: payload.timestamp } 
+    // FIX 7: Update liveMarketData structure for frontend widgets
+    const renderableData = payload.analytics 
+      ? { ...payload.analytics, symbol: payload.symbol, _timestamp: payload.timestamp } 
       : { ...payload };
-
+    
     set({
       analytics: renderableData,
+      // FIX 7: Update liveMarketData with complete structure
+      liveMarketData: {
+        snapshot: renderableData.snapshot,
+        analytics: renderableData.analytics,
+        option_chain: renderableData.option_chain,
+        candles: renderableData.candles,
+        ai_signals: renderableData.ai_signals,
+        timestamp: payload.timestamp
+      },
       // Phase 8: Extract spot and chain from bundle for full sync
       spot: renderableData.snapshot?.spot || get().spot,
       optionChainSnapshot: renderableData.option_chain || get().optionChainSnapshot,

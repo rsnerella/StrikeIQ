@@ -494,25 +494,40 @@ class UpstoxMarketFeed:
 
             for instrument_key, feed_data in feeds.items():
 
+                # Safe nested parsing for Upstox V3 feed structure
+                market = feed_data.get("fullFeed", {}).get("marketFF", {})
+                
+                ltpc = market.get("ltpc", {})
+                
+                ltp = ltpc.get("ltp", 0)
+                oi = market.get("oi", 0)
+                volume = market.get("vtt", 0)
+                iv = market.get("iv", 0)
+                
+                greeks = market.get("optionGreeks", {})
+                delta = greeks.get("delta")
+                gamma = greeks.get("gamma")
+                theta = greeks.get("theta")
+                vega = greeks.get("vega")
+
                 processed_data = {
                     "instrument_key": instrument_key,
                     "timestamp": timestamp,
-                    "ltp": feed_data.get("ltpc", {}).get("ltp"),
-                    "ltt": feed_data.get("ltpc", {}).get("ltt"),
-                    "ltq": feed_data.get("ltpc", {}).get("ltq"),
-                    "cp": feed_data.get("ltpc", {}).get("cp"),
+                    "ltp": ltp,
+                    "ltt": ltpc.get("ltt"),
+                    "ltq": ltpc.get("ltq"),
+                    "cp": ltpc.get("cp"),
+                    "oi": oi,
+                    "volume": volume,
+                    "iv": iv,
+                    "delta": delta,
+                    "gamma": gamma,
+                    "theta": theta,
+                    "vega": vega
                 }
 
-                # OPTION GREEKS
-                if "option_greeks" in feed_data:
-                    greeks = feed_data["option_greeks"]
-                    processed_data.update({
-                        "delta": greeks.get("delta"),
-                        "gamma": greeks.get("gamma"),
-                        "theta": greeks.get("theta"),
-                        "vega": greeks.get("vega"),
-                        "iv": greeks.get("iv")
-                    })
+                # Debug log for parsed tick
+                logger.info(f"PARSED TICK → {instrument_key} LTP={ltp} OI={oi}")
 
                 # UPDATE MARKET STATE
                 self.market_state.update_ws_tick_price(
@@ -550,7 +565,7 @@ class UpstoxMarketFeed:
                         }
                         
                         logger.info(f"MARKET DATA EXTRACTED - instrument={instrument_key} ltp={ltp}")
-                        await manager.broadcast_json("market_data", broadcast_message)
+                        await manager.broadcast(broadcast_message)  # ISSUE 5 FIX: Use broadcast() instead of broadcast_json()
                         logger.info(f"WS BROADCAST SENT - instrument={instrument_key} ltp={ltp}")
 
                 # ======================================
@@ -580,7 +595,7 @@ class UpstoxMarketFeed:
                 if not symbol:
                     continue   # ❗ WAS RETURN → NOW FIXED
 
-                builder = get_live_chain_builder(symbol)
+                builder = get_live_chain_builder(symbol, "")  # ISSUE 4 FIX: Pass expiry parameter
 
                 if not builder:
                     continue   # ❗ SAFETY FIX
@@ -817,7 +832,7 @@ class UpstoxMarketFeed:
                 
                 # Lookup numeric key from instruments.json cache
                 symbol = self.config.symbol
-                builder = get_live_chain_builder(symbol)
+                builder = get_live_chain_builder(symbol, "")  # ISSUE 4 FIX: Pass expiry parameter
                 ce_key = builder.resolve_instrument_key(ce_tsym)
                 pe_key = builder.resolve_instrument_key(pe_tsym)
                 

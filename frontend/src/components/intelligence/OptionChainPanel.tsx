@@ -104,7 +104,12 @@ const OptionChainPanel: React.FC<OptionChainPanelProps> = ({ optionChainData }) 
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <div className="text-[10px] text-gray-500 uppercase font-bold mb-1">PCR Value</div>
-                <div className="text-xl font-black">{optionChainData.pcr_summary.put_call_ratio.toFixed(2)}</div>
+                <div className="text-xl font-black">
+                    {typeof optionChainData.pcr_summary.put_call_ratio === 'number' && optionChainData.pcr_summary.put_call_ratio > 0
+                        ? optionChainData.pcr_summary.put_call_ratio.toFixed(2)
+                        : <span className="text-gray-600">—</span>
+                    }
+                  </div>
               </div>
               <div>
                 <div className="text-[10px] text-gray-500 uppercase font-bold mb-1">Context</div>
@@ -170,15 +175,21 @@ const OptionChainPanel: React.FC<OptionChainPanelProps> = ({ optionChainData }) 
                 <div className="grid grid-cols-3 gap-2 text-center">
                   <div className="bg-gray-800/50 py-2 rounded border border-gray-800">
                     <div className="text-[8px] text-gray-500 uppercase font-bold">Calls</div>
-                    <div className="text-[10px] font-bold text-[#FF4D4F]">{(strike.call_oi / 1000).toFixed(1)}k</div>
+                    <div className="text-[10px] font-bold text-[#FF4D4F]">
+                    {strike.call_oi > 0 ? (strike.call_oi / 1000).toFixed(1) + 'k' : '—'}
+                  </div>
                   </div>
                   <div className="bg-gray-800/50 py-2 rounded border border-gray-800">
                     <div className="text-[8px] text-gray-500 uppercase font-bold">Puts</div>
-                    <div className="text-[10px] font-bold text-[#00FF9F]">{(strike.put_oi / 1000).toFixed(1)}k</div>
+                    <div className="text-[10px] font-bold text-[#00FF9F]">
+                    {strike.put_oi > 0 ? (strike.put_oi / 1000).toFixed(1) + 'k' : '—'}
+                  </div>
                   </div>
                   <div className="bg-gray-800/50 py-2 rounded border border-gray-800">
                     <div className="text-[8px] text-gray-500 uppercase font-bold">Total</div>
-                    <div className="text-[10px] font-bold text-[#4F8CFF]">{(strike.total_oi / 1000).toFixed(1)}k</div>
+                    <div className="text-[10px] font-bold text-[#4F8CFF]">
+                    {strike.total_oi > 0 ? (strike.total_oi / 1000).toFixed(1) + 'k' : '—'}
+                  </div>
                   </div>
                 </div>
 

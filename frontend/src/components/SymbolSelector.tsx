@@ -17,7 +17,26 @@ export default function SymbolSelector() {
   
   const handleSymbolChange = (sym: string) => {
     setCurrentSymbol(sym);
-    // The expiry hook handles the resubscribe when it fetches the new expirylist and sets the new selected expiry
+    // Send subscription message to backend for the new symbol
+    resubscribeMarketWS(sym, selectedExpiry);
+  };
+
+  const handleTimeframeChange = (tf: string) => {
+    setTimeframe(tf);
+    // Map timeframe UI labels to API parameters
+    const timeframeMap: { [key: string]: string } = {
+      '1m': '1minute',
+      '5m': '5minute',
+      '15m': '15minute',
+      '1h': '60minute',
+      '1d': 'day'
+    };
+    
+    const apiTimeframe = timeframeMap[tf] || tf;
+    console.log('TIMEFRAME CHANGED', { ui: tf, api: apiTimeframe });
+    
+    // Fetch candles for new timeframe (implement this based on your candle fetching logic)
+    // fetchCandles(currentSymbol, apiTimeframe);
   };
 
   const {
@@ -92,7 +111,7 @@ export default function SymbolSelector() {
               return (
                 <button
                   key={tf}
-                  onClick={() => setTimeframe(tf)}
+                  onClick={() => handleTimeframeChange(tf)}
                   className="px-2 py-1 sm:px-3 sm:py-1.5 text-xs sm:text-sm rounded-md font-bold font-mono cursor-pointer transition-all duration-180 ease-in-out"
                   style={{
                     background: active ? 'rgba(0,229,255,0.12)' : 'transparent',

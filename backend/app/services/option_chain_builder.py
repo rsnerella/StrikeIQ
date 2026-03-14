@@ -11,9 +11,12 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 
-from app.services.oi_buildup_engine import OIBuildupEngine
+from app.analytics.oi_buildup_engine import OIBuildupEngine
 from app.core.diagnostics import diag, increment_counter
 from app.core.ai_health_state import mark_health
+from app.services.option_chain_snapshot import option_chain_snapshot
+from app.analytics.analytics_engine import analytics_engine
+from app.ai.ai_signal_engine import ai_signal_engine
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +61,7 @@ class ChainSnapshot:
     total_oi_puts: int = 0
     open: float = 0.0
     prev_close: float = 0.0
+    analytics: Dict[str, Any] = None
 
 
 class OptionChainBuilder:
@@ -286,6 +290,33 @@ class OptionChainBuilder:
         pcr = total_put_oi / total_call_oi if total_call_oi > 0 else 0.0
 
         logger.info(f"[CHAIN_OI_SUMMARY] strikes={len(strikes)} call_oi={total_call_oi} put_oi={total_put_oi}")
+        
+        logger.info(
+            f"CHAIN_BUILDER_OUTPUT symbol={symbol} "
+            f"strikes={len(chain.get('strikes', []))} "
+            f"call_oi={chain.get('total_oi_calls')} "
+            f"put_oi={chain.get('total_oi_puts')}"
+        )
+        
+        mark_health("option_chain")
+
+        # Capture price metadata
+        meta = getattr(self, "price_metadata", {}).get(symbol, {})
+
+        # Create snapshot data dictionary for analytics
+        snapshot_data = {
+            "symbol": symbol,
+            "spot": spot,
+            "calls": {str(s["strike"]): s for s in strikes},
+            "puts": {str(s["strike"]): s for s in strikes}
+        }
+
+        # Run analytics engine
+        analytics = analytics_engine.analyze(snapshot_data)
+        
+        # Generate AI signal
+        ai_signal = ai_signal_engine.generate(analytics)
+        analytics["ai_signal"] = ai_signal
 
         mark_health("option_chain")
 
@@ -304,6 +335,7 @@ class OptionChainBuilder:
             pcr=pcr,
             total_oi_calls=total_call_oi,
             total_oi_puts=total_put_oi,
+            analytics=analytics
         )
 
     # --------------------------------------------------
@@ -350,14 +382,70 @@ class OptionChainBuilder:
             
             # Broadcast option chain update
             pipeline_start = time.perf_counter()
-            await manager.broadcast(
-                {
-                    "type": "option_chain_update",
+            
+            # Extract calls and puts from strikes for frontend compatibility
+            calls_dict = {}
+            puts_dict = {}
+            
+            for strike_data in snapshot.strikes:
+                strike = strike_data.get("strike", 0)
+                if strike:
+                    calls_dict[strike] = {
+                        "ltp": strike_data.get("call_ltp", 0),
+                        "oi": strike_data.get("call_oi", 0),
+                        "volume": strike_data.get("call_volume", 0),
+                        "iv": strike_data.get("call_iv", 0),
+                        "delta": strike_data.get("call_delta", 0),
+                        "gamma": strike_data.get("call_gamma", 0),
+                        "theta": strike_data.get("call_theta", 0),
+                        "vega": strike_data.get("call_vega", 0),
+                        "bid": strike_data.get("call_bid", 0),
+                        "ask": strike_data.get("call_ask", 0),
+                    }
+                    puts_dict[strike] = {
+                        "ltp": strike_data.get("put_ltp", 0),
+                        "oi": strike_data.get("put_oi", 0),
+                        "volume": strike_data.get("put_volume", 0),
+                        "iv": strike_data.get("put_iv", 0),
+                        "delta": strike_data.get("put_delta", 0),
+                        "gamma": strike_data.get("put_gamma", 0),
+                        "theta": strike_data.get("put_theta", 0),
+                        "vega": strike_data.get("put_vega", 0),
+                        "bid": strike_data.get("put_bid", 0),
+                        "ask": strike_data.get("put_ask", 0),
+                    }
+            
+            payload = {
+                "type": "option_chain_update",
+                "symbol": snapshot.symbol,
+                "expiry": snapshot.expiry,
+                "spot": float(snapshot.spot) if snapshot.spot else 0.0,
+                "atm": int(snapshot.atm_strike) if snapshot.atm_strike else 0,
+                "pcr": float(snapshot.pcr) if snapshot.pcr else 0.0,
+                "timestamp": int(snapshot.timestamp),
+                "strikesCount": len(snapshot.strikes) if snapshot.strikes else 0,
+                "calls": calls_dict,   # {strike: {ltp, oi, iv, delta, gamma, theta, vega, bid, ask}}
+                "puts": puts_dict,    # same structure
+                "data": snapshot.__dict__,   # keep for backward compat
+            }
+            
+            # Broadcast analytics update separately
+            if snapshot.analytics:
+                analytics_payload = {
+                    "type": "analytics_update",
                     "symbol": snapshot.symbol,
-                    "timestamp": snapshot.timestamp,
-                    "data": snapshot.__dict__,
+                    "analytics": snapshot.analytics,
+                    "timestamp": int(snapshot.timestamp)
                 }
-            )
+                try:
+                    await manager.broadcast(analytics_payload)
+                except Exception as e:
+                    logger.warning(f"Analytics broadcast failed: {e}")
+            
+            try:
+                await manager.broadcast(payload)
+            except Exception as e:
+                logger.warning(f"WS send failed (client likely disconnected): {e}")
             pipeline_latency_ms = (time.perf_counter() - pipeline_start) * 1000
             
             # Add snapshot counter for sampling
@@ -451,42 +539,129 @@ class OptionChainBuilder:
 
             opt = self.chains[symbol][strike][right]
 
-            opt.ltp = ltp
-            if oi > 0:
-                if opt.oi > 0 and opt.oi != oi:
-                    opt.oi_prev = opt.oi
-                opt.oi = oi
-            if volume > 0:
-                opt.volume = volume
+            # MERGE STRATEGY
+            # Never overwrite a real non-zero value with zero.
+            # Two data sources update this store:
+            #   1. WebSocket full_d30 ticks — real-time LTP, bid/ask, OI, Greeks
+            #   2. REST poller (every 2s) — OI, Greeks snapshot as fallback
+            # A tick from one source may have zeros for fields the other provides.
+            # The merge ensures we always keep the best known value per field.
+            def merge(new_val, old_val, zero_val):
+                """Return new_val if it differs from zero_val, else keep old_val."""
+                if new_val != zero_val:
+                    return new_val
+                return old_val if old_val is not None else zero_val
+
+            # Extract existing values for merge
+            existing_ltp = opt.ltp
+            existing_oi = opt.oi
+            existing_volume = opt.volume
+            existing_bid = opt.bid
+            existing_ask = opt.ask
+            existing_bid_qty = opt.bid_qty
+            existing_ask_qty = opt.ask_qty
+            existing_iv = opt.iv
+            existing_delta = opt.delta
+            existing_theta = opt.theta
+            existing_vega = opt.vega
+            existing_gamma = opt.gamma
+
+            # Apply merge strategy
+            opt.ltp = merge(float(ltp), existing_ltp, 0.0)
             
-            # Update bid/ask
-            if "bid" in kwargs: opt.bid = kwargs["bid"]
-            if "ask" in kwargs: opt.ask = kwargs["ask"]
-            if "bid_qty" in kwargs: opt.bid_qty = kwargs["bid_qty"]
-            if "ask_qty" in kwargs: opt.ask_qty = kwargs["ask_qty"]
+            # Special handling for OI to track changes
+            new_oi = merge(int(oi), existing_oi, 0)
+            if new_oi != existing_oi and existing_oi > 0 and new_oi > 0:
+                opt.oi_prev = existing_oi
+            opt.oi = new_oi
             
-            # Update greeks if provided
-            if "iv" in kwargs: opt.iv = kwargs["iv"]
-            if "delta" in kwargs: opt.delta = kwargs["delta"]
-            if "theta" in kwargs: opt.theta = kwargs["theta"]
-            if "vega" in kwargs: opt.vega = kwargs["vega"]
-            if "gamma" in kwargs: opt.gamma = kwargs["gamma"]
+            opt.volume = merge(int(volume), existing_volume, 0)
+            opt.bid = merge(float(kwargs.get("bid", 0)), existing_bid, 0.0)
+            opt.ask = merge(float(kwargs.get("ask", 0)), existing_ask, 0.0)
+            opt.bid_qty = merge(int(kwargs.get("bid_qty", 0)), existing_bid_qty, 0)
+            opt.ask_qty = merge(int(kwargs.get("ask_qty", 0)), existing_ask_qty, 0)
+            opt.iv = merge(float(kwargs.get("iv", 0)), existing_iv, 0.0)
+            opt.delta = merge(float(kwargs.get("delta", 0)), existing_delta, 0.0)
+            opt.theta = merge(float(kwargs.get("theta", 0)), existing_theta, 0.0)
+            opt.vega = merge(float(kwargs.get("vega", 0)), existing_vega, 0.0)
+            opt.gamma = merge(float(kwargs.get("gamma", 0)), existing_gamma, 0.0)
                 
             opt.last_update = datetime.utcnow()
             
+            # FIX 4: Maintain chain dictionary structure and compute metrics
+            chain = self.chains[symbol]
+            
+            # Compute total call and put OI
+            total_call_oi = 0
+            total_put_oi = 0
+            
+            for strike_key, strike_data in chain.items():
+                ce_data = strike_data.get("CE")
+                pe_data = strike_data.get("PE")
+                
+                if ce_data:
+                    total_call_oi += ce_data.oi
+                if pe_data:
+                    total_put_oi += pe_data.oi
+            
+            # Compute PCR
+            pcr = total_put_oi / total_call_oi if total_call_oi > 0 else 0.0
+            
+            # Log chain update with metrics
+            logger.info(
+                f"CHAIN_UPDATE symbol={symbol} strikes={len(chain)} "
+                f"call_oi={total_call_oi:,} put_oi={total_put_oi:,} pcr={pcr:.2f}"
+            )
+            
+            # Log complete option data update (showing merged values)
+            logger.info(
+                f"CHAIN_UPDATE → {symbol} {right} strike={strike} ltp={opt.ltp} oi={opt.oi} "
+                f"iv={opt.iv} delta={opt.delta} "
+                f"gamma={opt.gamma} theta={opt.theta} vega={opt.vega}"
+            )
+            
+            # STEP 4: Merge cache data for missing fields
+            try:
+                # Convert strike to string key for cache lookup
+                strike_key = str(int(strike))
+                cache = option_chain_snapshot.option_chain_cache
+                
+                if symbol in cache and strike_key in cache[symbol]:
+                    snapshot = cache[symbol][strike_key]
+                    
+                    # Update missing fields from cache (DO NOT override LTP)
+                    if opt.oi == 0 and snapshot.get("oi", 0) > 0:
+                        opt.oi = snapshot["oi"]
+                    if opt.volume == 0 and snapshot.get("volume", 0) > 0:
+                        opt.volume = snapshot["volume"]
+                    if opt.bid == 0 and snapshot.get("bid", 0) > 0:
+                        opt.bid = snapshot["bid"]
+                    if opt.ask == 0 and snapshot.get("ask", 0) > 0:
+                        opt.ask = snapshot["ask"]
+                    if opt.iv == 0 and snapshot.get("iv", 0) > 0:
+                        opt.iv = snapshot["iv"]
+                    
+                    logger.info(f"CHAIN MERGED WITH SNAPSHOT → {symbol} {strike_key}")
+            except Exception as e:
+                logger.warning(f"Cache merge failed: {e}")
+            
             # STAGE 4: OPTION UPDATE
             logger.info(
-                "OPTION UPDATE → %s %s strike=%s",
+                "OPTION UPDATE → %s %s strike=%s oi=%s volume=%s bid=%s ask=%s",
                 symbol,
                 right,
-                strike
+                strike,
+                oi,
+                volume,
+                kwargs.get("bid", 0),
+                kwargs.get("ask", 0)
             )
 
-            logger.debug(f"OPTION TICK UPDATED → {symbol} {strike}{right} ltp={ltp} oi={oi}")
+            logger.debug(f"OPTION TICK UPDATED → {symbol} {strike}{right} ltp={opt.ltp} oi={opt.oi}")
 
             instrument_key = f"{symbol}_{strike}{right}"
 
-            signal = self.oi_buildup_engine.detect(instrument_key, ltp, oi)
+            signal = self.oi_buildup_engine.detect(instrument_key, opt.ltp, opt.oi)
 
             if signal:
                 logger.debug("OI SIGNAL → %s → %s", instrument_key, signal)

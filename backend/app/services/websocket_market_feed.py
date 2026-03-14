@@ -1,5 +1,5 @@
 import asyncio
-import json
+import json as json_lib
 import logging
 import time
 import os
@@ -17,21 +17,40 @@ MONTH_MAP = {
     "SEP":9,"OCT":10,"NOV":11,"DEC":12
 }
 
-from app.services.token_manager import token_manager
+from app.services.upstox_auth_service import get_upstox_auth_service
 from app.services.market_session_manager import get_market_session_manager
 from app.services.upstox_protobuf_parser_v3 import decode_protobuf_message
+from app.services.upstox_v3_raw_converter import convert_protobuf_to_upstox_v3_format
 from app.core.market_context import MARKET_CONTEXT
 from app.services.live_chain_manager import chain_manager
 from app.core.ws_manager import manager
 from app.services.instrument_registry import get_instrument_registry
 from app.services.market_data.upstox_client import UpstoxClient
+from app.services.option_chain_snapshot import option_chain_snapshot
 from app.services.live_structural_engine import LiveStructuralEngine
 from app.core.live_market_state import get_market_state_manager
 from app.core.logging_config import TICK_DEBUG
 from app.core.diagnostics import diag, increment_counter
 
+def _get_field(d: dict, *keys, default=0):
+    """
+    Safe field extractor for protobuf-sourced dicts.
+    Never uses truthiness checks on numeric fields.
+    Protobuf int and float fields default to 0 and 0.0.
+    These are falsy in Python but are valid real values.
+    Using "x or y" drops them silently. Use None checks instead.
+    """
+    for k in keys:
+        v = d.get(k)
+        if v is not None:
+            return v
+    return default
+
 # Global market feed instance
 market_feed_instance = None
+
+# Global guard for snapshot loop
+snapshot_loop_started = False
 
 def get_market_feed():
     """Get the global market feed instance"""
@@ -40,7 +59,7 @@ def get_market_feed():
 # Import new components
 from app.services.message_router import message_router
 from app.services.option_chain_builder import option_chain_builder
-from app.services.oi_heatmap_engine import oi_heatmap_engine
+from app.analytics.oi_heatmap_engine import oi_heatmap_engine
 from app.services.analytics_broadcaster import analytics_broadcaster
 
 logger = logging.getLogger(__name__)
@@ -53,7 +72,7 @@ last_market_status = None
 
 def get_index_instrument_keys():
     with open("app/data/NSE.json", "r") as f:
-        instruments = json.load(f)
+        instruments = json_lib.load(f)
     
     keys = []
     
@@ -150,6 +169,7 @@ class WebSocketMarketFeed:
         self.subscribed_instruments = set()
         self.dropped_ticks = 0
         self.last_subscription_time = 0
+        self.last_atm = None  # track last ATM for rate-limiter in subscribe_options
         
         # reconnect tracking
         self._disconnect_task = None
@@ -197,6 +217,7 @@ class WebSocketMarketFeed:
         self.active_symbol = None
         self.active_expiry = None
         self.last_spot_price = {}
+        self.spot_prices = {}  # FIX: Add missing spot_prices attribute
         self.current_atm = None
         self._subscription_lock = asyncio.Lock()  # P4: prevent subscription race conditions
 
@@ -210,7 +231,10 @@ class WebSocketMarketFeed:
             if self.websocket and self._is_connected:
                 return True
 
-            token = await token_manager.get_token()
+            auth_service = get_upstox_auth_service()
+            token = await auth_service.get_valid_token()
+            if not token:
+                token = os.getenv("UPSTOX_ACCESS_TOKEN")
             if not token:
                 logger.warning("Upstox token missing — cannot connect WS")
                 return False
@@ -361,7 +385,7 @@ class WebSocketMarketFeed:
         if response.status_code != 200:
             raise Exception(f"V3 authorization failed: {response.status_code}")
         
-        data = response.json()
+        data = json_lib.loads(response.text)
         ws_url = data.get("data", {}).get("authorized_redirect_uri")
         
         if not ws_url:
@@ -399,9 +423,54 @@ class WebSocketMarketFeed:
         except Exception as e:
             logger.error(f"Auto-subscription failed: {e}")
 
+        # STEP 2: Start option chain snapshot loop
+        try:
+            # Set up API client for snapshot service
+            option_chain_snapshot.set_api_client(self.upstox_client)
+            
+            # Start background snapshot loop (only once)
+            global snapshot_loop_started
+            if not snapshot_loop_started:
+                asyncio.create_task(self.option_chain_snapshot_loop())
+                snapshot_loop_started = True
+                logger.info("OPTION SNAPSHOT LOOP STARTED")
+        except Exception as e:
+            logger.error(f"Snapshot loop start failed: {e}")
+
+    async def option_chain_snapshot_loop(self):
+        """Background loop to fetch option chain snapshots every 5 seconds"""
+        while self.running:
+            try:
+                # Get current active symbol
+                symbol = getattr(self, 'active_symbol', 'NIFTY')
+                
+                # Fetch snapshot if we have an active symbol
+                if symbol:
+                    await option_chain_snapshot.fetch_option_chain(symbol)
+                    logger.info("OPTION SNAPSHOT UPDATED")
+                
+                # Also fetch BANKNIFTY if active
+                bank_symbol = getattr(self, 'active_symbol', None)
+                if bank_symbol == 'BANKNIFTY':
+                    await option_chain_snapshot.fetch_option_chain('BANKNIFTY')
+                    logger.info("BANKNIFTY SNAPSHOT UPDATED")
+                
+                # Wait 5 seconds before next fetch
+                await asyncio.sleep(5)
+                
+            except asyncio.CancelledError:
+                logger.info("Option chain snapshot loop cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Snapshot loop error: {e}")
+                await asyncio.sleep(5)  # Continue even on error
+
     async def connect(self):
         """Public connection method - deprecated, use ensure_connection"""
-        token = await token_manager.get_token()
+        auth_service = get_upstox_auth_service()
+        token = await auth_service.get_valid_token()
+        if not token:
+            token = os.getenv("UPSTOX_ACCESS_TOKEN")
         await self._connect(token)
 
     async def _fetch_index_ltp(self, symbol):
@@ -446,10 +515,9 @@ class WebSocketMarketFeed:
             ]
 
             payload = {
-                "guid": "strikeiq-index",
+                "guid": "strikeiq",
                 "method": "sub",
                 "data": {
-                    # INDEX must use LTPC mode
                     "mode": "ltpc",
                     "instrumentKeys": index_keys
                 }
@@ -457,7 +525,7 @@ class WebSocketMarketFeed:
 
             if self.websocket:
                 await self.websocket.send(
-                    json.dumps(payload).encode("utf-8")
+                    json_lib.dumps(payload).encode("utf-8")
                 )
                 logger.info(
                     "INDEX SUBSCRIPTION SENT → %s",
@@ -500,13 +568,13 @@ class WebSocketMarketFeed:
                 "guid": "strikeiq-options",
                 "method": "sub",
                 "data": {
-                    "mode": "full",
+                    "mode": "full_d30",
                     "instrumentKeys": new_keys
                 }
             }
             
             if self.websocket:
-                logger.info("SUBSCRIPTION PAYLOAD → %s", json.dumps(payload, indent=2))
+                logger.info("SUBSCRIPTION PAYLOAD → %s", json_lib.dumps(payload, indent=2))
                 # ==================== STRICT PROTECTED SECTION ====================
                 # WARNING: DO NOT MODIFY THIS LINE WITHOUT EXPLICIT REVIEW.
                 # This WebSocket subscription must be sent as UTF-8 encoded bytes.
@@ -514,8 +582,9 @@ class WebSocketMarketFeed:
                 # and result in heartbeat / market_info frames only (no market feeds).
                 # If modification is required, confirm protocol compatibility first.
                 # ==================================================================
-                await self.websocket.send(json.dumps(payload).encode("utf-8"))
+                await self.websocket.send(json_lib.dumps(payload).encode("utf-8"))
                 logger.info("SUBSCRIPTION SENT SUCCESSFULLY")
+                logger.info("SUBSCRIPTION MODE → full_d30 (Upstox Plus active)")
                 self.current_option_keys = new_keys
                 self.subscribed_instruments.update(new_keys)
                 self.last_subscription_time = time.time()
@@ -586,14 +655,14 @@ class WebSocketMarketFeed:
                 "guid": f"strikeiq-options-{symbol.lower()}",
                 "method": "sub",
                 "data": {
-                    "mode": "full",
+                    "mode": "full_d30",  # Changed back to "full_d30"
                     "instrumentKeys": option_keys
                 }
             }
             
             if self.websocket:
-                logger.info("SUBSCRIPTION PAYLOAD → %s", json.dumps(payload, indent=2))
-                payload_bytes = json.dumps(payload).encode("utf-8")
+                logger.info("SUBSCRIPTION PAYLOAD → %s", json_lib.dumps(payload, indent=2))
+                payload_bytes = json_lib.dumps(payload).encode("utf-8")
                 # store payload for failsafe resubscribe
                 self._subscription_payload = payload
                 await self.websocket.send(payload_bytes)
@@ -648,11 +717,11 @@ class WebSocketMarketFeed:
             }
             
             if self.websocket:
-                await self.websocket.send(json.dumps(payload).encode("utf-8"))
+                await self.websocket.send(json_lib.dumps(payload).encode("utf-8"))
                 logger.info(f"UNSUBSCRIBED {len(self.current_option_keys)} OLD OPTIONS")
                 self.current_option_keys = []
             else:
-                logger.error("Cannot unsubscribe from options - WebSocket not connected")
+                logger.warning("Cannot unsubscribe from options - WebSocket not connected")
                 
         except Exception as e:
             logger.error(f"Option unsubscription failed: {e}")
@@ -678,6 +747,69 @@ class WebSocketMarketFeed:
         await self.unsubscribe_options()
         await asyncio.sleep(0.1)
         self._clear_option_cache()
+        
+        # Get spot price from last known index tick or REST fallback
+        index_price = self.last_index_prices.get(symbol)
+        if not index_price:
+            logger.warning(f"Index price not yet received for {symbol} — fetching via REST")
+            index_price = await self._fetch_index_ltp(symbol)
+
+        if not index_price:
+            logger.error(f"Cannot resolve index price for {symbol} — aborting subscription")
+            return
+
+        # Calculate ATM
+        strike_step = 50 if symbol == "NIFTY" else 100
+        atm = round(index_price / strike_step) * strike_step
+        logger.info(f"ATM CALCULATED → {symbol} spot={index_price} atm={atm} step={strike_step}")
+
+        # Build strike window ATM ± 20 strikes
+        strikes_in_window = set(
+            atm + (i * strike_step) for i in range(-20, 21)
+        )
+
+        # Get options DIRECTLY from instrument registry (not REST API)
+        registry = self.instrument_registry
+        all_options_dict = registry.get_options(symbol, expiry)
+
+        if not all_options_dict:
+            logger.error(f"No options in registry for {symbol} {expiry}. Registry may not be loaded.")
+            return
+
+        logger.info(f"REGISTRY OPTIONS FOUND → {symbol} {expiry}: {len(all_options_dict)} strikes")
+
+        # Build instrument key list from registry
+        option_keys = []
+        for strike_val, types in all_options_dict.items():
+            try:
+                strike_num = float(strike_val)
+                if strike_num in strikes_in_window:
+                    ce_key = types.get("CE")
+                    pe_key = types.get("PE")
+                    if ce_key:
+                        option_keys.append(ce_key)
+                    if pe_key:
+                        option_keys.append(pe_key)
+            except (ValueError, TypeError):
+                continue
+
+        logger.info(f"OPTION KEYS BUILT → {len(option_keys)} instruments for {symbol} {expiry} ATM={atm}")
+
+        if not option_keys:
+            logger.error(
+                f"No option keys built for {symbol} {expiry}. "
+                f"Registry strikes: {list(all_options_dict.keys())[:5]} "
+                f"Window: {sorted(strikes_in_window)[:5]}"
+            )
+            return
+
+        # Subscribe to options with full_d30 mode (Upstox Plus)
+        await self._subscribe(option_keys)
+
+        self.active_symbol = symbol
+        self.active_expiry = expiry
+
+        logger.info(f"✅ SYMBOL SWITCH COMPLETE → {symbol} {expiry} | {len(option_keys)} options subscribed")
         
         # Get index key
         index_key = self._get_index_key(symbol)
@@ -803,6 +935,47 @@ class WebSocketMarketFeed:
 
             return []
 
+    async def _subscribe_options_from_registry(self, symbol: str, expiry: str):
+        """Fallback method to subscribe to options using instrument registry"""
+        try:
+            # Get option instruments from registry
+            option_instruments = self._get_option_instruments(symbol, expiry)
+            
+            if not option_instruments:
+                logger.warning(f"No option instruments found for {symbol} {expiry}")
+                return
+            
+            # Get index key
+            index_key = self._get_index_key(symbol)
+            if not index_key:
+                logger.error(f"Index key missing for {symbol}")
+                return
+            
+            # Build subscription list
+            instrument_keys = [index_key] + option_instruments
+            
+            logger.info(f"REGISTRY FALLBACK → Subscribing to {len(instrument_keys)} instruments")
+            
+            # Subscribe using full_d30 mode for options
+            payload = {
+                "guid": "strikeiq-registry-fallback",
+                "method": "sub",
+                "data": {
+                    "mode": "full_d30",
+                    "instrumentKeys": instrument_keys
+                }
+            }
+            
+            if self.websocket:
+                await self.websocket.send(json_lib.dumps(payload).encode("utf-8"))
+                self.subscribed_instruments.update(instrument_keys)
+                logger.info(f"REGISTRY SUBSCRIPTION SENT → {len(instrument_keys)} instruments")
+            else:
+                logger.error("WebSocket not ready for registry fallback subscription")
+                
+        except Exception as e:
+            logger.error(f"Registry fallback subscription failed: {e}")
+
     # PATCH 4: UNSUBSCRIBE ALL FUNCTION
     async def _unsubscribe_all(self):
         """Unsubscribe from all currently subscribed instruments"""
@@ -818,7 +991,7 @@ class WebSocketMarketFeed:
 
         try:
             if self.websocket:
-                await self.websocket.send(json.dumps(payload).encode("utf-8"))
+                await self.websocket.send(json_lib.dumps(payload).encode("utf-8"))
                 logger.info(f"UNSUBSCRIBED OLD INSTRUMENTS → {len(self.subscribed_instruments)} instruments")
             else:
                 logger.warning("Cannot unsubscribe - WebSocket not connected")
@@ -859,14 +1032,14 @@ class WebSocketMarketFeed:
             "guid": "strikeiq-feed",
             "method": "sub",
             "data": {
-                "mode": "full",
+                "mode": "full_d30",  # Use full_d30 mode for complete options data with bid/ask/greeks
                 "instrumentKeys": new_instruments
             }
         }
 
         try:
             if self.websocket:
-                payload_bytes = json.dumps(payload).encode("utf-8")
+                payload_bytes = json_lib.dumps(payload).encode("utf-8")
                 self._subscription_payload = payload
                 await self.websocket.send(payload_bytes)
                 logger.info(f"SUBSCRIBED → {len(new_instruments)} instruments")
@@ -898,13 +1071,13 @@ class WebSocketMarketFeed:
             "guid": "strikeiq-feed",
             "method": "sub",
             "data": {
-                "mode": "full",
+                "mode": "full_d30",  # Use full_d30 mode for complete options data
                 "instrumentKeys": instruments
             }
         }
         
         try:
-            await self.websocket.send(json.dumps(payload).encode("utf-8"))
+            await self.websocket.send(json_lib.dumps(payload).encode("utf-8"))
             logger.info(f"SUBSCRIBED → {len(instruments)} instruments (delayed)")
             # P4: Update subscribed_instruments with thread safety
             async with self._subscription_lock:
@@ -940,18 +1113,33 @@ class WebSocketMarketFeed:
 
             await asyncio.sleep(10)
 
-    async def _handle_message(self, raw: bytes) -> None:
-        """
-        Decode raw Upstox Protobuf frame → push valid ticks into self._message_queue.
-
-        Pipeline:
-            _recv_loop → _handle_message → _message_queue → _process_loop → message_router
-        """
+    async def _handle_message(self, raw):
+        """Handle binary WebSocket message: decode protobuf → queue ticks → broadcast raw format."""
+        
         try:
             # STAGE 1: PIPELINE ANALYSIS
             logger.debug("RAW FRAME SIZE → %d", len(raw))
             logger.debug("PROTOBUF DECODE START")
 
+            # STEP 1: Convert and broadcast raw Upstox V3 format
+            try:
+                # Debug: Log raw protobuf structure
+                from google.protobuf.json_format import MessageToJson
+                from app.proto.MarketDataFeedV3_pb2 import FeedResponse
+                debug_response = FeedResponse()
+                debug_response.ParseFromString(raw)
+                debug_json = MessageToJson(debug_response)
+                logger.info(f"DEBUG PROTOBUF STRUCTURE: {debug_json}")
+                
+                raw_upstox_data = await convert_protobuf_to_upstox_v3_format(raw)
+                if raw_upstox_data and raw_upstox_data.get("feeds"):
+                    logger.info("BROADCASTING RAW UPSTOX V3 FORMAT")
+                    logger.info(f"RAW DATA: {json_lib.dumps(raw_upstox_data, indent=2)}")
+                    await manager.broadcast(raw_upstox_data)
+            except Exception as e:
+                logger.error(f"Failed to broadcast raw Upstox V3 format: {e}")
+
+            # STEP 2: Process ticks for internal system (existing logic)
             try:
                 res = await decode_protobuf_message(raw)
             except Exception as e:
@@ -1179,15 +1367,16 @@ class WebSocketMarketFeed:
             raise
 
     async def _monitor_token_manager_redis(self):
-        """AUDIT METRICS - STEP 7: Monitor token manager Redis calls"""
+        """AUDIT METRICS - STEP 7: Monitor auth service token calls"""
         try:
-            # Monitor token retrieval from Redis
+            # Monitor token retrieval from auth service
+            auth_service = get_upstox_auth_service()
             await self._monitor_redis_call(
-                "token_manager_get_token", 
-                lambda: token_manager.get_token()
+                "auth_service_get_token", 
+                lambda: auth_service.get_valid_token()
             )
         except Exception as e:
-            logger.debug(f"Token manager Redis monitoring failed: {e}")
+            logger.debug(f"Auth service Redis monitoring failed: {e}")
 
     async def _monitor_broadcast(self, name, fn, *args):
         """AUDIT METRICS - STEP 8: Monitor WebSocket broadcast latency"""
@@ -1322,84 +1511,106 @@ class WebSocketMarketFeed:
                             self._option_sub_task = asyncio.create_task(
                                 self._check_and_subscribe_options(symbol, atm)
                             )
+                
+                # FIX 5: Throttle analytics engine to 2 times per second
+                now = time.time()
+                last_analytics_run = getattr(self, '_last_analytics_run', 0)
+                
+                if now - last_analytics_run > 0.5:  # 2 times per second = 0.5s interval
+                    logger.info(f"PIPELINE → analytics engine triggered {symbol}")
                     
-                    # Broadcast index tick using router message directly (no payload reconstruction)
-                    logger.info(f"INDEX BROADCAST → {message}")
-                    
-                    asyncio.create_task(
-                        self._monitor_broadcast(
-                            "index_tick",
-                            manager.broadcast,
-                            message
-                        )
-                    )
+                    # Compute and broadcast analytics immediately
+                    try:
+                        from app.services.analytics_broadcaster import analytics_broadcaster
+                        chain_data = option_chain_builder.get_chain(symbol)
+                        if chain_data:
+                            await analytics_broadcaster.compute_single_analytics(symbol, chain_data.__dict__)
+                            logger.info(f"PIPELINE → analytics broadcast complete {symbol}")
+                            self._last_analytics_run = now
+                    except Exception as e:
+                        logger.debug(f"PIPELINE → analytics engine failed {symbol}: {e}")
                 else:
-                    return  # Skip malformed ticks
-                
-            elif message_type == "option_tick":
-                # Update option chain builder with option data
-                data = message.get("data", {})
-                strike = data.get("strike")
-                right = data.get("right")
-                ltp = data.get("ltp")
-                
-                # CRITICAL DEBUG: Log raw Upstox payload
-                logger.debug(f"RAW TICK PAYLOAD → {data}")
-                
-                if not strike or not right:
-                    return  # Skip malformed ticks (LTP is optional for OI updates)
-                
-                # CRITICAL FIX: Parse OI from multiple possible field names
-                oi = (
-                    data.get("oi")
-                    or data.get("open_interest")
-                    or data.get("oi_day_high")
-                    or data.get("oi_day_low")
-                    or 0
-                )
-                volume = data.get("volume", 0)
-                
-                # CRITICAL DEBUG: Log raw option data
-                logger.debug(
-                    f"OPTION RAW DATA → strike={strike} right={right} "
-                    f"ltp={ltp} oi={oi}"
-                )
-                
-                logger.info(f"PIPELINE → forwarded tick to option_chain_builder {symbol}")
-
-                # AUDIT METRICS - STEP 3: Option Chain Builder CPU Time
-                start = time.time()
-
-                option_chain_builder.update_option_tick(
-                    symbol,
-                    strike,
-                    right,
-                    ltp,
-                    oi,
-                    volume
-                )
-                
-                # SYNC WITH MARKET STATE MANAGER
-                await self.market_state_manager.update_ws_tick_price(
-                    symbol, 
-                    f"NSE_FO|{symbol}{self.active_expiry}{strike}{right}", # Rough key for type detection
-                    {"ltp": ltp, "oi": oi, "volume": volume}
-                )
-                
-                elapsed = time.time() - start
-                
-                if elapsed > 0.02:
-                    self.slow_option_builder_count += 1
-                    loop_now = time.time()
-
-                    if loop_now - getattr(self, "last_option_warning", 0) > 5:
-                        logger.warning(f"OPTION_BUILDER_SLOW {elapsed:.4f}s")
-                        self.last_option_warning = loop_now
-                
-                self.max_option_builder_time = max(self.max_option_builder_time, elapsed)
+                    # Skip analytics due to throttling
+                    logger.debug(f"PIPELINE → analytics throttled (last run {now - last_analytics_run:.2f}s ago)")
                 
                 # Option ticks are included in chain snapshots, no individual broadcast
                 
+            elif message_type == "option_tick":
+                instrument_key = message.get("instrument_key")
+                if TICK_DEBUG:
+                    logger.info(f"PIPELINE CHECK → option_tick received for {instrument_key}")
+                
+                # Update option chain builder with option data
+                data = message.get("data", {})
+                
+                symbol = message.get("symbol")
+                right = message.get("right")
+                strike = message.get("strike")
+                ltp = data.get("ltp")
+                oi = data.get("oi")
+                iv = data.get("iv")
+                delta = data.get("delta")
+                
+                logger.info(
+                    f"OPTION TICK HANDLER → {symbol} {right} strike={strike} "
+                    f"ltp={ltp} oi={oi} iv={iv} delta={delta}"
+                )
+                
+                # Extract option data safely
+                ltp = data.get("ltp")
+                oi = data.get("oi")
+                iv = data.get("iv")
+                delta = data.get("delta")
+                gamma = data.get("gamma")
+                theta = data.get("theta")
+                vega = data.get("vega")
+                bid = data.get("bid_price")
+                ask = data.get("ask_price")
+                
+                # Update option chain builder
+                option_chain_builder.update_option_tick(
+                    symbol=symbol,
+                    strike=float(strike),
+                    right=right,
+                    ltp=float(ltp),
+                    oi=int(oi),
+                    volume=int(data.get("volume", 0)),
+                    bid=float(bid),
+                    ask=float(ask),
+                    iv=float(iv),
+                    delta=float(delta),
+                    gamma=float(gamma),
+                    theta=float(theta),
+                    vega=float(vega)
+                )
+                
+                # Route to message router for frontend broadcast
+                message = message_router.route_tick(message)
+                if message:
+                    # Handle different message types - AUDIT METRICS - STEP 4: Message Router Latency
+                    start = time.time()
+                    await self._handle_routed_message(message)
+                    elapsed = time.time() - start
+                    
+                    # Track router latency metrics
+                    self.max_router_latency = max(self.max_router_latency, elapsed)
+                    
+                    if elapsed > 0.01:
+                        self.slow_router_count += 1
+                        loop_now = time.time()
+
+                        if loop_now - getattr(self, "last_router_warning", 0) > 5:
+                            logger.warning(f"SLOW ROUTE HANDLER {elapsed:.4f}s")
+                            self.last_router_warning = loop_now
+                
+                self.processed_ticks += 1
+                self.processed_ticks_10s += 1
+                self.tick_counter += 1
+                
+                # STEP 2: QUEUE WORKER TRACE - DEBUG ONLY
+                if TICK_DEBUG:
+                    logger.debug("ANALYTICS QUEUE WORKER ACTIVE")
+            
             else:
                 logger.warning(f"Unknown message type: {message_type}")
                 
@@ -1525,7 +1736,6 @@ class WebSocketMarketFeed:
             # STEP 7: PROCESSING LATENCY - DEBUG ONLY
             if TICK_DEBUG:
                 logger.debug(f"PROCESSING LATENCY = {time.time() - start}")
-
 
 class WebSocketFeedManager:
 

@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime, date
 from app.services.live_option_chain_builder import LiveOptionChainBuilder
 from app.core.ws_manager import manager
-from app.services.greeks_engine import greeks_engine
+from app.analytics.greeks_engine import greeks_engine
 import logging
 import time
 
@@ -132,8 +132,7 @@ class LiveChainManager:
                 if spot and self.chain:
                     self.chain = greeks_engine.compute_chain_greeks(self.chain, spot)
                 
-                await manager.broadcast_json(
-                    "option_chain",
+                await manager.broadcast(
                     {
                         "type": "option_chain",
                         "chain": self.chain

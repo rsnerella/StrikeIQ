@@ -68,7 +68,10 @@ export function TickerStrip({
                                     }`}
                             >
                                 {changePositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                                {changePositive ? '+' : ''}{changePct.toFixed(2)}%
+                                {typeof changePct === 'number' && changePct !== 0
+                    ? `${changePositive ? '+' : ''}${changePct.toFixed(2)}%`
+                    : '—'
+                  }
                             </div>
                         </div>
                     </div>

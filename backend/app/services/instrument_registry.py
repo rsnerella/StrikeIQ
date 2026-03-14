@@ -58,7 +58,7 @@ class InstrumentRegistry:
         if self._ready_event.is_set():
             return
 
-        lock = redis_client.lock("instrument_registry_lock", timeout=120)
+        lock = await redis_client.lock("instrument_registry_lock", timeout=120)
 
         await lock.acquire()
 
@@ -122,7 +122,7 @@ class InstrumentRegistry:
                 self._ready_event.set()
 
         finally:
-            lock.release()
+            await lock.release()
 
     # --------------------------------------------------
     # BUILD REVERSE LOOKUPS
@@ -151,7 +151,7 @@ class InstrumentRegistry:
                             "option_type": "CE"
                         }
 
-                        token = ce.partition("|")[2]
+                        token = ce.split("|")[-1]  # ISSUE 7 FIX: Use split('|')[-1] instead of partition('|')[2]
 
                         if token:
                             self.token_map[token] = ce
@@ -165,7 +165,7 @@ class InstrumentRegistry:
                             "option_type": "PE"
                         }
 
-                        token = pe.partition("|")[2]
+                        token = pe.split("|")[-1]  # ISSUE 7 FIX: Use split('|')[-1] instead of partition('|')[2]
 
                         if token:
                             self.token_map[token] = pe

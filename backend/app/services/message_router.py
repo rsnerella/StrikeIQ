@@ -174,7 +174,16 @@ class MessageRouter:
                         right=meta["option_type"],
                         ltp=ltp,
                         oi=oi,
-                        volume=volume
+                        volume=volume,
+                        bid=tick.get("bid", 0),
+                        ask=tick.get("ask", 0),
+                        bid_qty=tick.get("bid_qty", 0),
+                        ask_qty=tick.get("ask_qty", 0),
+                        iv=tick.get("iv", 0),
+                        delta=tick.get("delta", 0),
+                        theta=tick.get("theta", 0),
+                        gamma=tick.get("gamma", 0),
+                        vega=tick.get("vega", 0)
                     )
 
                 except Exception as e:

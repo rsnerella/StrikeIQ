@@ -1,4 +1,4 @@
-import json
+import json as json_lib
 import asyncio
 import logging
 
@@ -67,7 +67,7 @@ async def market_ws(websocket: WebSocket):
 
                 message = await websocket.receive_text()
 
-                data = json.loads(message)
+                data = json_lib.loads(message)
 
                 if data.get("type") == "subscribe":
 
@@ -116,10 +116,11 @@ async def market_ws(websocket: WebSocket):
                     })
 
                     # ---------------- SEND CACHED SNAPSHOT ----------------
-                    from app.services.analytics_broadcaster import LAST_ANALYTICS
+                    from app.services.analytics_broadcaster import LAST_ANALYTICS, json_safe
                     if LAST_ANALYTICS and symbol in LAST_ANALYTICS:
                         logger.info(f"📤 SENDING CACHED SNAPSHOT → {symbol}")
-                        await websocket.send_json(LAST_ANALYTICS[symbol])
+                        cached_snapshot = json_lib.dumps(LAST_ANALYTICS[symbol], default=json_safe)
+                        await websocket.send_text(cached_snapshot)
 
             except WebSocketDisconnect:
 

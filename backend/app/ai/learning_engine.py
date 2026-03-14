@@ -1,13 +1,17 @@
 """
-Learning Engine - Tracks and learns from trade outcomes
-Lightweight, optimized for Intel i5 CPU, 8GB RAM
+Learning Engine - Enhanced with ML Feedback Loop
+Tracks and learns from trade outcomes and ML model performance
 """
 
 import logging
+import asyncio
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import json
+from sqlalchemy.orm import Session
+from app.models.ai_predictions import AIPrediction
+from app.models.signal_outcomes import SignalOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -38,14 +42,31 @@ class LearningEngine:
     Updates formula and strategy performance based on results
     """
     
-    def __init__(self):
+    def __init__(self, db_session: Optional[Session] = None):
+        # Database session for ML feedback
+        self.db_session = db_session
+        
         # Performance tracking
         self.formula_performance: Dict[str, FormulaPerformance] = {}
         self.strategy_performance: Dict[str, StrategyPerformance] = {}
         
+        # ML model performance tracking
+        self.ml_model_performance: Dict[str, Any] = {
+            'total_predictions': 0,
+            'correct_predictions': 0,
+            'accuracy': 0.0,
+            'avg_confidence': 0.0,
+            'feature_importance': {},
+            'last_updated': datetime.now()
+        }
+        
         # Learning parameters
         self.min_predictions_for_learning = 10  # Minimum predictions before adjusting confidence
         self.learning_rate = 0.1  # How quickly to adjust confidence
+        
+        # Feedback loop parameters
+        self.feedback_interval = timedelta(hours=1)  # How often to run feedback loop
+        self.last_feedback_time = datetime.now()
         
         # Initialize with default values
         self._initialize_default_performance()
@@ -332,9 +353,279 @@ class LearningEngine:
                     'avg_return': best_strategy[1].avg_return
                 },
                 'learning_rate': self.learning_rate,
-                'min_predictions_threshold': self.min_predictions_for_learning
+                'min_predictions_threshold': self.min_predictions_for_learning,
+                'ml_performance': self.ml_model_performance
             }
             
         except Exception as e:
             logger.error(f"Learning summary error: {e}")
             return {'error': str(e)}
+    
+    # NEW ML FEEDBACK LOOP METHODS
+    
+    async def evaluate_prediction_accuracy(self, symbol: Optional[str] = None, days_back: int = 7) -> Dict[str, Any]:
+        """Evaluate ML model prediction accuracy against actual outcomes"""
+        try:
+            if not self.db_session:
+                return {'error': 'No database session available'}
+            
+            # Get recent predictions
+            cutoff_date = datetime.now() - timedelta(days=days_back)
+            
+            predictions_query = self.db_session.query(AIPrediction).filter(
+                AIPrediction.timestamp >= cutoff_date
+            )
+            
+            if symbol:
+                predictions_query = predictions_query.filter(AIPrediction.symbol == symbol)
+            
+            predictions = predictions_query.all()
+            
+            if not predictions:
+                return {'error': 'No predictions found for evaluation', 'symbol': symbol, 'days_back': days_back}
+            
+            # Match predictions with outcomes
+            correct_predictions = 0
+            total_evaluated = 0
+            accuracy_by_confidence = {}
+            
+            for prediction in predictions:
+                # Find corresponding outcome
+                outcome = self.db_session.query(SignalOutcome).filter(
+                    SignalOutcome.signal_id == f"pred_{prediction.timestamp.strftime('%Y%m%d_%H%M%S')}_{prediction.symbol}"
+                ).first()
+                
+                if outcome:
+                    total_evaluated += 1
+                    
+                    # Determine if prediction was correct
+                    predicted_direction = 'buy' if prediction.buy_probability > prediction.sell_probability else 'sell'
+                    actual_direction = 'buy' if outcome.profit_loss > 0 else 'sell'
+                    
+                    if predicted_direction == actual_direction:
+                        correct_predictions += 1
+                    
+                    # Track accuracy by confidence range
+                    conf_range = int(prediction.confidence_score * 10) / 10  # 0.1, 0.2, ..., 1.0
+                    if conf_range not in accuracy_by_confidence:
+                        accuracy_by_confidence[conf_range] = {'correct': 0, 'total': 0}
+                    
+                    accuracy_by_confidence[conf_range]['total'] += 1
+                    if predicted_direction == actual_direction:
+                        accuracy_by_confidence[conf_range]['correct'] += 1
+            
+            # Calculate overall accuracy
+            accuracy = correct_predictions / total_evaluated if total_evaluated > 0 else 0
+            
+            # Calculate accuracy by confidence
+            accuracy_by_confidence_result = {}
+            for conf_range, stats in accuracy_by_confidence.items():
+                accuracy_by_confidence_result[conf_range] = (
+                    stats['correct'] / stats['total'] if stats['total'] > 0 else 0
+                )
+            
+            # Update ML model performance
+            self.ml_model_performance.update({
+                'total_predictions': self.ml_model_performance['total_predictions'] + total_evaluated,
+                'correct_predictions': self.ml_model_performance['correct_predictions'] + correct_predictions,
+                'accuracy': accuracy,
+                'last_updated': datetime.now()
+            })
+            
+            result = {
+                'symbol': symbol,
+                'days_back': days_back,
+                'total_evaluated': total_evaluated,
+                'correct_predictions': correct_predictions,
+                'accuracy': accuracy,
+                'accuracy_by_confidence': accuracy_by_confidence_result,
+                'ml_performance': self.ml_model_performance
+            }
+            
+            logger.info(f"ML prediction accuracy evaluated: {accuracy:.3f} ({correct_predictions}/{total_evaluated})")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error evaluating prediction accuracy: {e}")
+            return {'error': str(e)}
+    
+    async def update_strategy_weights(self, accuracy_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update strategy weights based on ML accuracy"""
+        try:
+            updated_weights = {}
+            
+            # Get current strategy performance
+            current_ranking = self.get_strategy_ranking()
+            
+            # Adjust weights based on accuracy
+            for strategy, current_score in current_ranking:
+                # Get ML accuracy for this strategy
+                strategy_accuracy = accuracy_data.get('accuracy', 0.5)
+                
+                # Calculate weight adjustment
+                if strategy_accuracy > 0.6:  # High accuracy
+                    weight_adjustment = 0.1
+                    reason = f"High accuracy: {strategy_accuracy:.2%}"
+                elif strategy_accuracy < 0.4:  # Low accuracy
+                    weight_adjustment = -0.1
+                    reason = f"Low accuracy: {strategy_accuracy:.2%}"
+                else:
+                    weight_adjustment = 0.0
+                    reason = "Average accuracy"
+                
+                new_weight = max(0.1, min(1.0, current_score + weight_adjustment))
+                updated_weights[strategy] = {
+                    'old_weight': current_score,
+                    'new_weight': new_weight,
+                    'adjustment': weight_adjustment,
+                    'reason': reason,
+                    'accuracy': strategy_accuracy
+                }
+            
+            logger.info(f"Strategy weights updated based on ML accuracy: {len(updated_weights)} strategies")
+            return updated_weights
+            
+        except Exception as e:
+            logger.error(f"Error updating strategy weights: {e}")
+            return {}
+    
+    async def track_model_performance(self, symbol: str, features: Dict[str, Any], prediction: Dict[str, Any], outcome: Dict[str, Any]) -> None:
+        """Track individual model performance for feature importance analysis"""
+        try:
+            if not prediction.get('prediction_successful', False):
+                return
+            
+            # Determine if prediction was correct
+            predicted_direction = 'buy' if prediction.get('buy_probability', 0.5) > prediction.get('sell_probability', 0.5) else 'sell'
+            actual_direction = 'buy' if outcome.get('profit_loss', 0) > 0 else 'sell'
+            
+            is_correct = predicted_direction == actual_direction
+            
+            # Update overall performance
+            self.ml_model_performance['total_predictions'] += 1
+            if is_correct:
+                self.ml_model_performance['correct_predictions'] += 1
+            
+            # Update accuracy
+            total = self.ml_model_performance['total_predictions']
+            correct = self.ml_model_performance['correct_predictions']
+            self.ml_model_performance['accuracy'] = correct / total if total > 0 else 0
+            
+            # Update average confidence
+            current_conf = self.ml_model_performance['avg_confidence']
+            new_conf = prediction.get('confidence_score', 0)
+            self.ml_model_performance['avg_confidence'] = (current_conf * (total - 1) + new_conf) / total
+            
+            # Update feature importance (simplified)
+            feature_importance = prediction.get('feature_importance', {})
+            if feature_importance and is_correct:
+                # Increase importance of features that led to correct predictions
+                for feature, importance in feature_importance.items():
+                    if feature in self.ml_model_performance['feature_importance']:
+                        self.ml_model_performance['feature_importance'][feature] = (
+                            self.ml_model_performance['feature_importance'][feature] * 0.9 + importance * 0.1
+                        )
+                    else:
+                        self.ml_model_performance['feature_importance'][feature] = importance
+            
+            self.ml_model_performance['last_updated'] = datetime.now()
+            
+            logger.debug(f"Tracked model performance for {symbol}: correct={is_correct}, accuracy={self.ml_model_performance['accuracy']:.3f}")
+            
+        except Exception as e:
+            logger.error(f"Error tracking model performance: {e}")
+    
+    async def run_feedback_loop(self) -> Dict[str, Any]:
+        """Run the ML feedback loop"""
+        try:
+            logger.info("Starting ML feedback loop")
+            
+            # Step 1: Evaluate prediction accuracy
+            accuracy_result = await self.evaluate_prediction_accuracy()
+            
+            if 'error' in accuracy_result:
+                return accuracy_result
+            
+            # Step 2: Update strategy weights
+            weight_updates = await self.update_strategy_weights(accuracy_result)
+            
+            # Step 3: Generate learning insights
+            insights = self._generate_learning_insights(accuracy_result, weight_updates)
+            
+            # Update feedback time
+            self.last_feedback_time = datetime.now()
+            
+            result = {
+                'feedback_time': self.last_feedback_time.isoformat(),
+                'accuracy_evaluation': accuracy_result,
+                'strategy_weight_updates': weight_updates,
+                'learning_insights': insights,
+                'ml_performance': self.ml_model_performance
+            }
+            
+            logger.info(f"ML feedback loop completed: accuracy={accuracy_result['accuracy']:.3f}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in feedback loop: {e}")
+            return {'error': str(e)}
+    
+    def _generate_learning_insights(self, accuracy_data: Dict[str, Any], weight_updates: Dict[str, Any]) -> List[str]:
+        """Generate learning insights from feedback loop"""
+        insights = []
+        
+        accuracy = accuracy_data.get('accuracy', 0)
+        
+        # Overall performance insight
+        if accuracy > 0.7:
+            insights.append(f"ML model performing well with {accuracy:.1%} accuracy")
+        elif accuracy < 0.4:
+            insights.append(f"ML model needs improvement with {accuracy:.1%} accuracy")
+        else:
+            insights.append(f"ML model performance is average with {accuracy:.1%} accuracy")
+        
+        # Strategy weight insights
+        if weight_updates:
+            increased_weights = [s for s, w in weight_updates.items() if w['adjustment'] > 0]
+            decreased_weights = [s for s, w in weight_updates.items() if w['adjustment'] < 0]
+            
+            if increased_weights:
+                insights.append(f"Increased weight for {len(increased_weights)} strategies: {', '.join(increased_weights[:3])}")
+            
+            if decreased_weights:
+                insights.append(f"Decreased weight for {len(decreased_weights)} strategies: {', '.join(decrecreased_weights[:3])}")
+        
+        # Confidence range insights
+        accuracy_by_conf = accuracy_data.get('accuracy_by_confidence', {})
+        if accuracy_by_conf:
+            high_conf_accuracy = accuracy_by_conf.get(0.9, 0)  # 90-100% confidence
+            low_conf_accuracy = accuracy_by_conf.get(0.1, 0)   # 0-10% confidence
+            
+            if high_conf_accuracy > 0.8:
+                insights.append("High confidence predictions are very reliable")
+            elif low_conf_accuracy < 0.3:
+                insights.append("Low confidence predictions need improvement")
+        
+        return insights
+    
+    async def should_trigger_retraining(self) -> Tuple[bool, str]:
+        """Determine if model retraining should be triggered"""
+        try:
+            # Check if enough time has passed since last feedback
+            if datetime.now() - self.last_feedback_time < self.feedback_interval:
+                return False, "Too soon since last feedback loop"
+            
+            # Check accuracy threshold
+            accuracy = self.ml_model_performance.get('accuracy', 0)
+            if accuracy < 0.5 and self.ml_model_performance['total_predictions'] >= 100:
+                return True, f"Low accuracy ({accuracy:.2%}) with sufficient predictions"
+            
+            # Check prediction volume
+            if self.ml_model_performance['total_predictions'] >= 1000:
+                return True, "High prediction volume reached, time for retraining"
+            
+            return False, "No retraining trigger conditions met"
+            
+        except Exception as e:
+            logger.error(f"Error checking retraining trigger: {e}")
+            return False, f"Error checking retraining: {e}"

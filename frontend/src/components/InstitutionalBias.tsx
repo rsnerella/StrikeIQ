@@ -85,7 +85,10 @@ export default memo(function InstitutionalBias({ intelligence, spotPrice, market
             {/* Spot Price */}
             <div className="text-right">
               <div className="text-2xl font-black text-white">
-                ₹{spotPrice?.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {spotPrice > 0
+                    ? `₹${spotPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    : <span className="text-gray-600 animate-pulse">Loading...</span>
+                  }
               </div>
               <div className="flex items-center justify-end space-x-2">
                 {marketChange && (

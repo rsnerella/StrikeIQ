@@ -12,11 +12,22 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
+  # Local Redis for development/fallback
+  # Note: StrikeIQ now supports Upstash Redis for production
+  # To use Upstash Redis, set UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN
+  # The system will automatically use Upstash if configured, otherwise falls back to this local instance
   redis:
     image: redis:7-alpine
     container_name: strikeiq-redis
     ports:
       - "6379:6379"
+    # Optional: Add persistence for local Redis
+    # volumes:
+    #   - redisdata:/data
+
+# Optional: Uncomment for Redis persistence
+# volumes:
+#   redisdata:
 
 volumes:
   pgdata:

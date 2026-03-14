@@ -150,6 +150,22 @@ class UpstoxAuthService:
             }
 
     # ================= TOKEN =================
+    async def get_valid_token(self):
+        """
+        Returns a valid Upstox access token.
+        Refreshes token if missing.
+        """
+        if not getattr(self, "access_token", None):
+            await self.refresh_token()
+        return self.access_token
+
+    async def refresh_token(self):
+        """
+        Refresh Upstox access token.
+        """
+        self.access_token = os.getenv("UPSTOX_ACCESS_TOKEN")
+        return self.access_token
+
     async def get_valid_access_token(self) -> Dict[str, Any]:
 
         async with self._lock:

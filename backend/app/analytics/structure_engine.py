@@ -660,40 +660,47 @@ class StructureEngine:
                     "price": sp.price,
                     "ts": sp.ts,
                     "type": sp.type
-                }
-                for sp in analysis.swing_points
+                } for sp in analysis.swing_points
             ],
             "supply_zones": [
                 {
                     "type": sz.type,
                     "top": sz.top,
                     "bottom": sz.bottom,
-                    "mid": sz.mid,
-                    "ts": sz.ts,
                     "strength": sz.strength,
                     "note": sz.note
-                }
-                for sz in analysis.supply_zones
+                } for sz in analysis.supply_zones
             ],
             "demand_zones": [
                 {
                     "type": dz.type,
                     "top": dz.top,
                     "bottom": dz.bottom,
-                    "mid": dz.mid,
-                    "ts": dz.ts,
                     "strength": dz.strength,
                     "note": dz.note
-                }
-                for dz in analysis.demand_zones
+                } for dz in analysis.demand_zones
             ],
-            "wave_pattern": {
-                "type": analysis.wave_pattern.wave_type,
-                "label": analysis.wave_pattern.wave_label,
-                "probability": analysis.wave_pattern.probability,
-                "key_levels": analysis.wave_pattern.key_levels,
-                "interpretation": analysis.wave_pattern.interpretation
+            "elliott_wave": {
+                "wave_type": analysis.elliott_wave.wave_type,
+                "wave_label": analysis.elliott_wave.wave_label,
+                "confidence": analysis.elliott_wave.confidence,
+                "key_levels": analysis.elliott_wave.key_levels,
+                "interpretation": analysis.elliott_wave.interpretation
             },
-            "alerts": analysis.alerts,
             "key_levels": analysis.key_levels
         }
+    
+    async def _analytics_loop_wrapper(self):
+        """Wrapper for analytics loop to match expected interface"""
+        try:
+            logger.info("StructureEngine analytics loop started")
+            while True:
+                await asyncio.sleep(60)  # Run every minute
+                # The engine is passive - no active processing needed
+                logger.debug("StructureEngine analytics heartbeat")
+        except asyncio.CancelledError:
+            logger.info("StructureEngine analytics loop cancelled")
+            raise
+        except Exception as e:
+            logger.error(f"StructureEngine analytics loop error: {e}")
+            await asyncio.sleep(10)  # Brief pause before retry

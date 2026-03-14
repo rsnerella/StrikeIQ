@@ -166,12 +166,22 @@ export function TradeSetupPanel({ data }: TradeSetupPanelProps) {
                 <div className="grid grid-cols-2 gap-3">
                     <div className="rounded-xl p-4 transition-all hover:bg-white/5" style={{ background: 'rgba(34,197,94,0.03)', border: '1px solid rgba(34,197,94,0.1)' }}>
                         <div className="text-[9px] font-bold font-mono text-green-500/70 uppercase mb-1">Target</div>
-                        <div className="text-[14px] font-bold font-mono text-green-400">{(tradeSetup as any).target.toFixed(2)}</div>
+                        <div className="text-[14px] font-bold font-mono text-green-400">
+                        {typeof (tradeSetup as any).target === 'number' && (tradeSetup as any).target > 0
+                            ? (tradeSetup as any).target.toFixed(2)
+                            : <span className="text-gray-600">—</span>
+                        }
+                      </div>
                         <div className="text-[8px] font-mono text-green-500/50 mt-1">{rrRatio} RR</div>
                     </div>
                     <div className="rounded-xl p-4 transition-all hover:bg-white/5" style={{ background: 'rgba(239,68,68,0.03)', border: '1px solid rgba(239,68,68,0.1)' }}>
                         <div className="text-[9px] font-bold font-mono text-red-500/70 uppercase mb-1">Stop Loss</div>
-                        <div className="text-[14px] font-bold font-mono text-red-500">{(tradeSetup as any).stopLoss.toFixed(2)}</div>
+                        <div className="text-[14px] font-bold font-mono text-red-500">
+                        {typeof (tradeSetup as any).stopLoss === 'number' && (tradeSetup as any).stopLoss > 0
+                            ? (tradeSetup as any).stopLoss.toFixed(2)
+                            : <span className="text-gray-600">—</span>
+                        }
+                      </div>
                     </div>
                 </div>
 

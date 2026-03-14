@@ -1,5 +1,6 @@
 import React, { memo } from 'react';
 import { Brain, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
+import { useWSStore } from '@/core/ws/wsStore';
 
 interface AIInterpretation {
   narrative: string | null;
@@ -18,14 +19,17 @@ interface AIInterpretationPanelProps {
 }
 
 const AIInterpretationPanel: React.FC<AIInterpretationPanelProps> = ({ intelligence }) => {
+  // Get real AI signals from store
+  const analytics = useWSStore(state => state.analytics);
+  
   const interpretation = intelligence?.interpretation ?? {
-    narrative: null,
-    risk_context: null,
-    positioning_context: null,
-    contradiction_flags: [],
-    confidence_tone: 'cautious',
-    interpreted_at: undefined,
-    fallback: true
+    narrative: analytics?.narrative || null,
+    risk_context: analytics?.risk_context || null,
+    positioning_context: analytics?.positioning_context || null,
+    contradiction_flags: analytics?.contradiction_flags || [],
+    confidence_tone: analytics?.confidence_tone || 'cautious',
+    interpreted_at: analytics?.interpreted_at,
+    fallback: !analytics || Object.keys(analytics).length === 0
   };
 
   const getToneConfig = (tone: string) => {

@@ -65,7 +65,7 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
   const { optionChainData } = useOptionChainStore();
 
   // Use structured data from global store, fallback to option chain store, then legacy data
-  const actualLiveData = calls.length > 0 || puts.length > 0
+  const actualLiveData = (calls && calls.length > 0) || (puts && puts.length > 0)
     ? { calls, puts, spot }
     : optionChainData || liveData || optionChainSnapshot;
 
@@ -236,7 +236,10 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
                 className="text-3xl font-black tabular-nums tracking-tighter text-white"
                 style={{ fontFamily: "'Space Grotesk', sans-serif" }}
               >
-                {spotPrice.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {spotPrice > 0
+                    ? spotPrice.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                    : <span className="text-gray-600 animate-pulse">Loading...</span>
+                  }
               </span>
             </div>
           </div>
@@ -368,4 +371,4 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
 };
 
 
-export default memo(OIHeatmap);
+export default React.memo(OIHeatmap);

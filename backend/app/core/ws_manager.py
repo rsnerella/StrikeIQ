@@ -2,6 +2,14 @@ from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
 import asyncio
 import logging
+import json
+from datetime import datetime
+
+def json_safe(obj):
+    """JSON serializer for datetime objects"""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +100,11 @@ class WSManager:
         logger.info(f"TEMP DEBUG: Broadcasting to all {len(connections)} clients")
         
         # TODO: Re-enable symbol filtering after debugging
+        
+        logger.info(
+            f"WS_MANAGER_BROADCAST clients={len(target_connections)} "
+            f"type={message.get('type')}"
+        )
         # if message_symbol:
         #     # Only send to clients subscribed to this symbol
         #     logger.info(f"FILTERING for symbol {message_symbol} across {len(connections)} clients")
@@ -112,7 +125,7 @@ class WSManager:
         #     return
 
         results = await asyncio.gather(
-            *[conn.send_json(message) for conn in target_connections],
+            *[conn.send_text(json.dumps(message, default=json_safe)) for conn in target_connections],
             return_exceptions=True
         )
 

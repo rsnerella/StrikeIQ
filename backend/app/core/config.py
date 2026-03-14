@@ -47,6 +47,31 @@ class Settings:
     REDIS_PORT: int = int(os.getenv('REDIS_PORT', '6379'))
     REDIS_DB: int = int(os.getenv('REDIS_DB', '0'))
     
+    # Upstash Redis Settings
+    UPSTASH_REDIS_URL: str = os.getenv('UPSTASH_REDIS_URL', '')
+    UPSTASH_REDIS_TOKEN: str = os.getenv('UPSTASH_REDIS_TOKEN', '')
+    UPSTASH_REDIS_REST_URL: str = os.getenv('UPSTASH_REDIS_REST_URL', '')
+    
+    # Redis Provider Selection
+    REDIS_PROVIDER: str = os.getenv('REDIS_PROVIDER', 'local')  # 'local', 'upstash', 'auto'
+    
+    @property
+    def is_upstash_enabled(self) -> bool:
+        """Check if Upstash Redis is configured and enabled"""
+        if self.REDIS_PROVIDER == 'local':
+            return False
+        if self.REDIS_PROVIDER == 'upstash':
+            return bool(self.UPSTASH_REDIS_URL and self.UPSTASH_REDIS_TOKEN)
+        # Auto mode: prefer Upstash if configured, otherwise use local
+        return bool(self.UPSTASH_REDIS_URL and self.UPSTASH_REDIS_TOKEN)
+    
+    @property
+    def effective_redis_url(self) -> str:
+        """Get the effective Redis URL based on configuration"""
+        if self.is_upstash_enabled:
+            return self.UPSTASH_REDIS_URL
+        return self.REDIS_URL
+    
     def __init__(self):
         # Additional initialization if needed, but class attributes cover defaults
         pass

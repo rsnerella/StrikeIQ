@@ -60,54 +60,114 @@ class PollerService:
     # ================= MAIN POLLER =================
 
     async def poll_market_data(self):
-
-        logger.info("Starting market data poll")
-
-        diag("POLLER", "Polling option chain snapshot")
-
-        # ---- FIX: skip poller if WS feed active ----
+        """
+        Fetch option chain snapshot from Upstox REST API.
+        Called every 5 seconds as a supplement to WebSocket feed.
+        Provides OI and Greeks when WebSocket tick has zero values.
+        """
         try:
-            ws_feed = get_market_feed()
-            if ws_feed and ws_feed.is_connected():
-                logger.info("Skipping poller because WS feed active")
+            from app.services.websocket_market_feed import get_market_feed
+            from app.services.option_chain_builder import option_chain_builder
+
+            feed = get_market_feed()
+            if not feed:
                 return
-        except Exception:
-            pass
 
-        async with AsyncSessionLocal() as db:
+            symbol = feed.active_symbol
+            expiry = feed.active_expiry
 
-            try:
+            if not symbol or not expiry:
+                return
 
-                token = await self.get_token()
+            # Get index key for REST call
+            index_key_map = {
+                "NIFTY": "NSE_INDEX|Nifty 50",
+                "BANKNIFTY": "NSE_INDEX|Nifty Bank",
+                "FINNIFTY": "NSE_INDEX|Nifty Fin Service",
+            }
+            index_key = index_key_map.get(symbol)
+            if not index_key:
+                return
 
-                logger.info(
-                    f"POLLER TOKEN CHECK → {'FOUND' if token else 'MISSING'}"
-                )
+            # Fetch option chain from Upstox REST API
+            from app.services.token_manager import token_manager
+            import httpx
 
-                if not token:
+            token = await token_manager.get_token()
+            if not token:
+                return
 
-                    logger.warning(
-                        "Poller waiting for Upstox access token..."
-                    )
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json"
+            }
 
-                    await asyncio.sleep(5)
+            url = "https://api.upstox.com/v2/option/chain"
+            params = {
+                "instrument_key": index_key,
+                "expiry_date":    expiry,
+            }
+
+            async with httpx.AsyncClient(timeout=10) as client:
+                response = await client.get(url, headers=headers, params=params)
+
+                if response.status_code != 200:
+                    logger.warning(f"Option chain REST fetch failed: {response.status_code}")
                     return
 
-                symbol = MARKET_CONTEXT["symbol"]
+                data = response.json().get("data", [])
+                if not data:
+                    logger.warning("Option chain REST returned empty data")
+                    return
 
-                await self._poll_symbol(symbol, token, db)
+                # Update option chain builder with REST data
+                updated = 0
+                for item in data:
+                    strike = item.get("strike_price")
+                    if not strike:
+                        continue
 
-                await db.commit()
+                    for opt_type in ["call_options", "put_options"]:
+                        opt = item.get(opt_type, {})
+                        if not opt:
+                            continue
 
-                logger.info("Market data poll completed")
+                        right = "CE" if opt_type == "call_options" else "PE"
+                        mkt_data = opt.get("market_data", {})
+                        greeks = opt.get("option_greeks", {})
 
-            except Exception as e:
+                        ltp = mkt_data.get("ltp", 0)
+                        oi = mkt_data.get("oi", 0)
+                        volume = mkt_data.get("volume", 0)
+                        bid = mkt_data.get("bid_price", 0)
+                        ask = mkt_data.get("ask_price", 0)
+                        iv = greeks.get("iv", 0)
+                        delta = greeks.get("delta", 0)
+                        gamma = greeks.get("gamma", 0)
+                        theta = greeks.get("theta", 0)
+                        vega = greeks.get("vega", 0)
 
-                logger.error(f"Poller error: {e}")
+                        option_chain_builder.update_option_tick(
+                            symbol=symbol,
+                            strike=float(strike),
+                            right=right,
+                            ltp=float(ltp),
+                            oi=int(oi),
+                            volume=int(volume),
+                            bid=float(bid),
+                            ask=float(ask),
+                            iv=float(iv),
+                            delta=float(delta),
+                            gamma=float(gamma),
+                            theta=float(theta),
+                            vega=float(vega)
+                        )
+                        updated += 1
 
-                await db.rollback()
+                logger.info(f"REST POLLER → Updated {updated} strikes for {symbol} {expiry}")
 
-                await asyncio.sleep(5)
+        except Exception as e:
+            logger.error(f"Poller cycle error: {e}")
 
     # ================= SYMBOL POLLING =================
 

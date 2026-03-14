@@ -14,20 +14,20 @@ const OptionRow = memo(({ index, style, data }: any) => {
 
   return (
     <div style={style} className="flex items-center border-b border-gray-800 hover:bg-gray-800/50 transition-colors">
-      <div className="w-16 text-xs font-mono text-gray-400 px-2 py-1 text-right">
-        {item.call_ltp ? item.call_ltp.toFixed(1) : '-'}
+      <div className={`w-16 text-xs font-mono px-2 py-1 text-right ${item.call_ltp > 0 ? 'text-green-400' : 'text-gray-600'}`}>
+        {item.call_ltp > 0 ? item.call_ltp.toFixed(2) : '—'}
       </div>
       <div className="w-20 text-xs font-mono text-red-400 px-2 py-1 text-right">
-        {item.call_oi ? (item.call_oi / 1000).toFixed(1) + 'k' : '-'}
+        {item.call_oi > 0 ? (item.call_oi / 1000).toFixed(1) + 'k' : '—'}
       </div>
       <div className="flex-1 text-xs font-mono font-bold text-gray-200 px-2 py-1 text-center bg-gray-900/40">
         {item.strike}
       </div>
       <div className="w-20 text-xs font-mono text-green-400 px-2 py-1 text-right">
-        {item.put_oi ? (item.put_oi / 1000).toFixed(1) + 'k' : '-'}
+        {item.put_oi > 0 ? (item.put_oi / 1000).toFixed(1) + 'k' : '—'}
       </div>
-      <div className="w-16 text-xs font-mono text-gray-400 px-2 py-1 text-right">
-        {item.put_ltp ? item.put_ltp.toFixed(1) : '-'}
+      <div className={`w-16 text-xs font-mono px-2 py-1 text-right ${item.put_ltp > 0 ? 'text-green-400' : 'text-gray-600'}`}>
+        {item.put_ltp > 0 ? item.put_ltp.toFixed(2) : '—'}
       </div>
     </div>
   );

@@ -4,7 +4,7 @@ import logging
 from typing import Callable, TypeVar, Any, cast
 from fastapi import HTTPException
 
-from app.services.token_manager import token_manager
+from app.services.upstox_auth_service import get_upstox_auth_service
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +14,7 @@ F = TypeVar("F", bound=Callable[..., Any])
 def retry_on_upstox_401(func: F) -> F:
     """
     Retry exactly once on HTTP 401.
-    Uses token_manager.force_refresh()
+    Uses UpstoxAuthService.refresh_access_token()
     """
 
     @functools.wraps(func)
@@ -29,7 +29,8 @@ def retry_on_upstox_401(func: F) -> F:
             logger.warning(f"401 in {func.__name__} → refreshing token once")
 
             # refresh once
-            await token_manager.force_refresh()
+            auth_service = get_upstox_auth_service()
+            await auth_service.refresh_access_token()
 
             logger.info(f"Retrying {func.__name__} after refresh")
 

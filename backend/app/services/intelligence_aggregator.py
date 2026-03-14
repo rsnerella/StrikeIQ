@@ -1,6 +1,6 @@
 import logging
 from typing import Dict, Any, List, Optional
-from ..engines.probability_engine import ProbabilityEngine
+from ..ai.probability_engine import ProbabilityEngine
 from ..exceptions.data_unavailable_error import DataUnavailableError
 
 logger = logging.getLogger(__name__)

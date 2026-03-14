@@ -40,6 +40,10 @@ async def get_db():
         finally:
             await session.close()
 
+def get_async_session():
+    """Get async session for database operations"""
+    return AsyncSessionLocal()
+
 import asyncio
 
 async def test_db_connection(max_retries: int = 3, delay: int = 5):

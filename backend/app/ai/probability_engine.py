@@ -1,14 +1,51 @@
 import logging
+import asyncio
 from typing import Dict, List, Any, Optional
 import math
+import pandas as pd
+import numpy as np
+from datetime import datetime, timezone
 from app.exceptions.data_unavailable_error import DataUnavailableError, MissingPremiumError
+from app.ai.ml_training_engine import MLTrainingEngine
 
 logger = logging.getLogger(__name__)
 
 class ProbabilityEngine:
+    """
+    Enhanced Probability Engine with ML Model Integration
     
-    def __init__(self):
-        self.model = None  # Placeholder for ML model
+    Features:
+    - Loads trained ML model at startup
+    - Provides inference for trade success probability
+    - Combines ML predictions with traditional probability calculations
+    - Falls back to traditional calculations if model unavailable
+    """
+    
+    def __init__(self, db_session=None):
+        self.ml_engine = MLTrainingEngine(db_session)
+        self.model_data = None
+        self.model_loaded = False
+        self.confidence_threshold = 0.6
+        
+        # Load model at startup
+        self._load_model()
+    
+    def _load_model(self) -> bool:
+        """Load ML model at startup"""
+        try:
+            self.model_data = asyncio.run(self.ml_engine.load_model())
+            if self.model_data:
+                self.model_loaded = True
+                self.model_version = self.model_data.get('model_version', 'unknown')
+                self.feature_columns = self.model_data.get('feature_columns', [])
+                logger.info(f"ProbabilityEngine: ML model loaded (version: {self.model_version})")
+                return True
+            else:
+                logger.warning("ProbabilityEngine: No ML model found, using traditional calculations only")
+                return False
+        except Exception as e:
+            logger.error(f"ProbabilityEngine: Error loading ML model: {e}")
+            return False
     
     def _get_safe_default_result(self) -> Dict[str, Any]:
         """Return safe default result for error conditions"""
@@ -22,7 +59,116 @@ class ProbabilityEngine:
             'range_hold_probability': 50.0,
             'volatility_state': 'fair',
             'implied_volatility': 0.0,
-            'time_to_expiry': 0.0
+            'days_to_expiry': 0.0,
+            'buy_probability': 0.5,
+            'sell_probability': 0.5,
+            'confidence_score': 0.0,
+            'ml_enabled': self.model_loaded
+        }
+    
+    async def predict(self, symbol: str, features: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Make ML prediction for trade success probability
+        
+        Args:
+            symbol: Trading symbol
+            features: Feature dictionary from FeatureBuilder
+            
+        Returns:
+            Prediction results with probabilities and confidence
+        """
+        try:
+            if not self.model_loaded:
+                logger.warning("ProbabilityEngine: ML model not loaded, returning default probabilities")
+                return self._get_default_ml_result()
+            
+            # Convert features to DataFrame
+            feature_df = self._prepare_features_for_prediction(features)
+            
+            if feature_df.empty:
+                logger.warning("ProbabilityEngine: Empty features for prediction")
+                return self._get_default_ml_result()
+            
+            # Make prediction using ML engine
+            prediction_results = await self.ml_engine.predict(feature_df)
+            
+            if not prediction_results:
+                logger.warning("ProbabilityEngine: ML prediction failed, returning default")
+                return self._get_default_ml_result()
+            
+            # Prepare result
+            result = {
+                'symbol': symbol,
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'buy_probability': prediction_results.get('buy_probability', 0.5),
+                'sell_probability': prediction_results.get('sell_probability', 0.5),
+                'confidence_score': prediction_results.get('confidence_score', 0.0),
+                'model_version': prediction_results.get('model_version', 'unknown'),
+                'feature_importance': prediction_results.get('feature_importance', {}),
+                'ml_enabled': True,
+                'prediction_successful': True
+            }
+            
+            logger.info(f"ProbabilityEngine: ML prediction for {symbol} - Buy: {result['buy_probability']:.3f}, Confidence: {result['confidence_score']:.3f}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"ProbabilityEngine: Error in ML prediction: {e}")
+            return self._get_default_ml_result()
+    
+    def _prepare_features_for_prediction(self, features: Dict[str, Any]) -> pd.DataFrame:
+        """Prepare features for ML prediction"""
+        try:
+            # Extract key features expected by the model
+            feature_mapping = {
+                'pcr': features.get('options_features', {}).get('pcr', 0),
+                'gamma_exposure': features.get('options_features', {}).get('net_gamma', 0),
+                'oi_velocity': features.get('options_features', {}).get('oi_change', 0),
+                'volatility': features.get('volatility_features', {}).get('volatility_20', 0),
+                'trend_strength': features.get('momentum_features', {}).get('trend_strength', 0),
+                'liquidity_score': features.get('volume_features', {}).get('volume_trend', 0),
+                'market_regime': features.get('regime_features', {}).get('regime_score', 0)
+            }
+            
+            # Handle categorical encoding for market regime
+            regime_value = feature_mapping.get('market_regime', 0)
+            if isinstance(regime_value, str):
+                # Simple encoding for regime strings
+                regime_encoding = {
+                    'trend': 1, 'range': 0, 'breakout': 2, 
+                    'mean_reversion': -1, 'high_volatility': 3, 'low_volatility': -2
+                }
+                feature_mapping['market_regime'] = regime_encoding.get(regime_value.lower(), 0)
+            
+            # Create DataFrame
+            df = pd.DataFrame([feature_mapping])
+            
+            # Ensure all required columns exist
+            for col in self.feature_columns:
+                if col not in df.columns:
+                    df[col] = 0  # Default value for missing features
+            
+            # Select and order columns according to model expectations
+            df = df[self.feature_columns]
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error preparing features for prediction: {e}")
+            return pd.DataFrame()
+    
+    def _get_default_ml_result(self) -> Dict[str, Any]:
+        """Return default ML result when model unavailable"""
+        return {
+            'symbol': 'unknown',
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'buy_probability': 0.5,
+            'sell_probability': 0.5,
+            'confidence_score': 0.0,
+            'model_version': 'none',
+            'feature_importance': {},
+            'ml_enabled': False,
+            'prediction_successful': False
         }
     
     def calculate(self, option_chain):
