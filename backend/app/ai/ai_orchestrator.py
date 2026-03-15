@@ -22,6 +22,21 @@ from .drift_monitor import model_drift_monitor
 from .trade_planner import trade_planner
 from .news_event_engine import news_event_engine
 
+# Institutional Layer Integrations (backend/ai/)
+try:
+    from ai.dealer_gamma_engine import DealerGammaEngine
+    from ai.liquidity_engine import LiquidityEngine
+    from ai.gamma_squeeze_engine import GammaSqueezeEngine
+    from ai.options_trade_engine import generate_option_trade
+    from ai.entry_exit_engine import EntryExitEngine
+except ImportError:
+    # Fallback for different import paths
+    from ..ai.dealer_gamma_engine import DealerGammaEngine
+    from ..ai.liquidity_engine import LiquidityEngine
+    from ..ai.gamma_squeeze_engine import GammaSqueezeEngine
+    from ..ai.options_trade_engine import generate_option_trade
+    from ..ai.entry_exit_engine import EntryExitEngine
+
 logger = logging.getLogger(__name__)
 
 class AIOrchestrator:
@@ -33,7 +48,14 @@ class AIOrchestrator:
     def __init__(self, db_session=None):
         self.db_session = db_session
         self._last_cycle_time = 0
-        logger.info("Institutional AI Orchestrator initialized")
+        
+        # Initialize Institutional Engines
+        self.dealer_gamma = DealerGammaEngine()
+        self.liquidity_engine = LiquidityEngine()
+        self.gamma_squeeze = GammaSqueezeEngine()
+        self.entry_exit = EntryExitEngine()
+        
+        logger.info("Institutional AI Orcherstrator initialized with all engines")
 
     async def run_cycle(self, symbol: str, snapshot: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -65,9 +87,45 @@ class AIOrchestrator:
             # 4. Market Analysis (Regime + Bias + Levels)
             analysis = market_analysis_engine.analyze(fv, snapshot)
             
-            # 5. Early Warning Scan (Severity alerts)
-            alerts = early_warning_engine.scan(fv, snapshot, analysis)
+            # 4.1 Institutional Gamma Analysis (Law 1 Alignment)
+            gamma_metrics = {
+                "net_gamma": fv.net_gamma,
+                "gamma_flip_level": analysis.key_levels.get("gex_flip", 0),
+                "spot_price": snapshot.get("spot", 0)
+            }
+            inst_gamma = self.dealer_gamma.analyze(gamma_metrics)
             
+            # 4.2 Squeeze & Liquidity Scanning
+            inst_metrics = {
+                "spot": snapshot.get("spot", 0),
+                "net_gamma": fv.net_gamma,
+                "gamma_flip_level": analysis.key_levels.get("gex_flip", 0),
+                "distance_from_flip": abs(snapshot.get("spot", 0) - analysis.key_levels.get("gex_flip", 0)),
+                "flow_direction": "call" if fv.pcr_ratio < 0.8 else "put" if fv.pcr_ratio > 1.2 else "neutral",
+                "flow_imbalance": abs(1.0 - fv.pcr_ratio),
+                "oi_velocity": fv.oi_velocity if hasattr(fv, 'oi_velocity') else 0,
+                "volatility_regime": analysis.volatility_state.get("state", "normal"),
+                "support_level": analysis.key_levels.get("put_wall", 0),
+                "resistance_level": analysis.key_levels.get("call_wall", 0),
+                "expected_move": analysis.volatility_state.get("iv_atm", 0) * snapshot.get("spot", 0) * 0.02 # Proxy
+            }
+            squeeze_data = self.gamma_squeeze.analyze(inst_metrics)
+            liquidity_data = self.liquidity_engine.analyze(inst_metrics)
+
+            # 5. Early Warning Scan (Merge with institutional squeeze alerts)
+            alerts = early_warning_engine.scan(fv, snapshot, analysis)
+            if squeeze_data.get("signal") != "NONE":
+                from .early_warning_engine import EarlyWarningSignal
+                alerts.append(EarlyWarningSignal(
+                    alert_type="GAMMA_SQUEEZE",
+                    severity="HIGH" if squeeze_data.get("confidence", 0) > 0.7 else "MEDIUM",
+                    probability_move=squeeze_data.get("confidence", 0),
+                    direction_bias=squeeze_data.get("direction", "NEUTRAL"),
+                    description=squeeze_data.get("reason", ""),
+                    suggested_action="Prepare for rapid directional expansion",
+                    timestamp=int(time.time())
+                ))
+
             # 6. Confidence Scoring (Weighting conviction)
             confidence = confidence_scoring_engine.score(fv, view_5m, view_15m, analysis, alerts)
             
@@ -76,9 +134,24 @@ class AIOrchestrator:
             # Adjust confidence based on drift
             confidence = max(0.0, confidence * (1.0 - drift))
             
-            # 8. Trade Planning (Execution strategy)
+            # 8. Trade Planning (Execution strategy - Law 1 Alignment)
+            # Use institutional option trade engine for real strikes
+            opt_trade = generate_option_trade(snapshot, snapshot)
             plan = trade_planner.plan(symbol, analysis, confidence)
             
+            # Merge opt_trade into plan if available
+            if opt_trade:
+                plan_dict = plan.to_dict() if hasattr(plan, 'to_dict') else plan
+                plan_dict.update({
+                    "strike": opt_trade["strike"],
+                    "direction": opt_trade["option_type"],
+                    "entry": opt_trade["entry"],
+                    "stop_loss": opt_trade["stop_loss"],
+                    "target": opt_trade["target"],
+                    "reason": plan_dict.get("reason", []) + [opt_trade["signal_text"]]
+                })
+                plan = plan_dict
+
             # 9. News Event Engine (Institutional Sentiment Overlay)
             news_analysis = await news_event_engine.analyze(symbol)
             sentiment_overlay = {
@@ -87,7 +160,7 @@ class AIOrchestrator:
                 "status": news_analysis.get("status")
             }
             
-            # 10. Final Payload Assembly
+            # 10. Final Payload Assembly (Aligned with v5.0 Contract)
             elapsed_ms = (time.monotonic() - t0) * 1000
             self._last_cycle_time = elapsed_ms
             
@@ -95,17 +168,33 @@ class AIOrchestrator:
                 "symbol": symbol,
                 "timestamp": int(time.time()),
                 "status": "AI_READY",
+                "ai_ready": True,
                 "cycle_time_ms": round(elapsed_ms, 2),
-                "regime": analysis.regime,
-                "bias": analysis.bias,
-                "bias_strength": analysis.bias_strength,
+                
+                "market_analysis": {
+                    "regime": analysis.regime,
+                    "bias": analysis.bias,
+                    "bias_strength": analysis.bias_strength,
+                    "key_levels": analysis.key_levels,
+                    "gamma_analysis": {
+                        "net_gex": inst_gamma.get("strength") * (1 if inst_gamma.get("direction") == "UP" else -1) if inst_gamma.get("direction") != "NONE" else fv.net_gamma,
+                        "regime": inst_gamma.get("signal", "GAMMA_NEUTRAL"),
+                        "flip_level": analysis.key_levels.get("gex_flip"),
+                        "implication": inst_gamma.get("reason", "Stable positioning")
+                    },
+                    "volatility_state": analysis.volatility_state,
+                    "technical_state": {
+                        "rsi": fv.rsi if hasattr(fv, 'rsi') else 50.0,
+                        "momentum_15m": fv.momentum,
+                        "liquidity_signal": liquidity_data.get("signal", "NONE"),
+                        "pattern": analysis.regime
+                    },
+                    "summary": analysis.summary
+                },
+                
+                "early_warnings": [a.to_dict() if hasattr(a, 'to_dict') else a for a in alerts],
+                "trade_plan": plan if isinstance(plan, dict) else plan.to_dict(),
                 "confidence_score": round(confidence, 3),
-                "drift_score": round(drift, 3),
-                "key_levels": analysis.key_levels,
-                "early_warnings": [a.to_dict() for a in alerts],
-                "trade_plan": plan.to_dict() if hasattr(plan, 'to_dict') else plan,
-                "market_summary": f"{analysis.regime} market with {analysis.bias} bias",
-                "volatility_state": analysis.vol_state,
                 "sentiment_overlay": sentiment_overlay
             }
             

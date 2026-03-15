@@ -101,15 +101,23 @@ async def callback(code: str = Query(None), request: Request = None):
 
         logger.info("Upstox authentication successful")
 
-        # Start market feed asynchronously
         try:
-            from app.services.websocket_market_feed import start_market_feed
+            from app.services.websocket_market_feed import get_market_feed
+            feed = get_market_feed()
+            if feed:
+                if not feed._is_connected:
+                    logger.info("POST-AUTH: Reconnecting WebSocket feed...")
+                    asyncio.create_task(feed.ensure_connection())
+                    # Wait briefly for connection to establish
+                    await asyncio.sleep(2)
 
-            asyncio.create_task(start_market_feed())
-            logger.info("Market feed start task scheduled")
-
-        except Exception as feed_error:
-            logger.warning(f"Market feed auto start failed: {feed_error}")
+                # Trigger the subscription that was deferred due to 401
+                logger.info("POST-AUTH: Triggering pending subscription...")
+                asyncio.create_task(feed.trigger_pending_subscription())
+            else:
+                logger.warning("POST-AUTH: Market feed not initialized yet")
+        except Exception as e:
+            logger.error(f"POST-AUTH subscription trigger failed: {e}")
 
         clear_trace()
 

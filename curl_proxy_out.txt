@@ -1,1 +1,0 @@
-{"symbol":"NIFTY","strategy":"Bull Call Spread","direction":"CALL","trade_type":"BUY","strike":22400,"entry":22420,"target":22540,"stoploss":22380,"confidence":0.71,"lot_size":2,"expected_profit":7200,"expected_loss":2800,"risk_reward":2.5,"source":"SIMULATED_FALLBACK"}

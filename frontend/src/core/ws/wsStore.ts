@@ -20,6 +20,8 @@ interface WSStore {
   liveSpot: number
   currentSpot: number
   atmStrike: number
+  atm: number
+  symbol?: string
   lastUpdate: number
   marketData: any
   optionChainSnapshot: any
@@ -37,6 +39,32 @@ interface WSStore {
   candles: any[]
   _lastChainUpdate: number
   _THROTTLE_MS: number
+  
+  // Master Contract v5.0 Extended Fields
+  pcr: number
+  callWall: number
+  putWall: number
+  maxPain: number
+  gexFlip: number
+  netGex: number
+  ivAtm: number
+  ivPercentile: number
+  calls: Record<string, any>
+  puts: Record<string, any>
+  optionChain: any
+  regime: string
+  bias: string
+  biasStrength: number
+  keyLevels: any
+  gammaAnalysis: any
+  volState: any
+  technicals: any
+  summary: string
+  tradePlan: any
+  earlyWarnings: any[]
+  newsAlerts: any[]
+  paperTrading: any
+  
   handleMessage: (message: any) => void
   handleAnalytics: (analyticsPayload: any) => void
   setConnected: (v: boolean) => void
@@ -59,6 +87,7 @@ export const useWSStore = create<WSStore>((set, get) => ({
   liveSpot: 0,
   currentSpot: 0,
   atmStrike: 0,
+  atm: 0,
   marketData: null,
   optionChainSnapshot: null,
   liveData: null,
@@ -77,425 +106,344 @@ export const useWSStore = create<WSStore>((set, get) => ({
   _lastChainUpdate: 0,
   _THROTTLE_MS: 50,
 
+  // Master Contract v5.0 Extended State
+  pcr: 0,
+  callWall: 0,
+  putWall: 0,
+  maxPain: 0,
+  gexFlip: 0,
+  netGex: 0,
+  ivAtm: 0,
+  ivPercentile: 0,
+  calls: {},
+  puts: {},
+  optionChain: null,
+  regime: 'RANGING',
+  bias: 'NEUTRAL',
+  biasStrength: 0,
+  keyLevels: {},
+  gammaAnalysis: {},
+  volState: {},
+  technicals: {},
+  summary: '',
+  tradePlan: null,
+  earlyWarnings: [],
+  newsAlerts: [],
+  paperTrading: null,
+
   handleMessage: (message: any) => {
     if (!message) return
 
-    // STEP 3: DEBUG LOG
-    console.log("WS MESSAGE PROCESSED", message);
-
-    // Institutional Market Update (Elite Engine)
-    if (message.type === "market_update") {
-      const marketStore = useMarketContextStore.getState()
-      const selectedSymbol = marketStore?.symbol || 'NIFTY'
-      
-      if (message.symbol !== selectedSymbol) return
-
-      set({
-        spot: message.spotPrice,
-        spotPrice: message.spotPrice,
-        liveSpot: message.liveSpot,
-        currentSpot: message.currentSpot,
-        atmStrike: message.atmStrike,
-        aiIntelligence: message.aiIntelligence,
-        dataQuality: message.dataQuality,
-        aiReady: message.aiReady,
-        lastUpdate: Date.now(),
-        error: null
-      })
-      return
+    // STEP 5: RAW WS LOGGING
+    if (message.type !== 'pong' && message.type !== 'ping') {
+      console.log('RAW WS MESSAGE:', message.type, Object.keys(message));
     }
 
-    // Market status update
-    if (message.type === "market_status" && message.market_open !== undefined) {
-      set({
-        marketOpen: message.market_open,
-        marketStatus: message.status || (message.market_open ? "OPEN" : "CLOSED"),
-        error: null
-      })
-      return
-    }
+    const marketContextStore = useMarketContextStore.getState();
+    const selectedSymbol = marketContextStore?.symbol || 'NIFTY';
 
-    // AI Prediction
-    if (message.type === "ai_prediction") {
-      set({ aiPrediction: message, error: null })
-      return
-    }
-
-    // INDEX TICK — backend broadcasts this for NIFTY/BANKNIFTY spot price
-    if (message.type === "index_tick" && message.data) {
-      const tick = message.data
-      
-      // DEBUG: Log index tick details
-      console.log("INDEX TICK RECEIVED", {
-        messageSymbol: message.symbol,
-        tickSymbol: tick.symbol,
-        ltp: tick.ltp
-      })
-      
-      // PATCH 2: Filter WebSocket index ticks by selected symbol
-      const marketStore = useMarketContextStore.getState()
-      const selectedSymbol = marketStore?.symbol || 'NIFTY'
-      
-      // Use message.symbol instead of tick.symbol for filtering
-      if (message.symbol !== selectedSymbol) {
-        console.log("INDEX TICK FILTERED", {
-          messageSymbol: message.symbol,
-          selectedSymbol
-        })
-        return
-      }
-      
-      set({
-        spot: tick.ltp ?? 0,
-        spotPrice: tick.ltp ?? 0,
-        liveSpot: tick.ltp ?? 0,
-        currentSpot: tick.ltp ?? 0,
-        lastUpdate: Date.now(),
-        liveData: { ...tick, symbol: message.symbol, spot_price: tick.ltp },
-        wsLiveData: { ...tick, symbol: message.symbol, spot_price: tick.ltp },
-        error: null
-      })
-      return
-    }
-
-    // OPTION TICK — individual option price updates
-    if (message.type === "option_tick" && message.data) {
-      const tick = message.data
-      
-      // PERFORMANCE: Filter by selected symbol to prevent unnecessary updates
-      const marketStore = useMarketContextStore.getState()
-      const selectedSymbol = marketStore?.symbol || 'NIFTY'
-      
-      if (message.symbol !== selectedSymbol) {
-        console.log("OPTION TICK FILTERED", {
-          messageSymbol: message.symbol,
-          selectedSymbol
-        })
-        return
-      }
-      
-      // DEBUG: Log option tick details
-      console.log("OPTION TICK RECEIVED", {
-        symbol: message.symbol,
-        strike: tick.strike,
-        right: tick.right,
-        ltp: tick.ltp,
-        oi: tick.oi
-      })
-      
-      // Update option chain with individual tick data
-      const currentData = get().marketData || {}
-      
-      // PERFORMANCE: Avoid expensive spread on large objects
-      // Only update the specific strike that changed
-      const strikeKey = tick.strike
-      const optionType = tick.right === 'CE' ? 'CE' : 'PE'
-      
-      // Check if data actually changed to avoid unnecessary updates
-      const currentOption = currentData[strikeKey]?.[optionType]
-      if (currentOption && 
-          currentOption.ltp === tick.ltp && 
-          currentOption.oi === (tick.oi || 0) && 
-          currentOption.volume === (tick.volume || 0)) {
-        // No change, skip update
-        return
-      }
-      
-      // Create new object with only the updated strike
-      const updatedData = {
-        ...currentData,
-        [strikeKey]: {
-          ...currentData[strikeKey],
-          [optionType]: {
-            strike: tick.strike,
-            right: tick.right,
-            ltp: tick.ltp,
-            oi: tick.oi || 0,
-            volume: tick.volume || 0
-          }
+    switch (message.type) {
+      case 'market_update': {
+        const now = Date.now()
+        if (now - get()._lastChainUpdate < get()._THROTTLE_MS) {
+          return
         }
-      }
-      
-      set({
-        marketData: updatedData,
-        lastUpdate: Date.now(),
-        error: null
-      })
-      return
-    }
+        const p = message;
+        if (p.symbol && p.symbol !== selectedSymbol) return;
 
-    // OPTION CHAIN UPDATE — backend broadcasts this every 500ms from option_chain_builder
-    if (message.type === "option_chain_update" && message.data) {
-      const now = Date.now()
-      const store = get()
+        // Extract spot from any alias
+        const spotRaw = p.spot ?? p.spotPrice ?? p.liveSpot ?? p.currentSpot ?? 0;
+        const spot = typeof spotRaw === 'number' && spotRaw > 0 ? spotRaw : 0;
 
-      // PERFORMANCE: Filter by selected symbol to prevent unnecessary updates
-      const marketStore = useMarketContextStore.getState()
-      const selectedSymbol = marketStore?.symbol || 'NIFTY'
-      
-      if (message.symbol !== selectedSymbol) {
-        console.log("OPTION CHAIN UPDATE FILTERED", {
-          messageSymbol: message.symbol,
-          selectedSymbol
-        })
-        return
-      }
-
-      // DEBUG: Log option chain update details
-      console.log("OPTION CHAIN UPDATE RECEIVED", {
-        symbol: message.symbol,
-        spot: message.spot,
-        strikesCount: message.strikesCount,
-        timestamp: message.timestamp
-      })
-
-      if (now - store._lastChainUpdate < store._THROTTLE_MS) {
-        console.log("OPTION CHAIN UPDATE THROTTLED")
-        return
-      }
-
-      // Update market context if symbol changed
-      const marketContextStore = useMarketContextStore.getState()
-      if (message.symbol !== marketContextStore.symbol) {
-        marketContextStore.setSymbol(message.symbol)
-        console.log("SYMBOL CONTEXT UPDATED", message.symbol)
-      }
-      if (message.expiry && message.expiry !== marketContextStore.expiry) {
-        marketContextStore.setExpiry(message.expiry)
-        console.log("EXPIRY CONTEXT UPDATED", message.expiry)
-      }
-
-      set({
-        spot: message.spot ?? 0,
-        marketData: message.data,
-        optionChainSnapshot: message.data,
-        lastUpdate: now,
-        _lastChainUpdate: now,
-        error: null
-      })
-      return
-    }
-
-    // HEATMAP UPDATE — backend broadcasts this every 3s from oi_heatmap_engine
-    if (message.type === "heatmap_update") {
-      // heatmap data is forwarded via optionChainSnapshot for OIHeatmap component
-      const data = message.data
-      if (data) {
-        set({ marketData: { ...get().marketData, heatmap: data }, error: null })
-      }
-      return
-    }
-
-    // Market tick (legacy format)
-    if (message.type === "market_tick" && message.data) {
-      const tick = message.data
-      set({
-        spot: tick.ltp ?? 0,
-        lastUpdate: Date.now(),
-        liveData: tick,
-        wsLiveData: tick,
-        error: null
-      })
-      return
-    }
-
-    // Market data with spot price (legacy format)
-    if (message.type === "market_data" && message.spot !== undefined) {
-      set({
-        spot: message.spot,
-        lastUpdate: Date.now(),
-        marketData: message,
-        liveData: message,
-        wsLiveData: message,
-        error: null
-      })
-      return
-    }
-
-    // Market data with direct ltp (fallback)
-    if (message.type === "market_data" && message.ltp !== undefined) {
-      set({
-        spot: message.ltp,
-        lastUpdate: Date.now(),
-        liveData: message,
-        wsLiveData: message,
-        error: null
-      })
-      return
-    }
-
-    // STEP 1: HANDLE TICK MESSAGE
-    if (message.type === "tick") {
-      // ADD SAFETY
-      if (!message.ltp) {
-        console.warn("Tick missing LTP", message)
-        return
-      }
-      
-      set({
-        liveData: {
-          spot_price: message.ltp,
-          timestamp: Date.now()
+        // Log every message so we can verify it's arriving
+        if (process.env.NODE_ENV === 'development') {
+          console.log(
+            '[wsStore] market_update |',
+            'spot=', spot,
+            'pcr=', p.option_chain?.pcr,
+            'calls=', Object.keys(p.option_chain?.calls || {}).length,
+            'ai_ready=', p.ai_ready
+          );
         }
-      })
-      return
-    }
 
-    // STEP 2: HANDLE SNAPSHOT MESSAGE
-    if (message.type === "snapshot") {
-      set({
-        optionChainSnapshot: message.data
-      })
-      return
-    }
+        set((prev) => ({
+          // SPOT — all aliases
+          spot: spot > 0 ? spot : prev.spot,
+          spotPrice:    spot > 0 ? spot : prev.spotPrice,
+          liveSpot:     spot > 0 ? spot : prev.liveSpot,
+          currentSpot:  spot > 0 ? spot : prev.currentSpot,
 
-    // Chain update (legacy format)
-    if (message.type === "chain_update" && message.data) {
-      const now = Date.now()
-      const store = get()
+          // Core
+          atm:          p.atm       ?? prev.atm,
+          symbol:       p.symbol    ?? prev.symbol,
+          lastUpdate:   p.timestamp ?? Date.now(),
+          aiReady:      p.ai_ready  ?? p.aiReady ?? prev.aiReady,
 
-      if (now - store._lastChainUpdate < store._THROTTLE_MS) {
-        return
+          // Option chain fields
+          pcr:          p.option_chain?.pcr           ?? prev.pcr,
+          callWall:     p.option_chain?.call_wall      ?? prev.callWall,
+          putWall:      p.option_chain?.put_wall       ?? prev.putWall,
+          maxPain:      p.option_chain?.max_pain       ?? prev.maxPain,
+          gexFlip:      p.option_chain?.gex_flip       ?? prev.gexFlip,
+          netGex:       p.option_chain?.net_gex        ?? prev.netGex,
+          ivAtm:        p.option_chain?.iv_atm         ?? prev.ivAtm,
+          ivPercentile: p.option_chain?.iv_percentile  ?? prev.ivPercentile,
+          calls: {
+            ...(prev.calls || {}),
+            ...(p.option_chain?.calls || {})
+          },
+
+          puts: {
+            ...(prev.puts || {}),
+            ...(p.option_chain?.puts || {})
+          },
+          optionChain:  p.option_chain                 ?? prev.optionChain,
+
+          // AI analysis — accept both key names
+          regime:        (p.market_analysis ?? p.aiIntelligence)?.regime          ?? prev.regime,
+          bias:          (p.market_analysis ?? p.aiIntelligence)?.bias            ?? prev.bias,
+          biasStrength:  (p.market_analysis ?? p.aiIntelligence)?.bias_strength   ?? prev.biasStrength,
+          keyLevels:     (p.market_analysis ?? p.aiIntelligence)?.key_levels      ?? prev.keyLevels,
+          gammaAnalysis: (p.market_analysis ?? p.aiIntelligence)?.gamma_analysis  ?? prev.gammaAnalysis,
+          volState:      (p.market_analysis ?? p.aiIntelligence)?.volatility_state ?? prev.volState,
+          technicals:    (p.market_analysis ?? p.aiIntelligence)?.technical_state  ?? prev.technicals,
+          summary:       (p.market_analysis ?? p.aiIntelligence)?.summary          ?? prev.summary,
+
+          // Plans and alerts
+          tradePlan:     p.trade_plan     ?? prev.tradePlan,
+          earlyWarnings: Array.isArray(p.early_warnings) ? p.early_warnings : prev.earlyWarnings ?? [],
+          newsAlerts:    Array.isArray(p.news_alerts)    ? p.news_alerts    : prev.newsAlerts    ?? [],
+          paperTrading:  p.paper_trading  ?? prev.paperTrading,
+
+          // Data quality
+          dataQuality: {
+            hasSpot:    spot > 0,
+            hasOi:      (p.option_chain?.call_wall ?? 0) > 0,
+            hasGreeks:  (p.option_chain?.iv_atm    ?? 0) > 0,
+            aiReady:    p.ai_ready ?? false,
+            lastUpdate: Date.now(),
+            source:     spot > 0 ? 'live' : 'rest_poller',
+          },
+          _lastChainUpdate: now
+        }));
+        break;
       }
 
-      const data = message.data
-      set({
-        spot: data.spot ?? 0,
-        marketData: data,
-        optionChainSnapshot: data,
-        lastUpdate: now,
-        _lastChainUpdate: now,
-        error: null
-      })
-      return
-    }
+      case 'analytics_update': {
+        const a = message.analytics || {}
+        const spot = a.spot || a.spotPrice || message.spot || 0
 
-    // ANALYTICS UPDATE — from analytics_broadcaster
-    if (message.type === "analytics_update") {
-      get().handleAnalytics(message);
-      return
-    }
+        set((prev) => ({
+          spotPrice:    spot > 0 ? spot : prev.spotPrice,
+          liveSpot:     spot > 0 ? spot : prev.liveSpot,
+          currentSpot:  spot > 0 ? spot : prev.currentSpot,
+          lastUpdate:   message.timestamp || Date.now(),
+          aiReady:      true,
 
-    // INTELLIGENCE UPDATE — from LiveStructuralEngine
-    if (message.type === "intelligence_update" && message.intelligence) {
-      set({
-        analytics: { ...get().analytics, intelligence: message.intelligence },
-        lastUpdate: Date.now(),
-        error: null
-      })
-      return
-    }
-
-    // METRICS UPDATE — fallback from LiveStructuralEngine when AI pipeline fails
-    if (message.type === "metrics_update") {
-      set({
-        spot: message.spot ?? get().spot,
-        lastUpdate: Date.now(),
-        error: null
-      })
-      return
-    }
-
-    // AI SIGNAL — from LiveStructuralEngine signal generator
-    if (message.type === "ai_signal") {
-      set({
-        analytics: { ...get().analytics, ai_signals: message.signals },
-        lastUpdate: Date.now(),
-        error: null
-      })
-      return
-    }
-
-    // Raw option chain
-    if (message.calls && message.puts) {
-      const now = Date.now()
-      const store = get()
-
-      if (now - store._lastChainUpdate < store._THROTTLE_MS) {
-        return
+          // Map from analytics object
+          regime:        a.regime         || a.market_regime   || prev.regime        || 'RANGING',
+          bias:          a.bias           || a.market_bias     || prev.bias          || 'NEUTRAL',
+          biasStrength:  a.bias_strength  || a.confidence      || prev.biasStrength  || 0,
+          keyLevels:     a.key_levels     || a.levels          || prev.keyLevels     || {},
+          gammaAnalysis: a.gamma_analysis || a.gamma           || prev.gammaAnalysis || {},
+          volState:      a.volatility_state || a.volatility    || prev.volState      || {},
+          technicals:    a.technical_state  || a.technicals    || prev.technicals    || {},
+          summary:       a.summary        || prev.summary      || '',
+          tradePlan:     a.trade_plan     || a.signal          || prev.tradePlan     || null,
+          earlyWarnings: Array.isArray(a.early_warnings) ? a.early_warnings :
+                         Array.isArray(a.warnings)       ? a.warnings       :
+                         prev.earlyWarnings || [],
+        }));
+        break;
       }
 
-      set({
-        spot: message.spot ?? 0,
-        marketData: message,
-        optionChainSnapshot: message,
-        lastUpdate: now,
-        _lastChainUpdate: now,
-        error: null
-      })
-      return
-    }
+      case 'option_chain_update': {
+        if (message.symbol === selectedSymbol) {
+          const p = message
+          const spot = p.spot || 0
 
-    // ADVANCED STRATEGIES — Step 14 (SMC, ICT, CRT, MSNR)
-    if (message.type === "advanced_strategies") {
-      // ADVANCED STRATEGIES — Step 14: only update if symbol or content changed
-      const prevAdv = get().advancedStrategies
-      if (
-        !prevAdv ||
-        prevAdv.symbol !== message.symbol ||
-        prevAdv.timestamp !== message.timestamp
-      ) {
+          set((prev) => ({
+            spotPrice:    spot > 0 ? spot : prev.spotPrice,
+            liveSpot:     spot > 0 ? spot : prev.liveSpot,
+            currentSpot:  spot > 0 ? spot : prev.currentSpot,
+            atm:          p.atm    || prev.atm,
+            lastUpdate:   p.timestamp || Date.now(),
+
+            pcr:          p.pcr    || prev.pcr,
+            calls:        p.calls  || prev.calls || {},
+            puts:         p.puts   || prev.puts  || {},
+            optionChain: {
+              ...(prev.optionChain || {}),
+              pcr:    p.pcr    || prev.optionChain?.pcr,
+              calls:  p.calls  || prev.optionChain?.calls || {},
+              puts:   p.puts   || prev.optionChain?.puts || {},
+              atm:    p.atm    || prev.optionChain?.atm,
+              spot:   spot     || prev.optionChain?.spot,
+            },
+          }));
+        }
+        break;
+      }
+
+      case 'market_status': {
+        if (message.market_open !== undefined) {
+          set({
+            marketOpen: message.market_open,
+            marketStatus: message.status || (message.market_open ? "OPEN" : "CLOSED"),
+            error: null
+          });
+        }
+        break;
+      }
+
+      case 'ai_prediction':
+        set({ aiPrediction: message, error: null });
+        break;
+
+      case 'index_tick': {
+        const tick = message.data;
+        if (message.symbol === selectedSymbol && tick) {
+          set({
+            spot: tick.ltp ?? 0,
+            spotPrice: tick.ltp ?? 0,
+            liveSpot: tick.ltp ?? 0,
+            currentSpot: tick.ltp ?? 0,
+            lastUpdate: Date.now(),
+            liveData: { ...tick, symbol: message.symbol, spot_price: tick.ltp },
+            wsLiveData: { ...tick, symbol: message.symbol, spot_price: tick.ltp },
+            error: null
+          });
+        }
+        break;
+      }
+
+      case 'option_tick': {
+        const tick = message.data;
+        if (message.symbol === selectedSymbol && tick) {
+          const currentData = get().marketData || {};
+          const strikeKey = tick.strike;
+          const optionType = tick.right === 'CE' ? 'CE' : 'PE';
+          
+          const updatedData = {
+            ...currentData,
+            [strikeKey]: {
+              ...currentData[strikeKey],
+              [optionType]: {
+                strike: tick.strike,
+                right: tick.right,
+                ltp: tick.ltp,
+                oi: tick.oi || 0,
+                volume: tick.volume || 0
+              }
+            }
+          };
+          
+          set({
+            marketData: updatedData,
+            lastUpdate: Date.now(),
+            error: null
+          });
+        }
+        break;
+      }
+
+      case 'heatmap_update': {
+        const data = message.data;
+        if (data) {
+          set({ marketData: { ...get().marketData, heatmap: data }, error: null });
+        }
+        break;
+      }
+
+      case 'market_tick':
+      case 'market_data':
+      case 'tick': {
+        const spot = message.spot ?? message.ltp ?? message.data?.ltp ?? 0;
+        if (spot > 0) {
+          set({
+            spot,
+            spotPrice: spot,
+            liveSpot: spot,
+            currentSpot: spot,
+            lastUpdate: Date.now(),
+            error: null
+          });
+        }
+        break;
+      }
+
+      case 'intelligence_update':
+        if (message.intelligence) {
+          set({
+            analytics: { ...get().analytics, intelligence: message.intelligence },
+            lastUpdate: Date.now(),
+            error: null
+          });
+        }
+        break;
+
+      case 'metrics_update':
+        set({
+          spot: message.spot ?? get().spot,
+          lastUpdate: Date.now(),
+          error: null
+        });
+        break;
+
+      case 'ai_signal':
+        set({
+          analytics: { ...get().analytics, ai_signals: message.signals },
+          lastUpdate: Date.now(),
+          error: null
+        });
+        break;
+
+      case 'advanced_strategies':
         set({
           advancedStrategies: message,
           analytics: { ...get().analytics, advanced_strategies: message },
           lastUpdate: Date.now(),
           error: null
-        })
-      }
-      return
-    }
+        });
+        break;
 
-    // SIGNAL SCORE — Step 15: only update if score meaningfully changed
-    if (message.type === "signal_score") {
-      const prevScore = get().signalScore
-      const scoreDelta = Math.abs((prevScore?.score ?? -1) - (message.score ?? 0))
-      if (
-        !prevScore ||
-        prevScore.symbol !== message.symbol ||
-        scoreDelta >= 0.5 ||
-        prevScore.bias !== message.bias
-      ) {
+      case 'signal_score':
         set({
           signalScore: message,
           analytics: { ...get().analytics, signal_score: message },
           lastUpdate: Date.now(),
           error: null
-        })
-      }
-      return
-    }
+        });
+        break;
 
-    // CHART ANALYSIS — from chart_signal_engine
-    if (message.type === "chart_analysis") {
-      const prev = get().chartAnalysis
-      // Dedup: only update if timestamp or signal changed
-      if (!prev || prev.timestamp !== message.timestamp || prev.signal !== message.signal) {
+      case 'chart_analysis':
         set({
           chartAnalysis: message,
           lastUpdate: Date.now(),
           error: null
-        })
-      }
-      return
-    }
+        });
+        break;
 
-    // CANDLE DATA — from candle_builder
-    if (message.type === "candle_data") {
-      set({
-        candles: message.candles || [],
-        lastUpdate: Date.now(),
-        error: null
-      })
-      return
-    }
+      case 'candle_data':
+        set({
+          candles: message.candles || [],
+          lastUpdate: Date.now(),
+          error: null
+        });
+        break;
 
-    // Silently ignore known server ack/control messages
-    const silenced = ['subscribed', 'unsubscribed', 'pong', 'ping', 'ack']
-    if (silenced.includes(message.type)) return
+      case 'subscribed':
+        console.log('✅ Subscribed to', message.symbol);
+        break;
 
-    // Unknown — log in dev only, do not pollute error state
-    if (process.env.NODE_ENV === "development") {
-      console.warn("⚠️ WS UNKNOWN MESSAGE TYPE:", message.type)
+      default:
+        // Silently skip control messages
+        if (!['pong', 'ping', 'ack'].includes(message.type)) {
+          if (process.env.NODE_ENV === "development") {
+            console.warn("⚠️ WS UNKNOWN MESSAGE TYPE:", message.type);
+          }
+        }
+        break;
     }
   },
 

@@ -10,186 +10,175 @@ interface BiasAndMoveProps {
     isSnapshotMode: boolean;
 }
 
-export function BiasPanel({ data }: { data: LiveMarketData | null }) {
-    const biasLabel = (data as any)?.intelligence?.bias?.label;
-    const biasScore = (data as any)?.intelligence?.bias?.score ?? 0;
+import { useWSStore } from '../../core/ws/wsStore';
 
-    const getBiasConfig = (label: string) => {
-        switch (label?.toUpperCase()) {
-            case 'BULLISH':
-                return { color: '#4ade80', bgColor: 'rgba(34,197,94,0.12)', borderColor: 'rgba(34,197,94,0.25)', bgGradient: 'linear-gradient(90deg, #166534, #4ade80)' };
-            case 'BEARISH':
-                return { color: '#f87171', bgColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.25)', bgGradient: 'linear-gradient(90deg, #991b1b, #f87171)' };
-            default:
-                return { color: '#94a3b8', bgColor: 'rgba(148,163,184,0.08)', borderColor: 'rgba(148,163,184,0.18)', bgGradient: 'linear-gradient(90deg, #334155, #94a3b8)' };
-        }
-    };
+// Skeleton Pulse for professional loading states
+const SkeletonPulse = ({ className }: { className: string }) => (
+    <div className={`animate-pulse bg-white/5 rounded-md ${className}`} />
+);
 
-    const config = getBiasConfig(biasLabel);
+export function BiasPanel() {
+    // Law 7: Granular Store Subscriptions
+    const aiReady = useWSStore(s => s.aiReady);
+    const analysis = useWSStore(s => s.chartAnalysis);
+    const lastUpdate = useWSStore(s => s.lastUpdate);
+    const hasData = lastUpdate > 0;
+    
+    // v5.0 Bias state
+    const biasLabel = analysis?.bias || 'NEUTRAL';
+    const biasScore = analysis?.bias_strength || 0;
+
+    if (!hasData) {
+        return (
+            <div className="trading-panel h-full flex flex-col p-6 opacity-40">
+                 <div className="flex items-center justify-between mb-8">
+                    <SectionLabel>Market Bias</SectionLabel>
+                    <SkeletonPulse className="w-16 h-5" />
+                </div>
+                <div className="space-y-4">
+                    <SkeletonPulse className="w-full h-16" />
+                    <SkeletonPulse className="w-full h-12" />
+                </div>
+            </div>
+        );
+    }
+
+    const isBullish = biasLabel === 'BULLISH';
+    const isBearish = biasLabel === 'BEARISH';
+    const configColor = isBullish ? '#4ade80' : isBearish ? '#f87171' : '#94a3b8';
 
     return (
         <div
-            className="trading-panel h-full"
-            onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = CARD_HOVER_BORDER;
-            }}
-            onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)';
-            }}
+            className="trading-panel h-full flex flex-col"
+            onMouseEnter={e => { e.currentTarget.style.borderColor = CARD_HOVER_BORDER; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)'; }}
         >
             <div className="flex items-center justify-between mb-5">
-                <SectionLabel>Market Bias</SectionLabel>
-                <span
-                    className="text-[10px] font-bold font-mono tracking-widest px-3 py-1 rounded-full border uppercase"
-                    style={{ background: config.bgColor, borderColor: config.borderColor, color: config.color, boxShadow: `0 0 10px ${config.color}15` }}
-                >
-                    {biasLabel ?? 'HOLD'}
+                <SectionLabel>Directional Bias</SectionLabel>
+                <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full border border-white/10 bg-white/5`}>
+                    <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: configColor }} />
+                    <span className="text-[10px] font-black font-mono tracking-widest uppercase" style={{ color: configColor }}>{biasLabel}</span>
+                </div>
+            </div>
+
+            <div className="flex-grow flex flex-col justify-center gap-6">
+                <div className="p-4 rounded-xl bg-white/[0.03] border border-white/10">
+                    <div className="flex justify-between items-center mb-3">
+                         <span className="text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest">Strength Matrix</span>
+                         <span className="text-lg font-black font-mono tabular-nums text-white">{(biasScore * 100).toFixed(1)}%</span>
+                    </div>
+                    <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                         <div 
+                            className="h-full transition-all duration-1000" 
+                            style={{ 
+                                width: `${biasScore * 100}%`, 
+                                background: `linear-gradient(90deg, transparent, ${configColor})` 
+                            }} 
+                        />
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                    <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5">
+                        <div className="text-[8px] font-bold font-mono text-slate-600 uppercase mb-1">Conviction</div>
+                        <div className="text-[10px] font-black font-mono text-white/80 uppercase">
+                            {biasScore > 0.8 ? 'INSTITUTIONAL' : biasScore > 0.5 ? 'STRUCTURAL' : 'NOISE'}
+                        </div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5">
+                        <div className="text-[8px] font-bold font-mono text-slate-600 uppercase mb-1">Flow Signal</div>
+                        <div className="text-[10px] font-black font-mono text-white/80 uppercase">
+                            {isBullish ? 'AGGRESSIVE BUY' : isBearish ? 'AGGRESSIVE SELL' : 'NEUTRAL'}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+export function ExpectedMovePanel() {
+    const aiReady = useWSStore(s => s.aiReady);
+    const lastUpdate = useWSStore(s => s.lastUpdate);
+    const hasData = lastUpdate > 0;
+    const spot = useWSStore(s => s.spot);
+    const analysis = useWSStore(s => s.chartAnalysis);
+    
+    const vol = analysis?.volatility_state;
+    const expectedMove = vol?.expected_move || 0;
+    const breachProb = vol?.breach_probability || 0;
+
+    if (!hasData || spot === 0) {
+        return (
+            <div className="trading-panel h-full flex flex-col p-6 opacity-40">
+                 <SectionLabel>Expected Move (1σ)</SectionLabel>
+                 <div className="mt-8 space-y-6">
+                    <SkeletonPulse className="w-full h-12" />
+                    <SkeletonPulse className="w-full h-16" />
+                 </div>
+            </div>
+        );
+    }
+
+    const lower = spot - expectedMove;
+    const upper = spot + expectedMove;
+
+    return (
+        <div
+            className="trading-panel h-full flex flex-col"
+            onMouseEnter={e => { e.currentTarget.style.borderColor = CARD_HOVER_BORDER; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)'; }}
+        >
+            <div className="flex items-center justify-between mb-6">
+                <SectionLabel>Probabilistic Range (1σ)</SectionLabel>
+                <div className="flex items-center gap-2">
+                    <span className="text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest">
+                        Exp Move: ₹{expectedMove.toFixed(1)}
+                    </span>
+                </div>
+            </div>
+
+            <div className="flex-grow flex flex-col justify-center">
+                <div className="grid grid-cols-2 gap-4 mb-8">
+                    <div className="p-4 rounded-xl bg-red-500/[0.03] border border-red-500/10">
+                        <div className="text-[8px] font-bold font-mono text-red-400/60 uppercase mb-1">Lower Deviation</div>
+                        <div className="text-xl font-black font-mono tabular-nums text-red-400">₹{typeof lower === 'number' && lower > 0 ? lower.toLocaleString() : '—'}</div>
+                    </div>
+                    <div className="p-4 rounded-xl bg-green-500/[0.03] border border-green-500/10">
+                        <div className="text-[8px] font-bold font-mono text-green-400/60 uppercase mb-1">Upper Deviation</div>
+                        <div className="text-xl font-black font-mono tabular-nums text-green-400">₹{typeof upper === 'number' && upper > 0 ? upper.toLocaleString() : '—'}</div>
+                    </div>
+                </div>
+
+                {/* Spot Progress Visual */}
+                <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 mb-6">
+                    <div className="flex justify-between items-center mb-3">
+                        <span className="text-[9px] font-bold font-mono text-slate-500 uppercase">Atmospheric Spot Position</span>
+                        <span className="text-xs font-black font-mono text-white">₹{typeof spot === 'number' && spot > 0 ? spot.toLocaleString() : '—'}</span>
+                    </div>
+                    <div className="relative h-1 w-full bg-white/5 rounded-full">
+                         <div className="absolute top-1/2 left-1/2 -translate-y-1/2 w-0.5 h-3 bg-white/20" />
+                         <div 
+                            className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_10px_#3b82f6]" 
+                            style={{ left: '50%', transform: 'translate(-50%, -50%)' }}
+                        />
+                    </div>
+                </div>
+            </div>
+
+            {/* Breach Risk */}
+            <div className="mt-auto pt-4 border-t border-white/5 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                    <AlertTriangle size={12} className={breachProb > 0.4 ? 'text-orange-400 animate-pulse' : 'text-slate-600'} />
+                    <span className="text-[9px] font-bold font-mono text-slate-600 uppercase tracking-tighter">Expansion Risk Factor</span>
+                </div>
+                <span className="text-[12px] font-black font-mono tabular-nums" style={{ color: breachProb > 0.4 ? '#fb923c' : '#4ade80' }}>
+                    {(breachProb * 100).toFixed(0)}%
                 </span>
             </div>
-
-            <div className="mb-6 rounded-xl p-4 transition-all hover:bg-white/5" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)' }}>
-                <div className="flex justify-between items-center mb-3">
-                    <span className="text-[10px] font-bold font-mono tracking-wider uppercase text-slate-500">
-                        Strength Score
-                    </span>
-                    <span className="text-[16px] font-bold font-mono text-white tabular-nums">
-                        {Math.abs(biasScore).toFixed(1)}
-                    </span>
-                </div>
-                <div className="w-full h-1.5 rounded-full overflow-hidden bg-white/5">
-                    <div
-                        className="h-full rounded-full transition-all duration-1000 ease-out"
-                        style={{
-                            width: `${Math.min(100, Math.abs(biasScore) * 10)}%`,
-                            background: config.bgGradient,
-                            boxShadow: `0 0 8px ${config.color}30`
-                        }}
-                    />
-                </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 mt-auto">
-                {[
-                    { label: 'CONFIDENCE', value: Math.abs(biasScore) > 0.7 ? 'HIGH' : Math.abs(biasScore) > 0.4 ? 'MED' : 'LOW', color: Math.abs(biasScore) > 0.7 ? '#4ade80' : '#fb923c' },
-                    { label: 'FLOW', value: biasLabel === 'BULLISH' ? 'BUYING' : biasLabel === 'BEARISH' ? 'SELLING' : 'FLAT', color: '#fff' },
-                ].map(({ label, value, color }) => (
-                    <div
-                        key={label}
-                        className="rounded-xl p-3 flex flex-col gap-1 transition-all hover:bg-white/5"
-                        style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
-                    >
-                        <div className="text-[9px] font-bold font-mono tracking-widest text-slate-500 uppercase">{label}</div>
-                        <div className="text-[12px] font-bold font-mono tracking-tight uppercase" style={{ color }}>{value}</div>
-                    </div>
-                ))}
-            </div>
         </div>
     );
 }
 
-export function ExpectedMovePanel({ data, isSnapshotMode }: { data: LiveMarketData | null; isSnapshotMode: boolean }) {
-    const spot = (data as any)?.spot ?? 0;
-    const expectedMove = (data as any)?.intelligence?.probability?.expected_move ?? 0;
-    const breachProbability = (data as any)?.intelligence?.probability?.breach_probability ?? 0;
-
-    return (
-        <div
-            className="trading-panel h-full"
-            onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = CARD_HOVER_BORDER;
-            }}
-            onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)';
-            }}
-        >
-            <div className="flex items-center justify-between mb-5">
-                <SectionLabel>Expected Move Range</SectionLabel>
-                {isSnapshotMode && (
-                    <span className="text-[9px] font-bold font-mono px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 tracking-widest uppercase">
-                        RESTRICTED MODE
-                    </span>
-                )}
-            </div>
-
-            <div className="space-y-6">
-                {/* Lower Bound */}
-                <div className="relative">
-                    <div className="flex items-center justify-between mb-3 px-1">
-                        <div className="flex flex-col">
-                            <span className="text-[10px] font-bold font-mono tracking-widest text-slate-500 uppercase">Lower Target (1σ)</span>
-                            <span className="text-[20px] font-bold font-mono text-red-400 tracking-tighter tabular-nums">
-                                {(spot - expectedMove).toFixed(2)}
-                            </span>
-                        </div>
-                        <div className="h-10 w-px bg-white/5" />
-                        <div className="flex flex-col items-end">
-                            <span className="text-[10px] font-bold font-mono tracking-widest text-slate-500 uppercase text-right">Upper Target (1σ)</span>
-                            <span className="text-[20px] font-bold font-mono text-green-400 tracking-tighter tabular-nums text-right">
-                                {(spot + expectedMove).toFixed(2)}
-                            </span>
-                        </div>
-                    </div>
-
-                    <div className="relative h-4 rounded-full overflow-hidden border border-white/5" style={{ background: 'rgba(0,0,0,0.3)' }}>
-                        <div
-                            className="absolute inset-0 opacity-40"
-                            style={{
-                                background: 'linear-gradient(90deg, #f87171, rgba(99,102,241,0.2) 50%, #4ade80)'
-                            }}
-                        />
-                        <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 flex items-center z-10">
-                            <div className="w-1 h-full bg-white shadow-[0_0_8px_white]" />
-                        </div>
-                    </div>
-                    <div className="flex justify-center mt-2">
-                        <span className="text-[10px] font-bold font-mono text-slate-400 tracking-widest uppercase bg-white/5 px-2 py-0.5 rounded">
-                            CURRENT SPOT: {spot.toFixed(2)}
-                        </span>
-                    </div>
-                </div>
-
-                {/* Risk Indicator */}
-                <div className="pt-4 border-t border-white/5 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-lg bg-orange-500/10 border border-orange-500/20">
-                            <AlertTriangle className="w-4 h-4 text-orange-400" />
-                        </div>
-                        <div className="flex flex-col">
-                            <span className="text-[10px] font-bold font-mono tracking-widest text-slate-500 uppercase">Breach Risk</span>
-                            <span className="text-[11px] font-mono text-slate-400 italic">Expansion beyond expected σ range</span>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                        <div className="w-20 h-1.5 rounded-full bg-white/5 overflow-hidden">
-                            <div
-                                className="h-full rounded-full transition-all duration-1000 ease-out"
-                                style={{
-                                    width: `${breachProbability}%`,
-                                    background: breachProbability > 40 ? 'linear-gradient(90deg, #fb923c, #f87171)' : 'linear-gradient(90deg, #1e293b, #fb923c)'
-                                }}
-                            />
-                        </div>
-                        <span className="text-[14px] font-bold font-mono text-white tracking-tight tabular-nums">
-                            {breachProbability.toFixed(0)}%
-                        </span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-// Keeping the combined component for compatibility if needed, but exports components separately
-export function BiasAndMove({ data, isSnapshotMode }: BiasAndMoveProps) {
-    return (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 h-full">
-            <div className="lg:col-span-4 h-full">
-                <BiasPanel data={data} />
-            </div>
-            <div className="lg:col-span-8 h-full">
-                <ExpectedMovePanel data={data} isSnapshotMode={isSnapshotMode} />
-            </div>
-        </div>
-    );
-}
+// Separate components exported individually for maximum layout flexibility
 

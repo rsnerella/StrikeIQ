@@ -120,6 +120,28 @@ class PollerService:
                     logger.warning("Option chain REST returned empty data")
                     return
 
+                # Extract spot price from first data item
+                spot_price = 0.0
+                if data and isinstance(data, list) and len(data) > 0:
+                    first_item = data[0]
+                    spot_price = float(
+                        first_item.get('underlying_spot_price', 0) or
+                        first_item.get('spot_price', 0) or
+                        first_item.get('ltp', 0) or
+                        0
+                    )
+
+                if spot_price > 0:
+                    option_chain_builder.update_index_price(symbol, spot_price)
+                    logger.info(
+                        f"[POLLER] Spot price updated: {symbol}={spot_price}"
+                    )
+                else:
+                    logger.warning(
+                        f"[POLLER] Could not extract spot price from "
+                        f"REST response for {symbol}"
+                    )
+
                 # Update option chain builder with REST data
                 updated = 0
                 for item in data:
@@ -165,6 +187,16 @@ class PollerService:
                         updated += 1
 
                 logger.info(f"REST POLLER → Updated {updated} strikes for {symbol} {expiry}")
+
+                # Force broadcaster to pick up REST data even in WebSocket-offline mode
+                try:
+                    from app.services.analytics_broadcaster import analytics_broadcaster
+                    if not hasattr(analytics_broadcaster, "_dirty"):
+                        analytics_broadcaster._dirty = {}
+                    analytics_broadcaster._dirty[symbol] = True
+                    logger.debug(f"POLLER → Dirty flag set for {symbol}")
+                except Exception as e:
+                    logger.debug(f"POLLER → Could not set dirty flag: {e}")
 
         except Exception as e:
             logger.error(f"Poller cycle error: {e}")

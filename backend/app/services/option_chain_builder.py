@@ -240,47 +240,40 @@ class OptionChainBuilder:
         now = datetime.utcnow()
 
         for strike in strike_keys:
-
             data = chain[strike]
-
             ce = data.get("CE")
             pe = data.get("PE")
             
-            ce_valid = ce and (now - ce.last_update).total_seconds() <= 30
-            pe_valid = pe and (now - pe.last_update).total_seconds() <= 30
-            
-            if not ce_valid and not pe_valid:
-                continue
-
+            # Use real values if present, else None (Standardized null for frontend '—')
             strikes.append(
                 {
                     "strike": strike,
-                    "call_oi": ce.oi if ce_valid else 0,
-                    "call_oi_change": ce.oi - ce.oi_prev if ce_valid and ce.oi_prev > 0 else 0,
-                    "call_ltp": ce.ltp if ce_valid else 0,
-                    "call_bid": ce.bid if ce_valid else 0,
-                    "call_ask": ce.ask if ce_valid else 0,
-                    "call_bid_qty": ce.bid_qty if ce_valid else 0,
-                    "call_ask_qty": ce.ask_qty if ce_valid else 0,
-                    "call_volume": ce.volume if ce_valid else 0,
-                    "call_iv": ce.iv if ce_valid else 0,
-                    "call_delta": ce.delta if ce_valid else 0,
-                    "call_theta": ce.theta if ce_valid else 0,
-                    "call_vega": ce.vega if ce_valid else 0,
-                    "call_gamma": ce.gamma if ce_valid else 0,
-                    "put_oi": pe.oi if pe_valid else 0,
-                    "put_oi_change": pe.oi - pe.oi_prev if pe_valid and pe.oi_prev > 0 else 0,
-                    "put_ltp": pe.ltp if pe_valid else 0,
-                    "put_bid": pe.bid if pe_valid else 0,
-                    "put_ask": pe.ask if pe_valid else 0,
-                    "put_bid_qty": pe.bid_qty if pe_valid else 0,
-                    "put_ask_qty": pe.ask_qty if pe_valid else 0,
-                    "put_volume": pe.volume if pe_valid else 0,
-                    "put_iv": pe.iv if pe_valid else 0,
-                    "put_delta": pe.delta if pe_valid else 0,
-                    "put_theta": pe.theta if pe_valid else 0,
-                    "put_vega": pe.vega if pe_valid else 0,
-                    "put_gamma": pe.gamma if pe_valid else 0,
+                    "call_oi": ce.oi if ce and ce.oi > 0 else None,
+                    "call_oi_change": ce.oi - ce.oi_prev if ce and ce.oi_prev > 0 else None,
+                    "call_ltp": ce.ltp if ce and ce.ltp > 0 else None,
+                    "call_bid": ce.bid if ce and ce.bid > 0 else None,
+                    "call_ask": ce.ask if ce and ce.ask > 0 else None,
+                    "call_bid_qty": ce.bid_qty if ce and ce.bid_qty > 0 else None,
+                    "call_ask_qty": ce.ask_qty if ce and ce.ask_qty > 0 else None,
+                    "call_volume": ce.volume if ce and ce.volume > 0 else None,
+                    "call_iv": ce.iv if ce and ce.iv > 0 else None,
+                    "call_delta": ce.delta if ce and ce.delta != 0 else None,
+                    "call_theta": ce.theta if ce and ce.theta != 0 else None,
+                    "call_vega": ce.vega if ce and ce.vega != 0 else None,
+                    "call_gamma": ce.gamma if ce and ce.gamma != 0 else None,
+                    "put_oi": pe.oi if pe and pe.oi > 0 else None,
+                    "put_oi_change": pe.oi - pe.oi_prev if pe and pe.oi_prev > 0 else None,
+                    "put_ltp": pe.ltp if pe and pe.ltp > 0 else None,
+                    "put_bid": pe.bid if pe and pe.bid > 0 else None,
+                    "put_ask": pe.ask if pe and pe.ask > 0 else None,
+                    "put_bid_qty": pe.bid_qty if pe and pe.bid_qty > 0 else None,
+                    "put_ask_qty": pe.ask_qty if pe and pe.ask_qty > 0 else None,
+                    "put_volume": pe.volume if pe and pe.volume > 0 else None,
+                    "put_iv": pe.iv if pe and pe.iv > 0 else None,
+                    "put_delta": pe.delta if pe and pe.delta != 0 else None,
+                    "put_theta": pe.theta if pe and pe.theta != 0 else None,
+                    "put_vega": pe.vega if pe and pe.vega != 0 else None,
+                    "put_gamma": pe.gamma if pe and pe.gamma != 0 else None,
                 }
             )
 
@@ -683,11 +676,152 @@ class OptionChainBuilder:
             logger.error(f"Error getting option ltp: {e}")
             return 0.0
 
-    def get_chain(self, symbol: str):
+    def get_latest_snapshot(self, symbol: str):
+        """
+        Returns a snapshot object for analytics broadcaster.
+        Works even when spot price is 0 — never returns None
+        if chain data exists.
+        """
+        chain = self.chains.get(symbol, {})
 
-        if symbol not in self.chains:
+        # Debug: Log chain structure
+        if chain:
+            sample_key = list(chain.keys())[0]
+            sample_val = chain[sample_key]
+            logger.info(
+                f"[SNAPSHOT_DEBUG] {symbol} chains has {len(chain)} keys. "
+                f"Sample: {list(chain.items())[:1] if chain else 'EMPTY'}"
+            )
+            logger.info(
+                f"[SNAPSHOT DEBUG] First key type={type(sample_key)} "
+                f"val={repr(sample_key)[:50]} "
+                f"data type={type(sample_val)} "
+                f"data keys={list(sample_val.keys()) if isinstance(sample_val, dict) else 'not-dict'}"
+            )
+
+        # Return None only if we have zero strike data
+        if not chain:
+            logger.warning(
+                f"get_latest_snapshot: chains[{symbol}] is empty — "
+                f"no strike data yet"
+            )
             return None
 
+        class ChainSnapshot:
+            pass
+
+        snap = ChainSnapshot()
+
+        # Spot price — 0 is acceptable, broadcaster will handle it
+        snap.spot       = float(self.spot_prices.get(symbol, 0))
+        snap.atm_strike = self._compute_atm(symbol, snap.spot)
+        snap.dte        = self._get_dte(symbol)
+
+        # Aggregate from chains dict
+        call_oi = 0
+        put_oi  = 0
+        max_ce_oi     = 0
+        max_pe_oi     = 0
+        max_ce_strike = 0
+        max_pe_strike = 0
+        atm_iv        = 0.0
+        calls_data    = {}
+        puts_data     = {}
+
+        for strike_key, sides in chain.items():
+            # strike_key is a number (float/int), sides is a dict with 'CE'/'PE' keys
+            try:
+                strike = float(strike_key)
+                if not isinstance(sides, dict):
+                    continue
+            except Exception:
+                continue
+
+            for right in ('CE', 'PE'):
+                data = sides.get(right, {})
+                if not data:
+                    continue
+
+                # Extract from OptionData object
+                ltp   = float(getattr(data, 'ltp', 0) or 0)
+                oi    = int(  getattr(data, 'oi', 0) or 0)
+                iv    = float(getattr(data, 'iv', 0) or 0)
+                delta = float(getattr(data, 'delta', 0) or 0)
+                gamma = float(getattr(data, 'gamma', 0) or 0)
+                theta = float(getattr(data, 'theta', 0) or 0)
+                vega  = float(getattr(data, 'vega', 0) or 0)
+                bid   = float(getattr(data, 'bid', 0) or 0)
+                ask   = float(getattr(data, 'ask', 0) or 0)
+
+                entry      = {
+                    'ltp': ltp, 'oi': oi, 'iv': iv,
+                    'delta': delta, 'gamma': gamma,
+                    'theta': theta, 'vega': vega,
+                    'bid': bid, 'ask': ask,
+                }
+                strike_str = str(int(strike))
+
+                if right == 'CE':
+                    call_oi += oi
+                    calls_data[strike_str] = entry
+                    if oi > max_ce_oi:
+                        max_ce_oi     = oi
+                        max_ce_strike = int(strike)
+                    if snap.atm_strike and int(strike) == snap.atm_strike:
+                        atm_iv = iv
+
+                else:  # PE
+                    put_oi += oi
+                    puts_data[strike_str] = entry
+                    if oi > max_pe_oi:
+                        max_pe_oi     = oi
+                        max_pe_strike = int(strike)
+
+        snap.total_call_oi      = call_oi
+        snap.total_put_oi       = put_oi
+        snap.pcr                = round(float(put_oi) / max(float(call_oi), 1.0), 4)
+        snap.max_call_oi_strike = max_ce_strike
+        snap.max_put_oi_strike  = max_pe_strike
+        snap.atm_iv             = atm_iv
+        snap.vwap               = float(
+            getattr(self, '_vwap', {}).get(symbol, 0) or 0
+        )
+        snap.calls_data         = calls_data
+        snap.puts_data          = puts_data
+
+        logger.info(
+            f"[SNAPSHOT] {symbol} | spot={snap.spot} "
+            f"atm={snap.atm_strike} "
+            f"calls={len(calls_data)} puts={len(puts_data)} "
+            f"call_oi={call_oi} put_oi={put_oi} pcr={snap.pcr}"
+        )
+        return snap
+
+    def _compute_atm(self, symbol: str, spot: float) -> int:
+        """Compute ATM strike from spot price."""
+        if spot <= 0:
+            # Fall back to cached ATM if available
+            cached = getattr(self, '_atm_strikes', {}).get(symbol, 0)
+            return int(cached) if cached else 0
+
+        step = 100 if symbol == 'BANKNIFTY' else 50
+        return int(round(spot / step) * step)
+
+    def _get_dte(self, symbol: str) -> int:
+        """Get days to expiry for current subscription."""
+        try:
+            from datetime import datetime, date
+            expiry_str = getattr(self, '_current_expiry', {}).get(symbol, '')
+            if expiry_str:
+                expiry_date = datetime.strptime(expiry_str, '%Y-%m-%d').date()
+                return max((expiry_date - date.today()).days, 0)
+        except Exception:
+            pass
+        return 0
+
+    def get_chain(self, symbol: str):
+        if symbol not in self.chains:
+            return None
         return self._create_snapshot(symbol)
 
 

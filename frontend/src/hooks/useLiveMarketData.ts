@@ -11,13 +11,15 @@ export interface LiveMarketData {
   symbol: string;
   spot: number;
   timestamp: string;
-  aiIntelligence?: any;
+  intelligence?: any;
   dataQuality?: any;
   aiReady?: boolean;
   atmStrike?: number;
+  chartAnalysis?: any;
+  analytics?: any;
 }
 
-export function useLiveMarketData(symbol: string) {
+export function useLiveMarketData(symbol: string, expiry?: string) {
   // Use granular selectors with useShallow for absolute performance
   const marketData = useWSStore(
     useShallow((s) => ({
@@ -31,6 +33,9 @@ export function useLiveMarketData(symbol: string) {
       aiReady: s.aiReady,
       lastUpdate: s.lastUpdate,
       connected: s.connected,
+      error: s.error,
+      chartAnalysis: s.chartAnalysis,
+      analytics: s.analytics,
     }))
   );
 
@@ -51,10 +56,12 @@ export function useLiveMarketData(symbol: string) {
       symbol,
       spot: marketData.spot || marketData.spotPrice || 0,
       timestamp: new Date(marketData.lastUpdate || Date.now()).toISOString(),
-      aiIntelligence: marketData.aiIntelligence,
+      intelligence: marketData.aiIntelligence,
       dataQuality: marketData.dataQuality,
       aiReady: marketData.aiReady,
       atmStrike: marketData.atmStrike,
+      chartAnalysis: marketData.chartAnalysis,
+      analytics: marketData.analytics,
     };
 
     throttledUpdate(transformed);
@@ -66,10 +73,16 @@ export function useLiveMarketData(symbol: string) {
     };
   }, [throttledUpdate]);
 
+  // Derive mode
+  const mode = marketData.connected ? 'live' : (data?.spot ? 'snapshot' : 'offline');
+
   return {
     data,
     connected: marketData.connected,
     symbol,
     lastUpdate: data?.timestamp || new Date().toISOString(),
+    loading: !data && !marketData.error,
+    error: marketData.error,
+    mode
   };
 }

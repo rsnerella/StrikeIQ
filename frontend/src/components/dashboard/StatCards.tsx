@@ -1,6 +1,7 @@
 "use client";
 import React from 'react';
 import { CARD, CARD_HOVER_BORDER } from './DashboardTypes';
+import { useWSStore } from '../../core/ws/wsStore';
 import type { LiveMarketData } from '../../hooks/useLiveMarketData';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -66,48 +67,65 @@ export function StatCard({
     );
 }
 
-// ── Row 2: four stat cards ───────────────────────────────────────────────────
-interface StatCardsRowProps {
-    data: LiveMarketData | null;
-    isAnalyticsEnabled: boolean;
-}
+// Skeleton Pulse for professional loading states
+const SkeletonPulse = ({ className }: { className: string }) => (
+    <div className={`animate-pulse bg-white/5 rounded-md ${className}`} />
+);
 
-export function StatCardsRow({ data, isAnalyticsEnabled }: StatCardsRowProps) {
-    const pcr = data?.analytics?.bias?.pcr_value ?? data?.analytics?.pcr ?? 1;
-    const totalOI = (data?.analytics?.total_call_oi || 0) + (data?.analytics?.total_put_oi || 0);
+// ── Row 2: four stat cards ───────────────────────────────────────────────────
+export function StatCardsRow() {
+    // Law 7: Granular Subscriptions - Use direct selectors
+    const regime       = useWSStore(s => s.regime        ?? 'RANGING')
+    const bias         = useWSStore(s => s.bias          ?? 'NEUTRAL')
+    const biasStrength = useWSStore(s => s.biasStrength  ?? 0)
+    const pcr          = useWSStore(s => s.pcr           ?? 0)
+    const vol          = useWSStore(s => s.volState)
+    const gamma        = useWSStore(s => s.gammaAnalysis)
+    const lastUpdate   = useWSStore(s => s.lastUpdate)
+    const hasData      = lastUpdate > 0
+
+    // Loading State
+    if (!hasData) {
+        return (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                {[1, 2, 3, 4].map(i => (
+                    <div key={i} className="trading-panel h-32 flex flex-col p-4 opacity-40">
+                         <SkeletonPulse className="w-20 h-3 mb-4" />
+                         <SkeletonPulse className="w-full h-8" />
+                    </div>
+                ))}
+            </div>
+        );
+    }
 
     return (
         <div
             id="section-analytics"
-            className="scroll-mt-20 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
+            className="scroll-mt-20 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"
         >
             <StatCard
-                label="VOLATILITY σ"
-                value={isAnalyticsEnabled ? (data?.intelligence?.probability?.expected_move || 0).toFixed(2) : 'N/A'}
-                sub={isAnalyticsEnabled ? `RANGE: ±${(data?.intelligence?.probability?.upper_1sd || 0).toFixed(1)}` : 'Analysis disabled'}
+                label="VOLATILITY STATE"
+                value={vol?.state || 'NORMAL'}
+                sub={`IV ATM: ${vol?.iv_atm ? `${vol.iv_atm.toFixed(1)}%` : '—'}`}
                 accent="#00E5FF"
             />
             <StatCard
-                label="MARKET PCR"
-                value={typeof data?.analytics?.pcr === 'number' && data.analytics.pcr > 0
-                    ? data.analytics.pcr.toFixed(2)
-                    : <span className="text-gray-600">—</span>}
-                sub={pcr > 1 ? 'SENTIMENT: BULLISH' : pcr < 1 ? 'SENTIMENT: BEARISH' : 'SENTIMENT: NEUTRAL'}
+                label="GAMMA REGIME"
+                value={gamma?.regime || 'NEUTRAL'}
+                sub={`FLIP: ${gamma?.gex_flip?.toLocaleString() || '—'}`}
+                accent={gamma?.regime?.includes('SHORT') ? '#f87171' : '#4ade80'}
+            />
+            <StatCard
+                label="MARKET PC RATIO"
+                value={pcr > 0 ? pcr.toFixed(2) : '—'}
+                sub={pcr > 1.2 ? 'SENTIMENT: BULLISH' : pcr < 0.8 ? 'SENTIMENT: BEARISH' : 'SENTIMENT: NEUTRAL'}
                 accent={pcr > 1.2 ? '#4ade80' : pcr < 0.8 ? '#f87171' : '#94a3b8'}
             />
             <StatCard
-                label="TOTAL OI"
-                value={totalOI > 0
-                    ? totalOI > 1e6 ? `${(totalOI / 1e6).toFixed(1)}M` : totalOI.toLocaleString()
-                    : <span className="text-gray-600">—</span>}
-                sub={`VOL: ${((data?.analytics?.total_volume || 0) / 1e6).toFixed(1)}M UNITS`}
+                label="BIAS STRENGTH"
+                value={`${(biasStrength * 100).toFixed(0)}%`}
+                sub={bias || 'NEUTRAL'}
                 accent="#a78bfa"
-            />
-            <StatCard
-                label="BREACH RISK"
-                value={`${data?.intelligence?.probability?.breach_probability?.toFixed(0) ?? '0'}%`}
-                sub={`VWAP: ${data?.analytics?.vwap?.toFixed(1) ?? '—'}`}
-                accent="#fb923c"
             />
         </div>
     );

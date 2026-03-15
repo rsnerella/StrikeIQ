@@ -9,200 +9,129 @@ interface VolatilityRegimePanelProps {
     data: LiveMarketData | null;
 }
 
-export function VolatilityRegimePanel({ data }: VolatilityRegimePanelProps) {
-    // Extract volatility data from backend
-    const volatilityRegime = (data as any)?.intelligence?.volatility_regime || 'normal';
-    const breachProbability = (data as any)?.intelligence?.breach_probability || 0;
-    const expectedMove = (data as any)?.intelligence?.expected_move || 0;
-    const spot = (data as any)?.spot || 0;
+import { useWSStore } from '../../core/ws/wsStore';
 
-    // Get regime display properties
-    const getRegimeDisplay = (regime: string) => {
-        switch (regime.toLowerCase()) {
-            case 'extreme':
-                return {
-                    label: 'EXTREME',
-                    color: '#f87171',
-                    bgColor: 'rgba(239,68,68,0.12)',
-                    borderColor: 'rgba(239,68,68,0.25)',
-                    icon: <AlertTriangle className="w-4 h-4" />,
-                    description: 'Systemic volatility risk detected'
-                };
-            case 'elevated':
-                return {
-                    label: 'ELEVATED',
-                    color: '#fb923c',
-                    bgColor: 'rgba(251,146,60,0.12)',
-                    borderColor: 'rgba(251,146,60,0.25)',
-                    icon: <Activity className="w-4 h-4" />,
-                    description: 'Structural expansion in progress'
-                };
-            case 'low':
-                return {
-                    label: 'LOW',
-                    color: '#60a5fa',
-                    bgColor: 'rgba(59,130,246,0.12)',
-                    borderColor: 'rgba(59,130,246,0.25)',
-                    icon: <BarChart3 className="w-4 h-4" />,
-                    description: 'Mean reversion regime'
-                };
-            default:
-                return {
-                    label: 'NORMAL',
-                    color: '#4ade80',
-                    bgColor: 'rgba(34,197,94,0.12)',
-                    borderColor: 'rgba(34,197,94,0.25)',
-                    icon: <TrendingUp className="w-4 h-4" />,
-                    description: 'Standard market conditions'
-                };
+// Skeleton Pulse for professional loading states
+const SkeletonPulse = ({ className }: { className: string }) => (
+    <div className={`animate-pulse bg-white/5 rounded-md ${className}`} />
+);
+
+export function VolatilityRegimePanel() {
+    // Law 7: Granular Store Subscriptions
+    const lastUpdate = useWSStore(s => s.lastUpdate);
+    const aiReady = useWSStore(s => s.aiReady);
+    const analysis = useWSStore(s => s.chartAnalysis);
+    const spot = useWSStore(s => s.spot);
+    
+    // v5.0 Volatility state
+    const vol = analysis?.volatility_state;
+    const regime = vol?.state || 'NORMAL';
+    const iv = vol?.iv_atm || 0;
+    const compression = vol?.compression || false;
+    const breachProb = vol?.breach_probability || 0;
+    const expectedMove = analysis?.expected_move?.[vol?.timeframe || '1h'] || 0;
+
+    const hasData = lastUpdate > 0;
+    if (!hasData || !analysis) {
+        return (
+            <div className="trading-panel h-full flex flex-col p-6 opacity-40">
+                 <div className="flex items-center justify-between mb-8">
+                    <SectionLabel>Volatility Intelligence</SectionLabel>
+                    <SkeletonPulse className="w-24 h-6 rounded-full" />
+                </div>
+                <div className="space-y-6">
+                    <SkeletonPulse className="w-full h-24" />
+                    <SkeletonPulse className="w-full h-24" />
+                </div>
+            </div>
+        );
+    }
+
+    const getRegimeDisplay = (r: string) => {
+        switch (r.toLowerCase()) {
+            case 'extreme': return { color: '#f87171', label: 'EXTREME', desc: 'SYSTEMIC VOLATILITY EXPLOSION DETECTED' };
+            case 'elevated': return { color: '#fb923c', label: 'ELEVATED', desc: 'STRUCTURAL EXPANSION IN PROGRESS' };
+            case 'low': return { color: '#60a5fa', label: 'LOW', desc: 'COMPRESSION / MEAN REVERSION REGIME' };
+            default: return { color: '#4ade80', label: 'NORMAL', desc: 'STABLE INSTITUTIONAL FLOW CONDITIONS' };
         }
     };
 
-    const regimeDisplay = getRegimeDisplay(volatilityRegime);
-
-    // Get probability color
-    const getProbabilityColor = (probability: number) => {
-        if (probability >= 70) return { color: '#f87171', label: 'HIGH' };
-        if (probability >= 40) return { color: '#fb923c', label: 'MEDIUM' };
-        return { color: '#4ade80', label: 'LOW' };
-    };
-
-    const probabilityDisplay = getProbabilityColor(breachProbability);
-
-    // Calculate range percentages
-    const upperRange = spot + expectedMove;
-    const lowerRange = spot - expectedMove;
-    const rangePercentage = ((expectedMove / spot) * 100).toFixed(1);
+    const rd = getRegimeDisplay(regime);
+    const upperLimit = spot + expectedMove;
+    const lowerLimit = spot - expectedMove;
+    const movePct = spot > 0 ? ((expectedMove / spot) * 100).toFixed(2) : '0.00';
 
     return (
         <div
-            className="trading-panel h-full"
-            onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = CARD_HOVER_BORDER;
-            }}
-            onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)';
-            }}
+            className="trading-panel h-full flex flex-col"
+            onMouseEnter={e => { e.currentTarget.style.borderColor = CARD_HOVER_BORDER; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)'; }}
         >
-            {/* Header */}
-            <div className="flex items-center justify-between mb-5">
-                <SectionLabel>Volatility Intelligence</SectionLabel>
-                <div className="flex items-center gap-2">
-                    <span
-                        className="text-[10px] font-bold font-mono tracking-widest px-3 py-1 rounded-full flex items-center gap-2 uppercase"
-                        style={{
-                            background: regimeDisplay.bgColor,
-                            border: `1px solid ${regimeDisplay.borderColor}`,
-                            color: regimeDisplay.color,
-                            boxShadow: `0 0 10px ${regimeDisplay.color}15`
-                        }}
-                    >
-                        {regimeDisplay.icon}
-                        {regimeDisplay.label} REGIME
-                    </span>
+            <div className="flex items-center justify-between mb-6">
+                <SectionLabel>Volatility Matrix</SectionLabel>
+                <div className="flex items-center gap-2 px-3 py-1 rounded-full border border-blue-500/20 bg-blue-500/5">
+                    <Activity size={12} className="text-blue-400" />
+                    <span className="text-[10px] font-black font-mono tracking-widest text-blue-400 uppercase">Real-Time σ</span>
                 </div>
             </div>
 
-            {/* Price Range Section */}
-            <div className="mb-6 rounded-xl p-4 transition-all hover:bg-white/5" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)' }}>
-                <div className="flex items-center justify-between mb-4">
-                    <div className="flex flex-col gap-0.5">
-                        <span className="text-[10px] font-bold font-mono tracking-wider uppercase text-slate-500">
-                            Expected Move (1σ)
-                        </span>
-                        <span className="text-[11px] font-mono text-slate-600 uppercase">Implied Deviation: {rangePercentage}%</span>
-                    </div>
-                    <span className="text-[18px] font-bold font-mono tracking-tight text-white tabular-nums">
-                        ±{expectedMove.toFixed(1)}
-                    </span>
+            {/* Current Regime */}
+            <div className="mb-6 p-4 rounded-xl bg-white/[0.02] border border-white/5 relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-3 opacity-10">
+                    <Activity size={40} style={{ color: rd.color }} />
                 </div>
-
-                {/* Range Bar Visualization */}
-                <div className="space-y-3">
-                    <div className="relative h-6 rounded-lg overflow-hidden border border-white/5" style={{ background: 'rgba(0,0,0,0.3)' }}>
-                        {/* The Gradient Base */}
-                        <div
-                            className="absolute inset-0 opacity-40"
-                            style={{
-                                background: 'linear-gradient(90deg, #f87171, #fb923c, #4ade80 50%, #fb923c, #f87171)'
-                            }}
-                        />
-                        {/* Centered Current Spot Pointer */}
-                        <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 flex items-center z-10">
-                            <div className="w-1.5 h-full bg-white shadow-[0_0_12px_rgba(255,255,255,0.8)]" />
-                        </div>
-                    </div>
-                    <div className="flex justify-between items-center px-1">
-                        <div className="flex flex-col">
-                            <span className="text-[9px] font-bold font-mono text-slate-500 tracking-wider">LOWER BOUND</span>
-                            <span className="text-[12px] font-bold font-mono text-red-400 tabular-nums">{lowerRange.toFixed(1)}</span>
-                        </div>
-                        <div className="flex flex-col items-end">
-                            <span className="text-[9px] font-bold font-mono text-slate-500 tracking-wider">UPPER BOUND</span>
-                            <span className="text-[12px] font-bold font-mono text-green-400 tabular-nums">{upperRange.toFixed(1)}</span>
-                        </div>
-                    </div>
-                </div>
+                <div className="text-[9px] font-bold font-mono text-slate-500 uppercase mb-2">Implying Regime</div>
+                <div className="text-2xl font-black font-mono mb-1" style={{ color: rd.color }}>{rd.label}</div>
+                <div className="text-[10px] font-mono text-slate-400 italic">"{rd.desc}"</div>
             </div>
 
-            {/* Breakout Risk Section */}
-            <div className="mb-6 rounded-xl p-4 transition-all hover:bg-white/5" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)' }}>
-                <div className="flex items-center justify-between mb-4">
-                    <span className="text-[10px] font-bold font-mono tracking-wider uppercase text-slate-500">
-                        Expansion Probability
-                    </span>
-                    <div className="flex items-center gap-3">
-                        <span
-                            className="text-[18px] font-bold font-mono tracking-tight"
-                            style={{ color: probabilityDisplay.color, textShadow: `0 0 10px ${probabilityDisplay.color}30` }}
-                        >
-                            {breachProbability.toFixed(0)}%
-                        </span>
+            {/* Expected Move */}
+            <div className="mb-6 space-y-4">
+                <div className="flex justify-between items-end">
+                    <div className="flex flex-col gap-1">
+                        <span className="text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest">Expected Move (1σ)</span>
+                        <span className="text-[11px] font-mono text-slate-400">Timeframe: {vol?.timeframe || '1h'}</span>
+                    </div>
+                    <div className="text-right">
+                        <div className="text-xl font-black font-mono text-white tabular-nums">±{expectedMove.toFixed(1)}</div>
+                        <div className="text-[9px] font-bold font-mono text-cyan-400">{movePct}% Deviation</div>
                     </div>
                 </div>
 
-                <div className="w-full h-1.5 rounded-full overflow-hidden bg-white/5 mb-2">
-                    <div
-                        className="h-full rounded-full transition-all duration-1000 ease-out shadow-[0_0_8px_rgba(0,0,0,0.5)]"
-                        style={{
-                            width: `${breachProbability}%`,
-                            background: `linear-gradient(90deg, #1e293b, ${probabilityDisplay.color})`
-                        }}
-                    />
+                <div className="relative h-2 bg-white/5 rounded-full overflow-hidden border border-white/5">
+                    <div className="absolute inset-0 opacity-20" style={{ background: `linear-gradient(90deg, #f87171, ${rd.color}, #f87171)` }} />
+                    <div className="absolute left-1/2 -translate-x-1/2 top-0 bottom-0 w-1 bg-white shadow-[0_0_10px_white]" />
                 </div>
 
-                <div className="flex justify-between items-center">
-                    <span className="text-[9px] font-bold font-mono tracking-widest text-slate-600 uppercase">STABILITY</span>
-                    <span
-                        className="text-[9px] font-bold font-mono tracking-widest uppercase px-2 py-0.5 rounded-md border"
-                        style={{ background: `${probabilityDisplay.color}10`, borderColor: `${probabilityDisplay.color}20`, color: probabilityDisplay.color }}
-                    >
-                        {probabilityDisplay.label} EXPANSION RISK
-                    </span>
-                    <span className="text-[9px] font-bold font-mono tracking-widest text-slate-600 uppercase">VOLATILITY</span>
-                </div>
-            </div>
-
-            {/* Trading Summary Footer */}
-            <div className="mt-auto pt-4 border-t border-white/5 flex flex-col gap-3">
-                <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white/2 border border-white/5">
-                    <div style={{ color: regimeDisplay.color }}>{regimeDisplay.icon}</div>
+                <div className="flex justify-between items-center text-[10px] font-bold font-mono text-slate-500">
                     <div className="flex flex-col">
-                        <span className="text-[10px] font-bold font-mono tracking-widest text-slate-400 uppercase">Regime Outlook</span>
-                        <span className="text-[11px] font-mono text-slate-500 italic">{regimeDisplay.description}</span>
+                        <span>LOWER BOUND</span>
+                        <span className="text-red-400">₹{lowerLimit.toLocaleString()}</span>
+                    </div>
+                    <div className="flex flex-col items-end">
+                        <span>UPPER BOUND</span>
+                        <span className="text-green-400">₹{upperLimit.toLocaleString()}</span>
                     </div>
                 </div>
+            </div>
 
-                <div className="text-[10px] font-bold font-mono tracking-widest text-center py-2 px-3 rounded-lg bg-white/2 border border-white/5 uppercase opacity-80">
-                    {volatilityRegime === 'extreme'
-                        ? '🚫 SYSTEMIC RISK - DE-LEVERAGE IMMEDIATELY'
-                        : volatilityRegime === 'elevated'
-                            ? '⚡ INCREASE STOP BUFFER - NOISY MOVES'
-                            : volatilityRegime === 'low'
-                                ? '📉 MEAN REVERSION LIKELY - SELL TAILS'
-                                : '✅ CONVENTIONAL VOLATILITY - MODEL ALIGNED'
-                    }
-                </div>
+            {/* Expansion Probability */}
+            <div className="mt-auto pt-6 border-t border-white/5">
+                 <div className="flex justify-between items-center mb-3">
+                    <span className="text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest">Expansion Risk</span>
+                    <span className={`text-[11px] font-black font-mono ${breachProb > 50 ? 'text-red-400' : 'text-blue-400'}`}>
+                        {breachProb.toFixed(1)}%
+                    </span>
+                 </div>
+                 <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+                    <div 
+                        className="h-full transition-all duration-1000" 
+                        style={{ 
+                            width: `${breachProb}%`, 
+                            background: breachProb > 50 ? '#f87171' : '#60a5fa' 
+                        }} 
+                    />
+                 </div>
             </div>
         </div>
     );

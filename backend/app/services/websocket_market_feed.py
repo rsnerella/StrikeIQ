@@ -220,6 +220,8 @@ class WebSocketMarketFeed:
         self.spot_prices = {}  # FIX: Add missing spot_prices attribute
         self.current_atm = None
         self._subscription_lock = asyncio.Lock()  # P4: prevent subscription race conditions
+        self._pending_symbol: str = None
+        self._pending_expiry: str = None
 
 
     async def ensure_connection(self):
@@ -726,6 +728,35 @@ class WebSocketMarketFeed:
         except Exception as e:
             logger.error(f"Option unsubscription failed: {e}")
 
+    async def trigger_pending_subscription(self):
+        """
+        Called after OAuth token exchange completes.
+        Fires the deferred subscription that was queued before auth.
+        """
+        if self._pending_symbol and self._pending_expiry:
+            logger.info(
+                f"TOKEN REFRESHED → triggering pending subscription: "
+                f"{self._pending_symbol} {self._pending_expiry}"
+            )
+            symbol = self._pending_symbol
+            expiry = self._pending_expiry
+            self._pending_symbol = None
+            self._pending_expiry = None
+            await self.switch_symbol(symbol, expiry)
+        else:
+            # No pending — auto-subscribe to default NIFTY nearest expiry
+            from app.services.instrument_registry import get_instrument_registry
+            registry = get_instrument_registry()
+            expiries = registry.get_expiries("NIFTY")
+            if expiries:
+                from datetime import datetime
+                nearest = sorted(
+                    expiries,
+                    key=lambda x: datetime.strptime(x, '%Y-%m-%d')
+                )[0]
+                logger.info(f"TOKEN REFRESHED → auto-subscribing NIFTY {nearest}")
+                await self.switch_symbol("NIFTY", nearest)
+
     # PATCH 3: SWITCH SYMBOL FUNCTION
     async def switch_symbol(self, symbol: str, expiry: str):
         """Switch subscription to new symbol and expiry"""
@@ -743,6 +774,19 @@ class WebSocketMarketFeed:
         # SYNC WITH STATE MANAGER
         self.market_state_manager.active_symbol = symbol
         self.market_state_manager.active_expiry = expiry
+
+        # Token gate — do not attempt any Upstox API calls with invalid token
+        from app.services.token_manager import token_manager
+        status = await token_manager.get_token_status()
+        if not status["is_valid"]:
+            logger.warning(
+                f"switch_symbol called but token is invalid — "
+                f"queuing subscription for {symbol} {expiry} until auth completes"
+            )
+            # Store the pending subscription so it fires after OAuth completes
+            self._pending_symbol = symbol
+            self._pending_expiry = expiry
+            return # Do NOT abort the system — just defer
 
         await self.unsubscribe_options()
         await asyncio.sleep(0.1)

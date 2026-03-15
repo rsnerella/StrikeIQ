@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React, { memo, useMemo } from 'react';
 import { BarChart3, TrendingUp, TrendingDown, Target, Shield } from 'lucide-react';
 import { OptionChainData } from '../../types/dashboard';
 
@@ -17,9 +17,20 @@ const OptionChainPanel: React.FC<OptionChainPanelProps> = ({ optionChainData }) 
     );
   }
 
-  // Extract calls and puts from normalized optionChain structure
-  const calls = optionChainData?.calls ?? [];
-  const puts = optionChainData?.puts ?? [];
+  // Extract calls and puts from Record structure and convert to sorted Arrays
+  const calls = useMemo(() => {
+    const raw = optionChainData?.calls || {};
+    return Object.entries(raw)
+      .map(([strike, data]: [string, any]) => ({ ...data, strike: Number(strike) }))
+      .sort((a, b) => a.strike - b.strike);
+  }, [optionChainData?.calls]);
+
+  const puts = useMemo(() => {
+    const raw = optionChainData?.puts || {};
+    return Object.entries(raw)
+      .map(([strike, data]: [string, any]) => ({ ...data, strike: Number(strike) }))
+      .sort((a, b) => a.strike - b.strike);
+  }, [optionChainData?.puts]);
   
   // PERFORMANCE: Limit visible strikes to prevent rendering performance issues
   // Show only 20 strikes around ATM (10 above, 10 below)
@@ -36,15 +47,9 @@ const OptionChainPanel: React.FC<OptionChainPanelProps> = ({ optionChainData }) 
     
     visibleCalls = calls.slice(startIndex, endIndex);
     visiblePuts = puts.slice(startIndex, endIndex);
-    
-    console.log(`PERFORMANCE: Limited strikes from ${totalStrikes} to ${visibleCalls.length} visible`);
   }
   
-  console.log("Calls length:", visibleCalls.length);
-  console.log("Puts length:", visiblePuts.length);
-  console.log("VISIBLE STRIKES", visibleCalls.length + visiblePuts.length);
-  console.log("FIRST CALL OBJECT:", visibleCalls[0]);
-  console.log("FIRST PUT OBJECT:", visiblePuts[0]);
+  // PERFORMANCE: Limited strikes from totalStrikes to visible length
 
   // Handle missing data with skeleton (Phase 4)
   if (!optionChainData || (visibleCalls.length === 0 && visiblePuts.length === 0)) {
@@ -79,13 +84,7 @@ const OptionChainPanel: React.FC<OptionChainPanelProps> = ({ optionChainData }) 
         </h3>
       </div>
 
-      {/* DEBUG: Temporary JSON dump */}
-      <div className="mb-4 p-4 bg-black/50 rounded border border-gray-800">
-        <h4 className="text-xs font-bold text-gray-500 mb-2">DEBUG - First Call Object:</h4>
-        <pre className="text-xs text-gray-300 overflow-auto max-h-32">
-          {JSON.stringify(visibleCalls[0], null, 2)}
-        </pre>
-      </div>
+      {/* Header Cluster */}
 
       {/* PCR Summary */}
       {optionChainData.pcr_summary && (

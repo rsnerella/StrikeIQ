@@ -213,6 +213,37 @@ class TokenManager:
 
     # ================= AUTH STATE =================
 
+    async def is_token_valid(self) -> bool:
+        """
+        Checks if the stored token is valid by making a lightweight
+        API call to Upstox profile endpoint.
+        Returns True if valid, False if expired or missing.
+        """
+        try:
+            token = await self.get_token()
+            if not token:
+                return False
+
+            import httpx
+            async with httpx.AsyncClient(timeout=5) as client:
+                resp = await client.get(
+                    "https://api.upstox.com/v2/user/profile",
+                    headers={"Authorization": f"Bearer {token}"}
+                )
+            return resp.status_code == 200
+        except Exception:
+            return False
+
+    async def get_token_status(self) -> dict:
+        """Returns token status for health checks and startup gate."""
+        token = await self.get_token()
+        valid = await self.is_token_valid() if token else False
+        return {
+            "has_token": bool(token),
+            "is_valid":  valid,
+            "needs_auth": not valid,
+        }
+
     def get_auth_state(self) -> Dict[str, Any]:
 
         return {

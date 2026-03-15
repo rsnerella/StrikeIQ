@@ -17,7 +17,7 @@ const LoadingPlaceholder = () => (
 );
 
 // ── Lazy load heavy panels (Task 10) ──────────────────────────────────────────
-const OIHeatmap = dynamic(() => import('./OIHeatmap'), { ssr: false, loading: () => <LoadingPlaceholder /> });
+const OIHeatmap = dynamic(() => import('./OIHeatmapClean'), { ssr: false, loading: () => <LoadingPlaceholder /> });
 const AIInterpretationPanel = dynamic(() => import('./AIInterpretationPanel'), { ssr: false, loading: () => <LoadingPlaceholder /> });
 const AlertPanelFinal = dynamic(() => import('./intelligence/AlertPanelFinal'), { ssr: false, loading: () => <LoadingPlaceholder /> });
 const AICommandCenter = dynamic(() => import('./AICommandCenter'), { ssr: false, loading: () => <LoadingPlaceholder /> });
@@ -188,6 +188,7 @@ const DASHBOARD_CSS = `
 
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
+// ── Main Dashboard ────────────────────────────────────────────────────────────
 function DashboardComponent({ initialSymbol = 'NIFTY' }: DashboardProps) {
   const setCurrentSymbol = useMarketContextStore(state => state.setSymbol);
   const currentSymbol = useMarketContextStore(state => state.symbol);
@@ -199,54 +200,18 @@ function DashboardComponent({ initialSymbol = 'NIFTY' }: DashboardProps) {
   }, [initialSymbol, setCurrentSymbol, currentSymbol]);
 
   const {
-    expiryList,
     selectedExpiry,
-    loadingExpiries,
-    expiryError,
-    handleExpiryChange,
-    optionChainConnected
   } = useExpirySelector();
 
-  const { data, error, loading, mode } = useLiveMarketData(currentSymbol, selectedExpiry);
+  // Unified Store Hook - Law 7
+  useLiveMarketData(currentSymbol, selectedExpiry);
 
-  const isLiveMode = useModeGuard(mode, 'LIVE');
-  const isSnapshotMode = useModeGuard(mode, 'SNAPSHOT');
-  const effectiveSpot = useEffectiveSpot(data, mode);
-  const isAnalyticsEnabled = (data as any)?.analytics_enabled !== false;
-
-  // Inject global CSS once
-  React.useEffect(() => {
-    const id = 'dashboard-global-css';
-    if (!document.getElementById(id)) {
-      const el = document.createElement('style');
-      el.id = id;
-      el.textContent = DASHBOARD_CSS;
-      document.head.appendChild(el);
-    }
-    return () => { document.getElementById(id)?.remove(); };
-  }, []);
-
-  // Snapshot-mode body class
-  React.useEffect(() => {
-    document.body.classList.toggle('snapshot-mode', mode !== 'live');
-  }, [mode]);
-
-  const safeError = typeof error === 'string' ? error : null;
-  const modeLabel = mode === 'live' ? 'LIVE' : mode === 'snapshot' ? 'SNAPSHOT' : mode === 'error' ? 'HALTED' : 'OFFLINE';
-  const modeColor = mode === 'live' ? '#4ade80' : mode === 'snapshot' ? '#60a5fa' : '#f87171';
-
-  // ── State guards ─────────────────────────────────────────────────────────────
-  if (loading) return mode === 'snapshot' ? <SnapshotReadyBlock /> : <LoadingBlock />;
-  if (safeError) return <ErrorBlock message={safeError} />;
-
-  // ── Main render ──────────────────────────────────────────────────────────────
   return (
-    <div className="w-full">
-      {/* Data Quality Banner */}
-      <DataQualityBanner />
+    <div className="min-h-screen bg-[#020408] text-slate-200 font-sans selection:bg-blue-500/30">
+      <style>{DASHBOARD_CSS}</style>
       
-      {/* Subtle grid overlay */}
-      <div
+      {/* ── Visual Grid Overlay ─────────────────────────────────────── */}
+      <div 
         className="pointer-events-none fixed inset-0 z-0"
         style={{
           backgroundImage: 'linear-gradient(rgba(0,229,255,1) 1px, transparent 1px), linear-gradient(90deg, rgba(0,229,255,1) 1px, transparent 1px)',
@@ -267,64 +232,57 @@ function DashboardComponent({ initialSymbol = 'NIFTY' }: DashboardProps) {
 
           {/* ROW 2 — Ticker Strip (full width) */}
           <div className="col-12">
-            <TickerStrip
-              symbol={currentSymbol}
-              data={data}
-              effectiveSpot={effectiveSpot}
-              mode={mode}
-              modeLabel={modeLabel}
-              modeColor={modeColor}
-            />
+            <TickerStrip symbol={currentSymbol} />
           </div>
 
           {/* ROW 3 — Four Stat Cards (full width, internally 4-col) */}
           <div className="col-12">
-            <StatCardsRow data={data} isAnalyticsEnabled={isAnalyticsEnabled} />
+            <StatCardsRow />
           </div>
 
           {/* ROW 4 — Alert Panel (compact, full width) */}
           <div className="col-12">
             <div className="trading-panel" style={{ padding: '10px 16px' }}>
-              <MemoizedAlerts alerts={(data as any)?.alerts || []} />
+              <MemoizedAlerts />
             </div>
           </div>
 
           {/* ROW 5 — Market Bias (4 cols) | Expected Move Range (8 cols) */}
           <div className="col-4">
-            <BiasPanel data={data} />
+            <BiasPanel />
           </div>
           <div className="col-8">
-            <ExpectedMovePanel data={data} isSnapshotMode={isSnapshotMode} />
+            <ExpectedMovePanel />
           </div>
 
           {/* ROW 6 — Smart Money | Liquidity | Gamma Exposure | Institutional Flow (3 cols each) */}
           <div className="col-3">
-            <SmartMoneyPanel data={data} isSnapshotMode={isSnapshotMode} />
+            <SmartMoneyPanel />
           </div>
           <div className="col-3">
-            <LiquidityPanel data={data} />
+            <LiquidityPanel />
           </div>
           <div className="col-3">
-            <GammaExposurePanel data={data} />
+            <GammaExposurePanel />
           </div>
           <div className="col-3">
-            <InstitutionalFlowPanel data={data} />
+            <InstitutionalFlowPanel />
           </div>
 
           {/* ROW 7 — Signal Matrix (4 cols) | Trade Setup (4 cols) | Chart Intelligence (4 cols) */}
           <div className="col-4">
-            <SignalMatrixPanel data={data} />
+            <SignalMatrixPanel />
           </div>
           <div className="col-4">
-            <TradeSetupPanel data={data} />
+            <TradeSetupPanel />
           </div>
           <div className="col-4">
-            <ChartIntelligencePanel data={data} />
+            <ChartIntelligencePanel />
           </div>
 
           {/* ROW 8 — Volatility Regime (full width) */}
           <div className="col-12">
-            <VolatilityRegimePanel data={data} />
+            <VolatilityRegimePanel />
           </div>
 
           {/* ROW 9 — OI Heatmap (full width, horizontal scroll) */}
@@ -341,39 +299,35 @@ function DashboardComponent({ initialSymbol = 'NIFTY' }: DashboardProps) {
 
           {/* ROW 10 — Advanced Intelligence: 4 panels × 3 cols */}
           <div className="col-3">
-            <TrapDetectionPanel data={data} />
+            <TrapDetectionPanel />
           </div>
           <div className="col-3">
-            <GammaSqueezePanel data={data} />
+            <GammaSqueezePanel />
           </div>
           <div className="col-3">
-            <LiquidityVacuumPanel data={data} />
+            <LiquidityVacuumPanel />
           </div>
           <div className="col-3">
-            <ExpiryMagnetPanel data={data} />
+            <ExpiryMagnetPanel />
           </div>
 
           <div className="col-12">
             <div className="trading-panel">
-              <MemoizedStrategyPlan 
-                symbol={currentSymbol} 
-                data={data?.intelligence?.trade_suggestion} 
-              />
+              <MemoizedStrategyPlan />
             </div>
           </div>
 
           {/* ROW 12 — AI Interpretation Panel (full width) */}
           <div className="col-12">
             <div className="trading-panel">
-              <div id="section-ai" className="scroll-mt-20" />
-              <MemoizedAIPanel intelligence={data?.intelligence ?? null} />
+              <MemoizedAIPanel />
             </div>
           </div>
 
           {/* ROW 13 — AI Command Center (full width) */}
           <div className="col-12">
             <div className="trading-panel">
-              <MemoizedAICommandCenter intelligence={data?.intelligence} />
+              <MemoizedAICommandCenter />
             </div>
           </div>
 

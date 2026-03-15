@@ -9,9 +9,10 @@ logger = logging.getLogger(__name__)
 
 SQLALCHEMY_DATABASE_URL = settings.DATABASE_URL
 
-# Verify asyncpg driver for async FastAPI
-if not SQLALCHEMY_DATABASE_URL.startswith("postgresql+asyncpg://"):
-    raise ValueError("DATABASE_URL must use postgresql+asyncpg:// driver for async FastAPI")
+# Verify async driver for async FastAPI
+if not (SQLALCHEMY_DATABASE_URL.startswith("postgresql+asyncpg://") or 
+        SQLALCHEMY_DATABASE_URL.startswith("postgresql+psycopg://")):
+    raise ValueError("DATABASE_URL must use postgresql+asyncpg:// or postgresql+psycopg:// driver")
 
 ssl_context = ssl.create_default_context()
 ssl_context.check_hostname = False

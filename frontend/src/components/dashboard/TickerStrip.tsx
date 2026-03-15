@@ -1,121 +1,146 @@
 "use client";
 import React from 'react';
-import { TrendingUp, TrendingDown, Activity, Zap } from 'lucide-react';
-import { CARD } from './DashboardTypes';
-import type { LiveMarketData } from '../../hooks/useLiveMarketData';
+import { TrendingUp, TrendingDown, Activity, Zap, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { useWSStore } from '../../core/ws/wsStore';
 
-interface TickerStripProps {
-    symbol: string;
-    data: LiveMarketData | null;
-    effectiveSpot: number | null;
-    mode: string;
-    modeLabel: string;
-    modeColor: string;
-}
+// Skeleton Pulse for professional loading states
+const SkeletonPulse = ({ className }: { className: string }) => (
+    <div className={`animate-pulse bg-white/5 rounded-md ${className}`} />
+);
 
-export function TickerStrip({
-    symbol,
-    data,
-    effectiveSpot,
-    mode,
-    modeLabel,
-    modeColor
-}: TickerStripProps) {
-    const changePositive = (data?.change ?? 0) >= 0;
-    const changePct = (data as any)?.change_percent ?? 0;
-    const ltp = effectiveSpot ?? 0;
+export function TickerStrip({ symbol }: { symbol: string }) {
+    // Law 7: Granular Store Subscriptions
+    const spot = useWSStore(s => s.spotPrice);
+    const effectiveSpot = spot || 0;
+    const lastUpdate = useWSStore(s => s.lastUpdate);
+    const hasData = lastUpdate > 0;
+    
+    // Direct selectors with fallbacks
+    const changePct = useWSStore(s => s.technicals?.change_pct ?? 0);
+    const changePositive = changePct >= 0;
+    const earlyWarnings = useWSStore(s => s.earlyWarnings) || [];
+    const bias = useWSStore(s => s.bias ?? 'NEUTRAL');
+    const regime = useWSStore(s => s.regime ?? 'RANGING');
+    const aiReady = useWSStore(s => s.aiReady);
 
     return (
         <div
             id="section-dashboard"
-            className="trading-panel scroll-mt-20 overflow-visible relative group"
+            className="trading-panel scroll-mt-20 overflow-hidden relative group"
             style={{
                 padding: '16px 24px',
                 borderColor: 'rgba(0, 229, 255, 0.15)',
-                background: 'rgba(6, 9, 18, 0.85)'
+                background: 'rgba(6, 9, 18, 0.9)',
+                backdropFilter: 'blur(20px)'
             }}
         >
-            {/* Global scanning line animation */}
-            <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-[18px]">
-                <div className="absolute top-0 left-[-100%] w-full h-[1px] bg-gradient-to-r from-transparent via-blue-400/30 to-transparent animate-[scan_3s_linear_infinite]" />
-            </div>
+            {/* Real-time status line */}
+            <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-cyan-500/50 to-transparent" />
 
-            <div className="flex flex-wrap items-center justify-between gap-4 relative z-10">
+            <div className="flex flex-wrap items-center justify-between gap-8 relative z-10">
                 {/* Left: Identity & Price */}
-                <div className="flex items-center gap-6">
+                <div className="flex items-center gap-8">
                     <div className="flex flex-col">
                         <div className="flex items-center gap-2 mb-1">
-                            <span className="text-[10px] font-bold font-mono tracking-[0.2em] text-slate-500 uppercase">Instrument</span>
-                            {mode === 'live' && (
-                                <span className="flex h-1.5 w-1.5 rounded-full bg-green-400 shadow-[0_0_8px_#4ade80]" />
-                            )}
+                            <span className="text-[10px] font-bold font-mono tracking-[0.2em] text-slate-500 uppercase">ASSET</span>
+                            <span className="flex h-1.5 w-1.5 rounded-full bg-green-400 shadow-[0_0_8px_#4ade80]" />
                         </div>
-                        <span className="text-2xl font-black tracking-tighter text-white font-sans">
-                            {symbol}<span className="text-blue-400/50">.IDX</span>
+                        <span className="text-2xl font-black tracking-tighter text-white font-sans flex items-baseline">
+                            {symbol}<span className="text-blue-400/50 text-sm ml-1">.IDX</span>
                         </span>
                     </div>
 
-                    <div className="h-10 w-px bg-white/5 mx-2" />
+                    <div className="h-10 w-px bg-white/10" />
 
                     <div className="flex flex-col">
-                        <span className="text-[10px] font-bold font-mono tracking-[0.2em] text-slate-500 uppercase mb-1">Last Traded Price</span>
-                        <div className="flex items-baseline gap-3">
-                            <span className="text-4xl font-black tabular-nums tracking-tighter text-white drop-shadow-2xl">
-                                {ltp.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        <span className="text-[10px] font-bold font-mono tracking-[0.2em] text-cyan-500/60 uppercase mb-1">Institutional Spot</span>
+                        <div className="flex items-baseline gap-4">
+                            <span className="text-4xl font-black tabular-nums tracking-tighter text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.1)]">
+                                {effectiveSpot > 0 
+                                    ? effectiveSpot.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) 
+                                    : <SkeletonPulse className="w-32 h-10" />}
                             </span>
-                            <div
-                                className={`flex items-center gap-1 text-[13px] font-bold font-mono px-2 py-0.5 rounded-md ${changePositive ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'
-                                    }`}
-                            >
-                                {changePositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                                {typeof changePct === 'number' && changePct !== 0
-                    ? `${changePositive ? '+' : ''}${changePct.toFixed(2)}%`
-                    : '—'
-                  }
+                            {effectiveSpot > 0 && (
+                                <div className={`flex items-center gap-1 text-[13px] font-bold font-mono px-2 py-0.5 rounded-md ${changePositive ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+                                    {changePositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                                    {changePct !== 0 ? `${changePositive ? '+' : ''}${changePct.toFixed(2)}%` : '0.00%'}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Center: Institutional Warnings Ticker (Law 5 Compliance) */}
+                <div className="flex-grow max-w-2xl px-8 hidden xl:block">
+                    <div className="h-14 bg-white/[0.02] border border-white/5 rounded-xl overflow-hidden flex items-center px-4 gap-4 relative">
+                        <div className="flex items-center gap-2 text-yellow-500 bg-yellow-500/10 self-stretch px-3 border-r border-white/5">
+                            <AlertTriangle size={14} className="animate-pulse" />
+                            <span className="text-[9px] font-black font-mono tracking-widest">ALERTS</span>
+                        </div>
+                        
+                        <div className="flex-grow overflow-hidden relative h-full">
+                            <div className="absolute inset-0 flex items-center">
+                                {earlyWarnings.length > 0 ? (
+                                    <div className="animate-[ticker_30s_linear_infinite] whitespace-nowrap flex gap-12 items-center">
+                                        {earlyWarnings.map((w: any, i: number) => (
+                                            <div key={i} className="flex items-center gap-2">
+                                                <div className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
+                                                <span className="text-[10px] font-bold font-mono text-slate-300 uppercase tracking-wide">
+                                                    {typeof w === 'string' ? w : w.message || 'CAUTION: LIQUIDITY IMBALANCE DETECTED'}
+                                                </span>
+                                            </div>
+                                        ))}
+                                        {/* Duplicate for infinite loop */}
+                                        {earlyWarnings.map((w: any, i: number) => (
+                                            <div key={`dup-${i}`} className="flex items-center gap-2">
+                                                <div className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
+                                                <span className="text-[10px] font-bold font-mono text-slate-300 uppercase tracking-wide">
+                                                    {typeof w === 'string' ? w : w.message || 'CAUTION: LIQUIDITY IMBALANCE DETECTED'}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center gap-3 opacity-40">
+                                        <ShieldCheck size={14} className="text-green-500" />
+                                        <span className="text-[10px] font-bold font-mono text-slate-400 tracking-widest uppercase">
+    {bias} {regime} · {changePositive ? '+' : ''}{changePct.toFixed(2)}% · 
+    {earlyWarnings.length > 0 ? `${earlyWarnings.length} WARNINGS` : 'CLEAR'}
+</span>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
                 </div>
 
-                {/* Right: Market Status & System Health */}
-                <div className="flex items-center gap-4">
+                {/* Right: Engine Status */}
+                <div className="flex items-center gap-6">
                     <div className="hidden lg:flex flex-col items-end">
-                        <span className="text-[10px] font-bold font-mono tracking-[0.2em] text-slate-500 uppercase mb-1">Data Engine</span>
+                        <span className="text-[10px] font-bold font-mono tracking-[0.2em] text-slate-500 uppercase mb-1">Compute Health</span>
                         <div className="flex items-center gap-4 text-slate-400 text-[11px] font-mono">
                             <div className="flex items-center gap-1.5">
-                                <Activity className="w-3 h-3 text-blue-400" />
-                                <span>WS:CONNECTED</span>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                                <div className="w-1 h-1 rounded-full bg-slate-600" />
-                                <span>LATENCY: 12ms</span>
+                                <Activity className="w-3 h-3 text-cyan-400 animate-pulse" />
+                                <span>L2:STREAMING</span>
                             </div>
                         </div>
                     </div>
 
-                    <div
-                        className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-bold font-mono tracking-[0.15em] border transition-all duration-300"
-                        style={{
-                            background: mode === 'live' ? 'rgba(34,197,94,0.05)' : 'rgba(59,130,246,0.05)',
-                            borderColor: `${modeColor}30`,
-                            color: modeColor,
-                            boxShadow: mode === 'live' ? '0 0 20px rgba(74,222,128,0.05)' : 'none'
-                        }}
-                    >
-                        {mode === 'live' ? <Zap className="w-3.5 h-3.5 fill-current" /> : <Activity className="w-3.5 h-3.5" />}
-                        {modeLabel} ENGINE
+                    <div className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-[11px] font-black font-mono tracking-[0.2em] border transition-all duration-500 ${
+                        aiReady ? 'bg-green-500/10 border-green-500/30 text-green-400 shadow-[0_0_20px_rgba(34,197,94,0.1)]' : 'bg-blue-500/10 border-blue-500/20 text-blue-400'
+                    }`}>
+                        {aiReady ? <Zap size={14} className="fill-current" /> : <Activity size={14} className="animate-spin" />}
+                        {aiReady ? 'STRIKE_AI:ACTIVE' : 'STRIKE_AI:INIT'}
                     </div>
                 </div>
             </div>
 
             <style jsx>{`
-                @keyframes scan {
-                    0% { left: -100%; opacity: 0; }
-                    50% { opacity: 0.5; }
-                    100% { left: 100%; opacity: 0; }
+                @keyframes ticker {
+                    0% { transform: translateX(0); }
+                    100% { transform: translateX(-50%); }
                 }
             `}</style>
         </div>
     );
 }
-

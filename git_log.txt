@@ -1,5 +1,0 @@
-commit 6778b821d5c1f10494bce24219da6a211d072cef
-Author: Uday Shastrakar <uday.shastrakar@gmail.com>
-Date:   Sun Mar 8 16:49:15 2026 +0530
-
-    Fix mobile dashboard APIs and Next.js LAN routing

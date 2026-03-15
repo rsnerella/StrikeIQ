@@ -70,71 +70,44 @@ class WSManager:
                 "expiry": expiry
             }
 
-    async def broadcast(self, message):
-        """Broadcast message to all connected clients concurrently.
-
-        We snapshot the connection list under _lock (brief), then release
-        the lock BEFORE awaiting sends — this prevents a slow/dead client
-        from blocking all other clients (head-of-line blocking).
-        """
-
-        # Brief lock to snapshot connections and subscriptions, then immediately release
-        async with self._lock:
-            connections = self.active_connections.copy()
-            subscriptions = self.client_subscriptions.copy()
-        
-        logger.debug(f"WS CLIENT COUNT → {len(connections)}")
-        logger.info(f"CLIENTS CONNECTED → {len(connections)}")
-        
-        if not connections:
+    async def broadcast(self, payload: dict):
+        """Broadcasts a payload to all connected clients with serialization safety."""
+        if not self.active_connections:
+            logger.warning("[WS MANAGER] No active connections — nothing to broadcast")
             return
 
-        logger.debug(f"WS broadcast → clients={len(connections)}")
+        # 1. JSON Serialization with fallback
+        try:
+            # Handle if payload is already a string
+            if isinstance(payload, str):
+                message = payload
+            else:
+                message = json.dumps(payload, default=json_safe)
+        except Exception as e:
+            logger.error(f"[WS MANAGER] Serialization failure: {e}")
+            try:
+                # Emergency fallback to simple string conversion
+                message = json.dumps(payload, default=str)
+            except:
+                logger.error("[WS MANAGER] ABSOLUTE SERIALIZATION FAILURE")
+                return
 
-        # Filter connections based on symbol subscription
-        target_connections = []
-        message_symbol = message.get("symbol")
-        
-        # TEMP DEBUG: Send to all clients for testing
-        target_connections = connections
-        logger.info(f"TEMP DEBUG: Broadcasting to all {len(connections)} clients")
-        
-        # TODO: Re-enable symbol filtering after debugging
-        
-        logger.info(
-            f"WS_MANAGER_BROADCAST clients={len(target_connections)} "
-            f"type={message.get('type')}"
-        )
-        # if message_symbol:
-        #     # Only send to clients subscribed to this symbol
-        #     logger.info(f"FILTERING for symbol {message_symbol} across {len(connections)} clients")
-        #     for conn in connections:
-        #         client_sub = subscriptions.get(conn, {})
-        #         logger.debug(f"Client subscription: {client_sub}")
-        #         if client_sub.get("symbol") == message_symbol:
-        #             target_connections.append(conn)
-        #             logger.debug(f"Client MATCHES subscription")
-        # else:
-        #     # Non-symbol messages (like market status) go to all clients
-        #     target_connections = connections
+        # 2. Concurrently broadcast to all active connections
+        async with self._lock:
+            connections = self.active_connections.copy()
 
-        # logger.info(f"TARGET CONNECTIONS: {len(target_connections)} for {message_symbol}")
-        # if not target_connections:
-        #     logger.warning(f"No clients subscribed to {message_symbol}")
-        #     logger.warning(f"Available subscriptions: {[sub.get('symbol') for sub in subscriptions.values()]}")
-        #     return
+        logger.info(f"[WS MANAGER] Broadcasting to {len(connections)} clients | type={payload.get('type') if isinstance(payload, dict) else 'string'}")
 
         results = await asyncio.gather(
-            *[conn.send_text(json.dumps(message, default=json_safe)) for conn in target_connections],
+            *[conn.send_text(message) for conn in connections],
             return_exceptions=True
         )
 
-        # STEP 13 MONITORING: track broadcast count
         self._total_broadcasts += 1
 
         # Remove dead connections (re-acquire lock only for list mutation)
         dead = [
-            conn for conn, result in zip(target_connections, results)
+            conn for conn, result in zip(connections, results)
             if isinstance(result, Exception)
         ]
         if dead:

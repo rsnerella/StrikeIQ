@@ -53,6 +53,8 @@ class WavePattern:
     key_levels: List[float]
     interpretation: str
 
+from app.analytics.neo_wave_engine import neo_wave_engine
+
 @dataclass
 class StructureAnalysis:
     """Complete structure analysis result"""
@@ -62,6 +64,7 @@ class StructureAnalysis:
     supply_zones: List[SupplyDemandZone]
     demand_zones: List[SupplyDemandZone]
     wave_pattern: WavePattern
+    neo_wave: Dict[str, Any]
     alerts: List[Dict[str, Any]]
     momentum_state: str
     key_levels: Dict[str, float]
@@ -74,14 +77,8 @@ class StructureEngine:
     - Structure analysis (from services/structure_engine.py)
     - Zone detection (from services/zone_detection_engine.py)
     - Wave analysis (from services/wave_engine.py)
+    - Neo Wave analysis (New)
     - Real-time alerts (from services/live_structural_engine.py)
-    
-    Features:
-    - Swing point detection
-    - Market structure classification
-    - Supply/demand zone identification
-    - Elliott Wave pattern recognition
-    - Real-time structural alerts
     """
     
     def __init__(self):
@@ -98,7 +95,7 @@ class StructureEngine:
         
         # Cache for real-time analysis
         self.last_analysis_time = {}
-        self.analysis_cooldown = 60  # seconds
+        self.analysis_cooldown = 1  # Reduced for responsiveness
         
         logger.info("StructureEngine initialized - Unified structure analysis")
     
@@ -108,8 +105,8 @@ class StructureEngine:
         """
         try:
             # Check cooldown for real-time analysis
-            if not self._should_analyze(symbol):
-                return self._get_cached_analysis(symbol)
+            # if not self._should_analyze(symbol):
+            #     return self._get_cached_analysis(symbol)
             
             # Detect swing points
             swing_highs = self.find_swing_highs(candles)
@@ -128,6 +125,10 @@ class StructureEngine:
             
             # Analyze wave patterns
             wave_pattern = self.detect_elliott_waves(swing_highs, swing_lows, current_price)
+            
+            # Analyze Neo Wave patterns
+            prices = [float(c.close) if hasattr(c, 'close') else float(c) for c in candles]
+            neo_wave = neo_wave_engine.analyze(symbol, prices, current_price)
             
             # Generate alerts
             alerts = self._generate_structure_alerts(
@@ -149,6 +150,7 @@ class StructureEngine:
                 supply_zones=supply_zones,
                 demand_zones=demand_zones,
                 wave_pattern=wave_pattern,
+                neo_wave=neo_wave,
                 alerts=alerts,
                 momentum_state=momentum_state,
                 key_levels=key_levels
@@ -681,12 +683,13 @@ class StructureEngine:
                 } for dz in analysis.demand_zones
             ],
             "elliott_wave": {
-                "wave_type": analysis.elliott_wave.wave_type,
-                "wave_label": analysis.elliott_wave.wave_label,
-                "confidence": analysis.elliott_wave.confidence,
-                "key_levels": analysis.elliott_wave.key_levels,
-                "interpretation": analysis.elliott_wave.interpretation
+                "wave_type": analysis.wave_pattern.wave_type,
+                "wave_label": analysis.wave_pattern.wave_label,
+                "probability": analysis.wave_pattern.probability,
+                "key_levels": analysis.wave_pattern.key_levels,
+                "interpretation": analysis.wave_pattern.interpretation
             },
+            "neo_wave": analysis.neo_wave,
             "key_levels": analysis.key_levels
         }
     
@@ -704,3 +707,6 @@ class StructureEngine:
         except Exception as e:
             logger.error(f"StructureEngine analytics loop error: {e}")
             await asyncio.sleep(10)  # Brief pause before retry
+
+# singleton instance
+structure_engine = StructureEngine()

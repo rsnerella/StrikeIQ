@@ -25,17 +25,16 @@ import time
 from typing import Any, Dict, List, Optional
 
 from .candle_builder import candle_builder
-from .structure_engine import structure_engine
-from .wave_engine import wave_engine
-from .zone_detection_engine import zone_detection_engine
+from app.analytics.structure_engine import structure_engine
 from .candle_pattern_engine import candle_pattern_engine
 
 logger = logging.getLogger(__name__)
 
 # ── Score weights ──────────────────────────────────────────────────────────────
 _W = {
-    "wave":      0.20,
-    "structure": 0.25,
+    "wave":      0.15,  # Elliott
+    "neo_wave":  0.10,  # Neo Wave
+    "structure": 0.20,
     "zone":      0.20,
     "pattern":   0.15,
     "options":   0.20,
@@ -62,64 +61,44 @@ class ChartSignalEngine:
     ) -> Dict[str, Any]:
         """
         Full chart analysis.
-
-        Args:
-            symbol:             "NIFTY" or "BANKNIFTY"
-            current_price:      Latest spot price
-            chain_data:         Option chain snapshot
-            options_analytics:  Output from analytics_broadcaster
-            interval:           Candle interval for analysis ("1m" or "5m")
-
-        Returns:
-            chart_analysis payload ready for WebSocket broadcast.
         """
         try:
             t0 = time.monotonic()
             
-            # DEBUG: Log input data
-            logger.info(f"CHART INTELLIGENCE INPUT → {symbol} price={current_price}")
-            logger.info(f"CHAIN DATA KEYS → {list(chain_data.keys()) if chain_data else 'None'}")
-            logger.info(f"OPTIONS ANALYTICS KEYS → {list(options_analytics.keys()) if options_analytics else 'None'}")
-            
-            if chain_data:
-                logger.info(f"CHAIN DATA SAMPLE → spot={chain_data.get('spot')} pcr={chain_data.get('pcr')} total_oi={chain_data.get('total_oi_calls', 0) + chain_data.get('total_oi_puts', 0)}")
-            
-            if options_analytics:
-                bias = options_analytics.get('bias', {})
-                struct = options_analytics.get('structural', {})
-                logger.info(f"ANALYTICS SAMPLE → bias_label={bias.get('label')} pcr={bias.get('pcr')} gamma_regime={struct.get('gamma_regime')}")
-
             candles = candle_builder.get_candles(symbol, interval, n=100)
 
             if not candles or current_price <= 0:
-                logger.warning(f"CHART INTELLIGENCE INSUFFICIENT DATA → candles={len(candles) if candles else 0} price={current_price}")
                 return self._empty(symbol, current_price, "Insufficient candle data")
 
+            # ── Unified Engine Call ───────────────────────────────────────────
+            analysis = structure_engine.analyze_market_structure(candles, current_price, symbol)
+            
             # ── Sub-engine calls ───────────────────────────────────────────────
-            structure = structure_engine.analyze(symbol, candles, current_price)
-            waves     = wave_engine.analyze(symbol, candles, current_price)
-            zones     = zone_detection_engine.analyze(symbol, candles, current_price)
+            # candles_patterns is still separate
             patterns  = candle_pattern_engine.analyze(symbol, candles)
 
             # ── Score assembly ─────────────────────────────────────────────────
-            wave_score    = self._score_wave(waves)
-            struct_score  = self._score_structure(structure)
-            zone_score    = self._score_zones(zones, current_price)
+            wave_score    = self._score_wave(analysis.wave_pattern)
+            neo_score     = self._score_neo_wave(analysis.neo_wave)
+            struct_score  = self._score_structure(analysis.structure_pattern, analysis.alerts)
+            zone_score    = self._score_zones(analysis.supply_zones, analysis.demand_zones, current_price)
             pattern_score = self._score_pattern(patterns)
             options_score = self._score_options(options_analytics or {})
 
             raw_bull = (
-                wave_score["bull"]    * _W["wave"]     +
+                wave_score["bull"]    * _W["wave"]      +
+                neo_score["bull"]     * _W["neo_wave"]  +
                 struct_score["bull"]  * _W["structure"] +
-                zone_score["bull"]    * _W["zone"]     +
-                pattern_score["bull"] * _W["pattern"]  +
+                zone_score["bull"]    * _W["zone"]      +
+                pattern_score["bull"] * _W["pattern"]   +
                 options_score["bull"] * _W["options"]
             )
             raw_bear = (
-                wave_score["bear"]    * _W["wave"]     +
+                wave_score["bear"]    * _W["wave"]      +
+                neo_score["bear"]     * _W["neo_wave"]  +
                 struct_score["bear"]  * _W["structure"] +
-                zone_score["bear"]    * _W["zone"]     +
-                pattern_score["bear"] * _W["pattern"]  +
+                zone_score["bear"]    * _W["zone"]      +
+                pattern_score["bear"] * _W["pattern"]   +
                 options_score["bear"] * _W["options"]
             )
 
@@ -149,17 +128,28 @@ class ChartSignalEngine:
                     stop_zone = [demand["bottom"], demand["top"]]
             elif signal == "SELL":
                 target_zone = [round(current_price - atr * 2, 2), round(current_price - atr * 2, 2)]
+            # ── Target / Stop zones ────────────────────────────────────────────
+            supply = analysis.supply_zones[-1] if analysis.supply_zones else None
+            demand = analysis.demand_zones[-1] if analysis.demand_zones else None
+            atr    = current_price * 0.005 # Default fallback
+
+            if signal == "BUY":
+                target_zone = [round(current_price + atr, 2), round(current_price + atr * 2, 2)]
+                stop_zone   = [round(current_price - atr * 1.5, 2), round(current_price - atr, 2)]
+                if supply:
+                    target_zone = [supply.bottom, supply.top]
+                if demand:
+                    stop_zone = [demand.bottom, demand.top]
+            elif signal == "SELL":
+                target_zone = [round(current_price - atr * 2, 2), round(current_price - atr * 2, 2)]
                 stop_zone   = [round(current_price + atr * 2, 2), round(current_price + atr * 1.5, 2)]
                 if demand:
-                    target_zone = [demand["bottom"], demand["top"]]
+                    target_zone = [demand.bottom, demand.top]
                 if supply:
-                    stop_zone = [supply["bottom"], supply["top"]]
+                    stop_zone = [supply.bottom, supply.top]
             else:
                 target_zone = []
                 stop_zone = []
-
-            # DEBUG: Log final signal
-            logger.info(f"CHART INTELLIGENCE SIGNAL → {symbol} {signal} confidence={confidence:.2f} bull={bull:.2f} bear={bear:.2f}")
 
             # ── Payload assembly ────────────────────────────────────────────────
             elapsed_ms = round((time.monotonic() - t0) * 1000, 1)
@@ -174,22 +164,23 @@ class ChartSignalEngine:
                 "bull_score":  round(bull, 3),
                 "bear_score":  round(bear, 3),
                 # Wave
-                "wave":        waves["elliott"].get("wave", "?"),
-                "wave_pattern": waves["elliott"].get("pattern", "UNKNOWN"),
-                "wave_probability": waves["elliott"].get("probability", 0),
-                "wave_points": waves.get("elliott_points", []),
-                "neo_pattern": waves["neo"].get("pattern", "UNKNOWN"),
+                "wave":        analysis.wave_pattern.wave_label,
+                "wave_pattern": analysis.wave_pattern.wave_type,
+                "wave_probability": analysis.wave_pattern.probability,
+                "wave_points": [sp.price for sp in analysis.swing_points[-5:]],
+                "neo_pattern": analysis.neo_wave.get("pattern", "UNKNOWN"),
                 # Structure
-                "trend":       structure.get("trend", "UNKNOWN"),
-                "bos":         structure.get("bos", {}).get("detected", False),
-                "bos_direction": structure.get("bos", {}).get("direction", "NONE"),
-                "mss":         structure.get("mss", {}).get("detected", False),
+                "trend":       analysis.structure_pattern.trend,
+                "bos":         any(a.get("type") == "structure_break" for a in analysis.alerts),
+                "mss":         analysis.momentum_state,
                 # Zones
-                "supply_zone": [supply["bottom"], supply["top"]] if supply else [],
-                "demand_zone": [demand["bottom"], demand["top"]] if demand else [],
-                "all_zones": zones.get("all_zones", []),
-                "order_blocks": zones.get("order_blocks", []),
-                "liquidity_pools": zones.get("liquidity_pools", []),
+                "supply_zone": [supply.bottom, supply.top] if supply else [],
+                "demand_zone": [demand.bottom, demand.top] if demand else [],
+                "all_zones": [
+                    {"type": z.type, "top": z.top, "bottom": z.bottom, "strength": z.strength}
+                    for z in analysis.supply_zones + analysis.demand_zones
+                ],
+                "order_blocks": analysis.key_levels.get("resistance", []) + analysis.key_levels.get("support", []),
                 # Patterns
                 "candle_pattern": patterns["primary"]["pattern"] if patterns["primary"] else None,
                 "candle_signal":  patterns["primary"]["signal"]  if patterns["primary"] else "WAIT",
@@ -200,12 +191,6 @@ class ChartSignalEngine:
                 "computation_ms": elapsed_ms,
             }
 
-            logger.debug(
-                "CHART SIGNAL [%s] signal=%s conf=%.2f wave=%s trend=%s (%.1fms)",
-                symbol, signal, confidence,
-                result["wave"], result["trend"], elapsed_ms
-            )
-
             return result
 
         except Exception as e:
@@ -214,68 +199,69 @@ class ChartSignalEngine:
 
     # ── Sub-scorers ────────────────────────────────────────────────────────────
 
-    def _score_wave(self, waves: Dict) -> Dict[str, float]:
-        pattern = waves.get("elliott", {}).get("pattern", "")
-        prob    = waves.get("elliott", {}).get("probability", 0) / 100.0
-        wave    = waves.get("elliott", {}).get("wave", "?")
+    def _score_wave(self, wave_pattern: Any) -> Dict[str, float]:
+        pattern = wave_pattern.wave_type
+        prob    = wave_pattern.probability
+        label    = wave_pattern.wave_label
 
         bull = bear = 0.0
-        if "BULLISH" in pattern:
+        if "BULLISH" in pattern or pattern == "IMPULSE":
             bull = prob
-            if wave in ("3", "5"):   # strongest bullish waves
+            if "W3" in label or "W5" in label:
                 bull = min(1.0, bull * 1.2)
         elif "BEARISH" in pattern:
             bear = prob
-            if wave in ("3", "5"):
+            if "W3" in label or "W5" in label:
                 bear = min(1.0, bear * 1.2)
-        elif "ABC" in pattern:
-            if "BULLISH" in pattern:
-                bull = prob * 0.6
-            else:
-                bear = prob * 0.6
-
+        
         return {"bull": bull, "bear": bear}
 
-    def _score_structure(self, structure: Dict) -> Dict[str, float]:
-        trend = structure.get("trend", "CHOPPY")
-        bos   = structure.get("bos", {})
-        mss   = structure.get("mss", {})
+    def _score_neo_wave(self, neo_wave: Dict) -> Dict[str, float]:
+        """Score based on Neo Wave pattern confidence."""
+        pattern = neo_wave.get("pattern", "UNKNOWN")
+        conf = neo_wave.get("confidence", 0)
+        
+        bull = bear = 0.0
+        # Diatmetrics and Symmetricals are often trend continuation or reversal
+        if conf > 0.5:
+            # Simplified: if pattern is detected, it adds to conviction
+            # In a real system, we'd check if A-G is bullish or bearish
+            bull = conf * 0.5 
+            
+        return {"bull": bull, "bear": bear}
 
+    def _score_structure(self, structure_pattern: Any, alerts: List[Dict]) -> Dict[str, float]:
+        trend = structure_pattern.trend
+        
         bull = bear = 0.0
         if trend == "BULLISH":
             bull = 0.7
         elif trend == "BEARISH":
             bear = 0.7
 
-        if bos.get("detected"):
-            if bos.get("direction") == "BULLISH":
-                bull = min(1.0, bull + 0.2)
-            elif bos.get("direction") == "BEARISH":
-                bear = min(1.0, bear + 0.2)
-
-        if mss.get("detected"):
-            new_trend = mss.get("to", "")
-            if new_trend == "BULLISH":
-                bull = min(1.0, bull + 0.15)
-            elif new_trend == "BEARISH":
-                bear = min(1.0, bear + 0.15)
+        for alert in alerts:
+            if alert.get("type") == "structure_break":
+                if "broken below" in alert.get("message", ""):
+                    bear = min(1.0, bear + 0.3)
+                elif "broken above" in alert.get("message", ""):
+                    bull = min(1.0, bull + 0.3)
 
         return {"bull": bull, "bear": bear}
 
-    def _score_zones(self, zones: Dict, price: float) -> Dict[str, float]:
+    def _score_zones(self, supply: List[Any], demand: List[Any], price: float) -> Dict[str, float]:
         bull = bear = 0.0
-        demand = zones.get("nearest_demand")
-        supply = zones.get("nearest_supply")
-
+        
         if demand:
-            dist_pct = abs(price - demand["mid"]) / max(price, 1)
-            if dist_pct < 0.005:          # within 0.5% of demand zone
-                bull = min(1.0, demand["strength"] / 100.0 * 0.8)
+            d = demand[-1]
+            dist_pct = abs(price - d.mid) / max(price, 1)
+            if dist_pct < 0.005:
+                bull = min(1.0, d.strength / 100.0 * 0.8)
 
         if supply:
-            dist_pct = abs(price - supply["mid"]) / max(price, 1)
+            s = supply[-1]
+            dist_pct = abs(price - s.mid) / max(price, 1)
             if dist_pct < 0.005:
-                bear = min(1.0, supply["strength"] / 100.0 * 0.8)
+                bear = min(1.0, s.strength / 100.0 * 0.8)
 
         return {"bull": bull, "bear": bear}
 

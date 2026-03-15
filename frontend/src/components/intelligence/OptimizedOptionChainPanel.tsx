@@ -159,8 +159,16 @@ TopStrikes.displayName = 'TopStrikes';
 const OptimizedOptionChainPanel: React.FC<OptimizedOptionChainPanelProps> = memo(({ optionChainData }) => {
   // Memoized data extraction to prevent re-computation
   const { calls, puts, hasData } = useMemo(() => {
-    const calls = optionChainData?.calls ?? [];
-    const puts = optionChainData?.puts ?? [];
+    const rawCalls = optionChainData?.calls || {};
+    const calls = Object.entries(rawCalls)
+      .map(([strike, data]: [string, any]) => ({ ...data, strike: Number(strike) }))
+      .sort((a, b) => a.strike - b.strike);
+
+    const rawPuts = optionChainData?.puts || {};
+    const puts = Object.entries(rawPuts)
+      .map(([strike, data]: [string, any]) => ({ ...data, strike: Number(strike) }))
+      .sort((a, b) => a.strike - b.strike);
+
     const hasData = calls.length > 0 || puts.length > 0;
     
     return { calls, puts, hasData };

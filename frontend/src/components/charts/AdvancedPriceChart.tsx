@@ -20,6 +20,7 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
     const timeframe = useMarketContextStore(state => state.timeframe || '1m');
 
     const [loading, setLoading] = useState(true);
+    const [chartMessage, setChartMessage] = useState<string | null>(null);
 
     // References to hold current state of markers and zones so we can update them
     const currentPriceRef = useRef<number | null>(null);
@@ -162,23 +163,14 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
                 if (res.ok) {
                     const candles = responseData.candles || [];
                     
-                    // STEP 3 continued — Check response structure
-                    console.log("CANDLES ARRAY EXISTS →", !!responseData.candles);
-                    console.log("CANDLES ARRAY LENGTH →", candles.length);
-                    console.log("CANDLES ARRAY EMPTY →", candles.length === 0);
-                    
-                    // Show empty chart message if no candles
+                    // Show message if no candles
                     if (!candles || candles.length === 0) {
-                        if (isMounted && chartContainerRef.current) {
-                            chartContainerRef.current.innerHTML = `
-                                <div class="flex items-center justify-center h-full text-gray-500 text-sm">
-                                    <span>Chart data loading... (market may be closed)</span>
-                                </div>
-                            `;
-                        }
+                        setChartMessage('Market closed — showing last session data');
                         setLoading(false);
                         return;
                     }
+                    
+                    setChartMessage(null);
                     
                     if (isMounted && seriesRef.current && candles.length > 0) {
                         // Filter candles to NSE trading hours (09:15 → 15:30)
@@ -429,6 +421,13 @@ export const AdvancedPriceChart: React.FC<AdvancedPriceChartProps> = ({ data }) 
             {loading && (
                 <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60">
                     <span className="text-white/70 font-mono text-xs tracking-widest animate-pulse">LOADING SYMBOL DATA...</span>
+                </div>
+            )}
+            {!loading && chartMessage && (
+                <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/40 pointer-events-none">
+                    <div className="bg-black/60 backdrop-blur-md px-4 py-2 rounded-lg border border-white/10 shadow-2xl">
+                        <span className="text-white/60 font-mono text-xs uppercase tracking-wider">{chartMessage}</span>
+                    </div>
                 </div>
             )}
             {/* Header info overlay */}

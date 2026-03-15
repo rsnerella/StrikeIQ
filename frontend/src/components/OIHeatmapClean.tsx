@@ -1,15 +1,13 @@
 import React, { memo, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useShallow } from "zustand/shallow";
-import { BarChart3, TrendingUp, TrendingDown } from 'lucide-react';
+import { BarChart3, TrendingUp, TrendingDown, Calendar } from 'lucide-react';
 import api from '../lib/api';
 import { useWSStore } from '../core/ws/wsStore';
 import { useOptionChainStore } from '../core/ws/optionChainStore';
-import { useDashboardData } from '../hooks/useDashboardData';
 import { useExpirySelector } from '../hooks/useExpirySelector';
 import { CARD } from './dashboard/DashboardTypes';
 import { SectionLabel } from './dashboard/StatCards';
 import { PremiumDropdown } from './ui/PremiumDropdown';
-import { Calendar } from 'lucide-react';
 
 interface OIData {
   strike: number;
@@ -29,13 +27,7 @@ interface OIHeatmapProps {
   symbol: string;
 }
 
-
-const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
-  // PERFORMANCE: Render profiling moved to useEffect
-  useEffect(() => {
-    console.count("OIHeatmap render")
-  })
-
+const OIHeatmapClean: React.FC<OIHeatmapProps> = ({ symbol }) => {
   // Use expiry selector hook
   const {
     expiryList,
@@ -46,112 +38,114 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
     optionChainConnected
   } = useExpirySelector();
 
-  // Use global store data
-  const { calls, puts, connected } = useDashboardData();
-
   const [oiData, setOiData] = useState<OIData[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [spotPrice, setSpotPrice] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Read from Zustand stores for fallback with grouped selectors
-  const { liveData, optionChainSnapshot, spot } = useWSStore(
+  // Read from Zustand stores with unique variable names to avoid any possible collisions
+  const { 
+    heatmapStoreCalls, 
+    heatmapStorePuts, 
+    heatmapStoreSpot, 
+    heatmapStoreConnected, 
+    heatmapStorePcr, 
+    heatmapStoreAtm 
+  } = useWSStore(
     useShallow(state => ({
-      liveData: state.liveData,
-      optionChainSnapshot: state.optionChainSnapshot,
-      spot: state.spot
+      heatmapStoreCalls: state.calls,
+      heatmapStorePuts: state.puts,
+      heatmapStoreSpot: state.spot,
+      heatmapStoreConnected: state.connected,
+      heatmapStorePcr: state.pcr,
+      heatmapStoreAtm: state.atmStrike
     }))
-  )
+  );
+  
   const { optionChainData } = useOptionChainStore();
 
-  // Use structured data from global store, fallback to option chain store, then legacy data
-  const actualLiveData = (calls && calls.length > 0) || (puts && puts.length > 0)
-    ? { calls, puts, spot }
-    : optionChainData || liveData || optionChainSnapshot;
+  // Use structured data mapped from store
+  const actualLiveData = useMemo(() => ({ 
+    callsData: Object.values(heatmapStoreCalls || {}), 
+    putsData: Object.values(heatmapStorePuts || {}), 
+    spot: heatmapStoreSpot,
+    spot_price: heatmapStoreSpot,
+    pcr: heatmapStorePcr,
+    atm_strike: heatmapStoreAtm
+  }), [heatmapStoreCalls, heatmapStorePuts, heatmapStoreSpot, heatmapStorePcr, heatmapStoreAtm]);
 
-  // 🔥 PCR FALLBACK CALCULATION (FRONTEND-ONLY FIX)
+  // 🔥 PCR FALLBACK CALCULATION
   const calculatePCR = useCallback((data: any) => {
-    if (!data || !data.calls || !data.puts) return 0;
+    if (!data || !data.callsData || !data.putsData) return 0;
 
-    const totalCallOI = data.calls.reduce((sum: number, call: any) =>
+    const totalCallOI = data.callsData.reduce((sum: number, call: any) =>
       sum + (call.open_interest || call.oi || 0), 0);
-    const totalPutOI = data.puts.reduce((sum: number, put: any) =>
+    const totalPutOI = data.putsData.reduce((sum: number, put: any) =>
       sum + (put.open_interest || put.oi || 0), 0);
 
     return totalCallOI > 0 ? totalPutOI / totalCallOI : 0;
   }, []);
 
-  // Use backend PCR if valid, otherwise fallback to calculated PCR
   const pcr = useMemo(() => {
     return actualLiveData?.pcr && actualLiveData.pcr > 0
       ? actualLiveData.pcr
       : calculatePCR(actualLiveData);
-  }, [actualLiveData?.pcr, calculatePCR]);
-
-  // Remove render-time logging to prevent memory growth
+  }, [actualLiveData, calculatePCR]);
 
   const tableRef = useRef<HTMLDivElement>(null);
   const atmRowRef = useRef<HTMLTableRowElement>(null);
   const hasScrolledRef = useRef<boolean>(false);
 
-  // Remove render-time logging to prevent memory growth
-
-  // Reset scroll flag when symbol changes
   useEffect(() => {
     hasScrolledRef.current = false;
   }, [symbol]);
 
-  // Process live data from WebSocket (includes chain snapshot)
+  // Process live data from WebSocket
   useEffect(() => {
-    if (actualLiveData && "calls" in actualLiveData && "puts" in actualLiveData && Array.isArray(actualLiveData.calls)) {
-      // Process live data without render-time logging
-
-      // Use spot price from live data (new field name)
+    if (actualLiveData && actualLiveData.callsData && Array.isArray(actualLiveData.callsData)) {
       setSpotPrice(actualLiveData.spot_price);
 
-      // Build unified strike map by merging calls and puts
       const strikeMap: { [key: number]: { call_oi: number; put_oi: number; call_ltp: number; put_ltp: number; call_volume: number; put_volume: number } } = {};
 
-      // Process calls
-      actualLiveData.calls.forEach((call: any) => {
-        strikeMap[call.strike] = {
-          call_oi: call.oi || 0,
-          put_oi: 0,
-          call_ltp: call.ltp || 0,
-          put_ltp: 0,
-          call_volume: call.volume || 0,
-          put_volume: 0
-        };
-      });
-
-      // Process puts and merge with existing strikes
-      actualLiveData.puts.forEach((put: any) => {
-        if (strikeMap[put.strike]) {
-          // Merge with existing call data
-          strikeMap[put.strike].put_oi = put.oi || 0;
-          strikeMap[put.strike].put_ltp = put.ltp || 0;
-          strikeMap[put.strike].put_volume = put.volume || 0;
-        } else {
-          // Add new put-only strike
-          strikeMap[put.strike] = {
-            call_oi: 0,
-            put_oi: put.oi || 0,
-            call_ltp: 0,
-            put_ltp: put.ltp || 0,
-            call_volume: 0,
-            put_volume: put.volume || 0
+      actualLiveData.callsData.forEach((call: any) => {
+        if (call.strike) {
+          strikeMap[call.strike] = {
+            call_oi: call.oi || 0,
+            put_oi: 0,
+            call_ltp: call.ltp || 0,
+            put_ltp: 0,
+            call_volume: call.volume || 0,
+            put_volume: 0
           };
         }
       });
 
-      // Convert strike map to array format for rendering
+      actualLiveData.putsData.forEach((put: any) => {
+        if (put.strike) {
+          if (strikeMap[put.strike]) {
+            strikeMap[put.strike].put_oi = put.oi || 0;
+            strikeMap[put.strike].put_ltp = put.ltp || 0;
+            strikeMap[put.strike].put_volume = put.volume || 0;
+          } else {
+            strikeMap[put.strike] = {
+              call_oi: 0,
+              put_oi: put.oi || 0,
+              call_ltp: 0,
+              put_ltp: put.ltp || 0,
+              call_volume: 0,
+              put_volume: put.volume || 0
+            };
+          }
+        }
+      });
+
       const transformedData = Object.entries(strikeMap).map(([strike, data]) => ({
         strike: parseInt(strike),
         oi: data.call_oi,
-        change: 0, // Not available in snapshot
+        change: 0,
         ltp: data.call_ltp,
         volume: data.call_volume,
-        iv: 0, // Not available in snapshot
+        iv: 0,
         put_oi: data.put_oi,
         put_change: 0,
         put_ltp: data.put_ltp,
@@ -159,41 +153,30 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
         put_iv: 0,
       }));
 
-      // Sort by strike for proper ordering
       transformedData.sort((a, b) => a.strike - b.strike);
 
-      // Filter to ATM window (±500 strikes) - DO NOT filter by OI
       const filteredData = transformedData.filter(row => {
-        const diff = Math.abs(row.strike - actualLiveData.atm_strike);
-        return diff <= 500;   // keep ±500 window
+        const diff = Math.abs(row.strike - (actualLiveData.atm_strike || spotPrice || 0));
+        return diff <= 500;
       });
 
-      // Process strike transformation without logging
       setOiData(filteredData);
       setLoading(false);
       setError(null);
-    } else {
-      // Handle invalid data silently
     }
-  }, [actualLiveData]);
+  }, [actualLiveData, spotPrice]);
 
-  // Remove render-time logging to prevent memory growth
-
-  // Always render the UI, show loading/error states inline instead of blocking
-
-  // Calculate max OI for intensity scaling
   const maxCallOI = Math.max(...oiData.map(r => r.oi), 1);
   const maxPutOI = Math.max(...oiData.map(r => r.put_oi), 1);
 
   return (
     <div className="w-full relative">
-      {/* ── Dashboard Integration Header ─────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
         <div className="flex flex-col gap-1">
           <SectionLabel>Option Intelligence Matrix</SectionLabel>
           <div className="flex items-center gap-2">
             <span className="text-[10px] font-bold font-mono tracking-widest text-slate-500 uppercase">Real-time OI Concentration</span>
-            <div className={`w-1.5 h-1.5 rounded-full ${optionChainConnected ? 'bg-cyan-500 animate-pulse' : 'bg-slate-700'}`} />
+            <div className={`w-1.5 h-1.5 rounded-full ${heatmapStoreConnected ? 'bg-cyan-500 animate-pulse' : 'bg-slate-700'}`} />
           </div>
         </div>
 
@@ -221,7 +204,6 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
         </div>
       </div>
 
-      {/* ── Spot Indicator ────────────────────────────────────────── */}
       {spotPrice && (
         <div className="group relative overflow-hidden mb-6 p-4 rounded-2xl bg-[#00E5FF]/[0.02] border border-[#00E5FF]/10 transition-all duration-500 hover:bg-[#00E5FF]/[0.04]">
           <div className="absolute top-0 left-0 w-1 h-full bg-[#00E5FF]" />
@@ -232,24 +214,15 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
             </div>
             <div className="flex items-baseline gap-2">
               <span className="text-[10px] font-bold font-mono text-cyan-500/50">INR</span>
-              <span
-                className="text-3xl font-black tabular-nums tracking-tighter text-white"
-                style={{ fontFamily: "'Space Grotesk', sans-serif" }}
-              >
-                {spotPrice > 0
-                    ? spotPrice.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                    : <span className="text-gray-600 animate-pulse">Loading...</span>
-                  }
+              <span className="text-3xl font-black tabular-nums tracking-tighter text-white" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+                {spotPrice.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── The Matrix ────────────────────────────────────────────── */}
       <div className="relative rounded-2xl overflow-hidden border border-white/5 bg-black/20 backdrop-blur-sm">
-
-        {/* Matrix Header */}
         <div className="sticky top-0 z-30 bg-[#090e1a]/95 backdrop-blur-xl border-b border-white/10">
           <div className="grid grid-cols-7 py-3">
             <div className="col-span-3 text-center border-r border-white/5">
@@ -274,12 +247,7 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
           </div>
         </div>
 
-        {/* Matrix Body */}
-        <div
-          ref={tableRef}
-          className="overflow-y-auto custom-scrollbar"
-          style={{ maxHeight: '520px' }}
-        >
+        <div ref={tableRef} className="overflow-y-auto custom-scrollbar" style={{ maxHeight: '520px' }}>
           <div className="flex flex-col">
             {oiData.map((row) => {
               const checkSpot = actualLiveData?.atm_strike || spotPrice || 0;
@@ -288,53 +256,31 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
               const putIntensity = row.put_oi / maxPutOI;
 
               return (
-                <div
-                  key={row.strike}
-                  ref={isATM ? atmRowRef : null}
-                  className={`grid grid-cols-7 py-2.5 border-b border-white/[0.02] transition-colors duration-300 relative ${isATM ? 'bg-cyan-500/[0.06] border-y border-cyan-500/20 z-10' : 'hover:bg-white/[0.02]'
-                    }`}
-                >
-                  {/* Call OI Intensity Bar */}
+                <div key={row.strike} ref={isATM ? atmRowRef : null} className={`grid grid-cols-7 py-2.5 border-b border-white/[0.02] transition-colors duration-300 relative ${isATM ? 'bg-cyan-500/[0.06] border-y border-cyan-500/20 z-10' : 'hover:bg-white/[0.02]'}`}>
                   <div className="absolute right-[57.14%] top-0 bottom-0 pointer-events-none overflow-hidden transition-all duration-700" style={{ width: `${callIntensity * 42.8}%` }}>
                     <div className="absolute inset-0 bg-red-500/5 border-r border-red-500/20" />
                   </div>
-
-                  {/* Call OI */}
                   <div className="text-right pr-6 text-[12px] font-bold font-mono tabular-nums text-red-100 relative z-10 transition-colors" style={{ opacity: callIntensity > 0.1 ? 1 : 0.4 }}>
                     {row.oi > 0 ? row.oi.toLocaleString() : '—'}
                   </div>
-
-                  {/* Call Chg */}
                   <div className="text-center text-[11px] font-mono text-slate-600 tabular-nums">
                     {row.change !== 0 ? (row.change > 0 ? `+${row.change}` : row.change) : '—'}
                   </div>
-
-                  {/* Call LTP */}
                   <div className="text-center text-[11px] font-bold font-mono text-slate-400 tabular-nums border-r border-white/5">
                     {row.ltp > 0 ? row.ltp.toFixed(1) : '—'}
                   </div>
-
-                  {/* Strike */}
                   <div className={`text-center text-[13px] font-black font-mono tabular-nums tracking-tighter ${isATM ? 'text-cyan-400' : 'text-white'}`}>
                     {row.strike}
                   </div>
-
-                  {/* Put LTP */}
                   <div className="text-center text-[11px] font-bold font-mono text-slate-400 tabular-nums border-l border-white/5">
                     {row.put_ltp > 0 ? row.put_ltp.toFixed(1) : '—'}
                   </div>
-
-                  {/* Put Chg */}
                   <div className="text-center text-[11px] font-mono text-slate-600 tabular-nums">
                     {row.put_change !== 0 ? (row.put_change > 0 ? `+${row.put_change}` : row.put_change) : '—'}
                   </div>
-
-                  {/* Put OI Intensity Bar */}
                   <div className="absolute left-[57.14%] top-0 bottom-0 pointer-events-none overflow-hidden transition-all duration-700" style={{ width: `${putIntensity * 42.8}%` }}>
                     <div className="absolute inset-0 bg-green-500/5 border-l border-green-500/20" />
                   </div>
-
-                  {/* Put OI */}
                   <div className="text-left pl-6 text-[12px] font-bold font-mono tabular-nums text-green-100 relative z-10 transition-colors" style={{ opacity: putIntensity > 0.1 ? 1 : 0.4 }}>
                     {row.put_oi > 0 ? row.put_oi.toLocaleString() : '—'}
                   </div>
@@ -345,7 +291,6 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
         </div>
       </div>
 
-      {/* Matrix Footer */}
       <div className="mt-4 flex items-center justify-between">
         <div className="flex gap-6">
           <div className="flex items-center gap-2">
@@ -370,5 +315,4 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
   );
 };
 
-
-export default React.memo(OIHeatmap);
+export default memo(OIHeatmapClean);
