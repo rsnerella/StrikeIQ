@@ -41,6 +41,8 @@ import { BiasPanel, ExpectedMovePanel } from './dashboard/BiasAndMove';
 import { SmartMoneyPanel, LiquidityPanel } from './dashboard/SmartMoneyAndLiquidity';
 import { CARD } from './dashboard/DashboardTypes';
 import type { LiveMarketData } from '../hooks/useLiveMarketData';
+import { StrikeIQChart } from './charts/StrikeIQChart';
+import { AdvancedPriceChart } from './charts/AdvancedPriceChart';
 
 // ── Memoized heavy panels (Task 10) ─────────────────────────────────────────────
 const MemoizedOIHeatmap = memo(OIHeatmap);
@@ -204,7 +206,7 @@ function DashboardComponent({ initialSymbol = 'NIFTY' }: DashboardProps) {
   } = useExpirySelector();
 
   // Unified Store Hook - Law 7
-  useLiveMarketData(currentSymbol, selectedExpiry);
+  const liveMarketData = useLiveMarketData(currentSymbol, selectedExpiry);
 
   return (
     <div className="min-h-screen bg-[#020408] text-slate-200 font-sans selection:bg-blue-500/30">
@@ -288,7 +290,21 @@ function DashboardComponent({ initialSymbol = 'NIFTY' }: DashboardProps) {
             <VolatilityRegimePanel />
           </div>
 
-          {/* ROW 9 — OI Heatmap (full width, horizontal scroll) */}
+          {/* ROW 9 — StrikeIQ Chart (full width) */}
+          <div className="col-12">
+            <div className="trading-panel">
+              <StrikeIQChart />
+            </div>
+          </div>
+
+          {/* ROW 10 — Advanced Price Chart (full width) */}
+          <div className="col-12">
+            <div className="trading-panel">
+              <AdvancedPriceChart data={liveMarketData.data} />
+            </div>
+          </div>
+
+          {/* ROW 11 — OI Heatmap (full width, horizontal scroll) */}
           <div className="col-12">
             <div className="trading-panel" style={{ padding: 0 }}>
               <div id="oi-heatmap" className="rounded-2xl overflow-x-auto" style={CARD}>
