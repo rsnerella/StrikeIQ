@@ -16,7 +16,7 @@ const AIInterpretationPanel: React.FC = () => {
     const interpretation = useWSStore(s => s.summary ?? '');
     const riskTopology = useWSStore(s => s.regime ?? 'STABLE');
     const structuralPos = useWSStore(s => s.regime ?? 'RANGING');
-    const contradictions = [];
+    const earlyWarnings = useWSStore(s => s.earlyWarnings ?? []);
     const confidence = useWSStore(s => s.biasStrength ?? 0);
 
     if (!hasData) {
@@ -118,12 +118,12 @@ const AIInterpretationPanel: React.FC = () => {
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                    {contradictions.length > 0 ? contradictions.map((flag, idx) => (
+                    {earlyWarnings.length > 0 ? earlyWarnings.map((flag, idx) => (
                         <div key={idx} className="px-2 py-1 rounded bg-red-500/10 border border-red-500/20 text-[10px] font-black font-mono text-red-400 uppercase tracking-tighter">
-                            {flag}
+                            {flag.alert_type || flag.type || 'WARNING'}
                         </div>
                     )) : (
-                        <div className="text-[10px] font-mono text-slate-600 italic tracking-wider">NO STRUCTURAL ANOMALIES DETECTED IN CURRENT TAPE.</div>
+                        <div className="text-[10px] font-mono text-slate-600 italic tracking-wider">No active warnings detected</div>
                     )}
                 </div>
             </div>

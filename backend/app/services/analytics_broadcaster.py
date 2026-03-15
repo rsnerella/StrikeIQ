@@ -139,20 +139,51 @@ class AnalyticsBroadcaster:
         try:
             from app.services.option_chain_builder import option_chain_builder
             from app.core.ws_manager import manager
+            from ai.advanced_microstructure_layer import AdvancedMicrostructureLayer
 
+            logger.info(f"[COMPUTE] Starting analytics for {symbol}")
+            
             snap = option_chain_builder.get_latest_snapshot(symbol)
             if snap is None:
-                logger.warning(f"[COMPUTE] No snapshot for {symbol} — skipping")
+                logger.warning(f"[COMPUTE] No snapshot for {symbol} — checking chains")
+                # Check if chains exist
+                chains = option_chain_builder.chains.get(symbol, {})
+                logger.info(f"[COMPUTE] Chains for {symbol}: {len(chains)} strikes")
+                if chains:
+                    logger.info(f"[COMPUTE] Sample strikes: {list(chains.keys())[:3]}")
                 return
+
+            logger.info(f"[COMPUTE] Found snapshot for {symbol}: spot={snap.spot} pcr={snap.pcr}")
+
+            # Initialize microstructure layer for liquidity analysis
+            microstructure_layer = AdvancedMicrostructureLayer()
+            
+            # Prepare metrics for liquidity vacuum analysis
+            metrics = {
+                'spot_price': snap.spot,
+                'support': 0,  # Will be calculated from key levels
+                'resistance': 0,  # Will be calculated from key levels  
+                'volatility_regime': 'normal',  # Will be determined from IV
+                'oi_change': 0  # Will be calculated from OI changes
+            }
+            
+            # Run liquidity vacuum analysis
+            microstructure_analysis = microstructure_layer.analyze_microstructure(metrics)
 
             # Simple bias from PCR
             pcr = snap.pcr
             if pcr > 1.3:
-                bias, strength, regime = "BULLISH", round(min((pcr-1)/0.5, 1.0), 3), "RANGING"
+                bias, strength, regime = "BULLISH", round(min((pcr-1.0)/0.5, 1.0), 3), "RANGING"
             elif pcr < 0.7:
-                bias, strength, regime = "BEARISH", round(min((1-pcr)/0.5, 1.0), 3), "RANGING"
+                bias, strength, regime = "BEARISH", round(min((1.0-pcr)/0.5, 1.0), 3), "RANGING"
             else:
-                bias, strength, regime = "NEUTRAL", 0.0, "RANGING"
+                # Neutral zone: 0.7 to 1.3
+                # PCR 0.9586 → slight put lean
+                # Distance from 1.0 center gives strength
+                distance = abs(pcr - 1.0)
+                strength = round(min(distance / 0.3, 1.0), 3)
+                bias = "NEUTRAL"
+                regime = "RANGING"
 
             import time
             ts  = int(time.time())
@@ -203,6 +234,13 @@ class AnalyticsBroadcaster:
                         "adx":          0,
                         "momentum_15m": 0,
                         "pattern":      "NONE",
+                    },
+                    "flow_analysis": {
+                        "call_velocity": max(0.1, min(0.9, (snap.total_call_oi / 1000000))),
+                        "put_velocity": max(0.1, min(0.9, (snap.total_put_oi / 1000000))),
+                        "direction": "BULLISH" if snap.total_call_oi > snap.total_put_oi else "BEARISH",
+                        "intent_score": max(0.1, min(0.9, abs(snap.total_call_oi - snap.total_put_oi) / 100000)),
+                        "imbalance": abs(snap.total_call_oi - snap.total_put_oi) / (snap.total_call_oi + snap.total_put_oi)
                     },
                     "summary": (
                         f"{symbol} | PCR={pcr:.2f} | Bias={bias} | "
@@ -284,6 +322,71 @@ class AnalyticsBroadcaster:
                 f"pcr={pcr:.2f} calls={len(snap.calls_data)} "
                 f"puts={len(snap.puts_data)}"
             )
+
+            # Send separate chart_analysis message with all required data for components
+            chart_analysis_payload = {
+                "type": "chart_analysis",
+                "symbol": symbol,
+                "timestamp": ts,
+                "price": round(spot, 2),
+                "bias": bias,
+                "bias_strength": strength,
+                "regime": regime,
+                "flow_analysis": {
+                    "call_velocity": max(0.1, min(0.9, (snap.total_call_oi / 1000000))),
+                    "put_velocity": max(0.1, min(0.9, (snap.total_put_oi / 1000000))),
+                    "direction": "BULLISH" if snap.total_call_oi > snap.total_put_oi else "BEARISH",
+                    "intent_score": max(0.1, min(0.9, abs(snap.total_call_oi - snap.total_put_oi) / 100000)),
+                    "imbalance": abs(snap.total_call_oi - snap.total_put_oi) / (snap.total_call_oi + snap.total_put_oi)
+                },
+                "key_levels": {
+                    "call_wall": snap.max_call_oi_strike,
+                    "put_wall": snap.max_put_oi_strike,
+                    "max_pain": 0,
+                    "gex_flip": 0,
+                    "vwap": snap.vwap,
+                    "ema20": 0,
+                    "ema50": 0,
+                },
+                "gamma_analysis": {
+                    "net_gex": 0,
+                    "regime": "SHORT_GAMMA" if snap.total_call_oi > snap.total_put_oi else "LONG_GAMMA",
+                    "flip_level": 0,
+                    "implication": "Dealer positioning from OI structure",
+                },
+                "volatility_state": {
+                    "iv_atm": snap.atm_iv,
+                    "iv_percentile": 0,
+                    "state": "NORMAL",
+                    "compression": False,
+                },
+                "technical_state": {
+                    "rsi": 0,
+                    "macd_hist": 0,
+                    "adx": 0,
+                    "momentum_15m": 0,
+                    "pattern": "NONE",
+                },
+                "liquidity_analysis": {
+                    "vacuum_start": round(spot * 0.98, 2),  # 2% below spot
+                    "vacuum_end": round(spot * 1.02, 2),    # 2% above spot
+                    "book_depth": max(0.3, min(0.9, microstructure_analysis.get("liquidity_vacuum_confidence", 0.5))),
+                    "expansion_probability": microstructure_analysis.get("liquidity_vacuum_confidence", 0.3),
+                    "vacuum_signal": microstructure_analysis.get("liquidity_vacuum_signal", "NONE"),
+                    "vacuum_direction": microstructure_analysis.get("liquidity_vacuum_direction", "NONE"),
+                    "vacuum_strength": microstructure_analysis.get("liquidity_vacuum_strength", 0.0)
+                },
+                "signal": "WAIT",
+                "confidence": 0.0,
+                "computation_ms": microstructure_analysis.get("execution_time_ms", 0.0)
+            }
+            
+            try:
+                chart_message = json.dumps(chart_analysis_payload, default=str)
+                await manager.broadcast(chart_message)
+                logger.info(f"[BROADCAST] ✅ {symbol} chart_analysis with liquidity vacuum data")
+            except Exception as e:
+                logger.error(f"[BROADCAST] Chart analysis JSON error for {symbol}: {e}")
 
         except Exception as e:
             logger.error(

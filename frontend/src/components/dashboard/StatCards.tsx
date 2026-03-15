@@ -111,9 +111,9 @@ export function StatCardsRow() {
             />
             <StatCard
                 label="GAMMA REGIME"
-                value={gamma?.regime || 'NEUTRAL'}
-                sub={`FLIP: ${gamma?.gex_flip?.toLocaleString() || '—'}`}
-                accent={gamma?.regime?.includes('SHORT') ? '#f87171' : '#4ade80'}
+                value={(gamma?.regime || 'NEUTRAL').split(' ')[0]}
+                sub={`FLIP: ${gamma?.flip_level?.toLocaleString() || '—'}`}
+                accent={(gamma?.regime || 'NEUTRAL').includes('SHORT') ? '#f87171' : '#4ade80'}
             />
             <StatCard
                 label="MARKET PC RATIO"

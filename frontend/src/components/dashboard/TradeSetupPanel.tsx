@@ -11,21 +11,22 @@ const SkeletonPulse = ({ className }: { className: string }) => (
 );
 
 export function TradeSetupPanel() {
-    // Law 7: Granular Store Subscriptions
-    const lastUpdate = useWSStore(s => s.lastUpdate);
-    const hasData = lastUpdate > 0;
-    const tradePlan = useWSStore(s => s.tradePlan);
-    const regime = useWSStore(s => s.regime ?? 'SCANNING...');
-    const bias = useWSStore(s => s.bias ?? 'NEUTRAL');
+    // Law 7: Granular Store Subscriptions with null-safe pattern
+    const regime       = useWSStore(s => s.regime        ?? 'RANGING')
+    const bias         = useWSStore(s => s.bias          ?? 'NEUTRAL')
+    const pcr          = useWSStore(s => s.pcr           ?? 0)
+    const tradePlan    = useWSStore(s => s.tradePlan)
+    const lastUpdate   = useWSStore(s => s.lastUpdate)
+    const hasData      = lastUpdate > 0
     
     // Loading State (Law 2 & 7)
-    if (!hasData || !tradePlan) {
+    if (!hasData) {
         return (
             <div className="trading-panel h-full flex flex-col justify-center items-center gap-4 opacity-60">
                 <Search className="w-8 h-8 text-blue-500/50 animate-bounce" />
                 <div className="flex flex-col items-center gap-2">
                     <span className="text-[10px] font-bold font-mono tracking-[0.2em] text-blue-400 uppercase">
-                        {tradePlan?.reason?.[0] || (hasData ? 'No high-conviction setup' : 'Analyzing Market Structure...')}
+                        Initializing Market Data...
                     </span>
                     <div className="flex gap-1">
                         <SkeletonPulse className="w-2 h-2" />
@@ -137,6 +138,8 @@ export function TradeSetupPanel() {
                                 <li key={i} className="truncate">{r}</li>
                             ))}
                         </ul>
+                    ) : hasData ? (
+                        <span>{bias} setup — {regime} regime | PCR {pcr?.toFixed(2)}</span>
                     ) : (
                         <div className="flex flex-col gap-2">
                             <SkeletonPulse className="w-full h-3" />

@@ -38,6 +38,7 @@ interface WSStore {
   aiPrediction: any
   candles: any[]
   _lastChainUpdate: number
+  _lastHeatmapUpdate: number
   _THROTTLE_MS: number
   
   // Master Contract v5.0 Extended Fields
@@ -64,6 +65,9 @@ interface WSStore {
   earlyWarnings: any[]
   newsAlerts: any[]
   paperTrading: any
+  heatmapData: any
+  oiHeatmap: any
+  oi_heatmap: any
   
   handleMessage: (message: any) => void
   handleAnalytics: (analyticsPayload: any) => void
@@ -104,6 +108,7 @@ export const useWSStore = create<WSStore>((set, get) => ({
   candles: [],
   lastUpdate: 0,
   _lastChainUpdate: 0,
+  _lastHeatmapUpdate: 0,
   _THROTTLE_MS: 50,
 
   // Master Contract v5.0 Extended State
@@ -130,6 +135,9 @@ export const useWSStore = create<WSStore>((set, get) => ({
   earlyWarnings: [],
   newsAlerts: [],
   paperTrading: null,
+  heatmapData: null,
+  oiHeatmap: null,
+  oi_heatmap: null,
 
   handleMessage: (message: any) => {
     if (!message) return
@@ -259,8 +267,25 @@ export const useWSStore = create<WSStore>((set, get) => ({
 
       case 'option_chain_update': {
         if (message.symbol === selectedSymbol) {
+          const now = Date.now()
+          const lastChainUpdate = get()._lastChainUpdate || 0
+
+          // Only update option chain every 500ms maximum
+          if (now - lastChainUpdate < 500) break
+
           const p = message
           const spot = p.spot || 0
+
+          // Log to verify data is arriving
+          if (process.env.NODE_ENV === 'development') {
+            const callCount = Object.keys(p.calls || {}).length
+            console.log(
+              '[wsStore] option_chain_update |',
+              'calls=', callCount,
+              'pcr=', p.pcr,
+              'atm=', p.atm
+            )
+          }
 
           set((prev) => ({
             spotPrice:    spot > 0 ? spot : prev.spotPrice,
@@ -272,14 +297,34 @@ export const useWSStore = create<WSStore>((set, get) => ({
             pcr:          p.pcr    || prev.pcr,
             calls:        p.calls  || prev.calls || {},
             puts:         p.puts   || prev.puts  || {},
+
+            // Nested optionChain object
             optionChain: {
               ...(prev.optionChain || {}),
-              pcr:    p.pcr    || prev.optionChain?.pcr,
-              calls:  p.calls  || prev.optionChain?.calls || {},
-              puts:   p.puts   || prev.optionChain?.puts || {},
-              atm:    p.atm    || prev.optionChain?.atm,
-              spot:   spot     || prev.optionChain?.spot,
+              calls:   p.calls || {},
+              puts:    p.puts  || {},
+              pcr:     p.pcr   ?? prev.optionChain?.pcr ?? 0,
+              atm:     p.atm   ?? prev.optionChain?.atm ?? 0,
+              spot:    (spot || prev.optionChain?.spot) ?? 0,
+              strikes: p.strikesCount ?? 0,
             },
+
+            // Also write to chainData in case any component uses it
+            chainData: {
+              calls: p.calls || {},
+              puts:  p.puts  || {},
+              pcr:   (p.pcr ?? 0),
+              atm:   (p.atm ?? 0),
+            },
+
+            // Data quality
+            dataQuality: {
+              ...(prev.dataQuality || {}),
+              hasOi:      (p.strikesCount || 0) > 0,
+              lastUpdate: Date.now(),
+            },
+
+            _lastChainUpdate: now
           }));
         }
         break;
@@ -348,9 +393,22 @@ export const useWSStore = create<WSStore>((set, get) => ({
       }
 
       case 'heatmap_update': {
+        const now = Date.now()
+        const lastHeatmap = get()._lastHeatmapUpdate || 0
+
+        if (now - lastHeatmap < 1000) break  // max once per second
+
         const data = message.data;
         if (data) {
-          set({ marketData: { ...get().marketData, heatmap: data }, error: null });
+          // Write to multiple possible fields to ensure compatibility
+          set({ 
+            marketData: { ...get().marketData, heatmap: data }, 
+            heatmapData: data,
+            oiHeatmap: data,
+            oi_heatmap: data,
+            _lastHeatmapUpdate: now,
+            error: null 
+          });
         }
         break;
       }

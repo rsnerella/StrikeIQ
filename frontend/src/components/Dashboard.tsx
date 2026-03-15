@@ -269,7 +269,7 @@ function DashboardComponent({ initialSymbol = 'NIFTY' }: DashboardProps) {
             <InstitutionalFlowPanel />
           </div>
 
-          {/* ROW 7 — Signal Matrix (4 cols) | Trade Setup (4 cols) | Chart Intelligence (4 cols) */}
+          {/* ROW 7 — Signal Matrix (4 cols) | Trade Setup (4 cols) | Chart Intelligence (4 cols) | Strategy Plan (4 cols) */}
           <div className="col-4">
             <SignalMatrixPanel />
           </div>
@@ -278,6 +278,9 @@ function DashboardComponent({ initialSymbol = 'NIFTY' }: DashboardProps) {
           </div>
           <div className="col-4">
             <ChartIntelligencePanel />
+          </div>
+          <div className="col-4">
+            <MemoizedStrategyPlan />
           </div>
 
           {/* ROW 8 — Volatility Regime (full width) */}

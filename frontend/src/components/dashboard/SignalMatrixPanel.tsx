@@ -41,20 +41,36 @@ const SkeletonPulse = ({ className }: { className: string }) => (
 );
 
 export function SignalMatrixPanel() {
-    // Law 7: Granular Store Subscriptions
-    const aiReady = useWSStore(s => s.aiReady);
-    const analysis = useWSStore(s => s.chartAnalysis);
-    const lastUpdate = useWSStore(s => s.lastUpdate);
-    const hasData = lastUpdate > 0;
+    // Law 7: Granular Store Subscriptions with null-safe pattern
+    const pcr           = useWSStore(s => s.pcr           ?? 0)
+    const netGex        = useWSStore(s => s.netGex        ?? 0)
+    const tradePlan     = useWSStore(s => s.tradePlan)
+    const earlyWarnings = useWSStore(s => s.earlyWarnings ?? [])
+    const bias          = useWSStore(s => s.bias          ?? 'NEUTRAL')
+    const keyLevels     = useWSStore(s => s.keyLevels     ?? {})
+    const lastUpdate    = useWSStore(s => s.lastUpdate)
+    const hasData       = lastUpdate > 0
     
-    // v5.0 Data Extraction
-    const score = analysis?.bias_strength ? analysis.bias_strength * 100 : 0;
+    // Extract signal-related data
+    const maxPain       = keyLevels?.max_pain ?? 0
+    const spotPrice     = useWSStore(s => s.spot) ?? 0
+    
+    // OI-to-PE ratio display
+    const oiToPeRatio = pcr > 0 ? pcr.toFixed(2) : '—'
+    
+    // Market bias display
+    const signalBias = tradePlan?.signals_used?.bias || bias
+    
+    // PINNED (max pain proximity)
+    const isPinned = maxPain > 0
+      ? Math.abs(spotPrice - maxPain) / spotPrice < 0.005
+      : false
+    const biasStrength = useWSStore(s => s.biasStrength ?? 0)
+    const score = biasStrength * 100
     const scoreTier = score > 75 ? 'INSTITUTIONAL' : score > 50 ? 'CONVICTION' : score > 25 ? 'STRUCTURAL' : 'NOISE';
-    const bias = analysis?.bias || 'NEUTRAL';
-    const gamma = analysis?.gamma_analysis;
-    const vol = analysis?.volatility_state;
-    const tech = analysis?.technical_state;
-    const keyLevels = analysis?.key_levels;
+    const gammaAnalysis = useWSStore(s => s.gammaAnalysis ?? {})
+    const volState = useWSStore(s => s.volState ?? {})
+    const technicals = useWSStore(s => s.technicals ?? {})
 
     if (!hasData) {
         return (
@@ -74,12 +90,12 @@ export function SignalMatrixPanel() {
     }
 
     const signals = [
-        { label: 'GAMMA', val: gamma?.regime || 'NEUTRAL', color: gamma?.regime?.includes('SHORT') ? BEAR : BULL },
-        { label: 'VOL', val: vol?.state || 'NORMAL', color: vol?.state === 'EXTREME' ? BEAR : CYAN },
-        { label: 'PCR', val: analysis?.pcr_value?.toFixed(2) || '—', color: analysis?.pcr_value > 1.2 ? BULL : analysis?.pcr_value < 0.8 ? BEAR : NEUT },
-        { label: 'RSI', val: tech?.rsi?.toFixed(1) || '—', color: tech?.rsi > 70 ? BEAR : tech?.rsi < 30 ? BULL : CYAN },
-        { label: 'GAP', val: analysis?.gap_status || 'CLOSED', color: analysis?.gap_status === 'OPEN' ? WARN : NEUT },
-        { label: 'BIAS', val: bias, color: bias === 'BULLISH' ? BULL : bias === 'BEARISH' ? BEAR : NEUT },
+        { label: 'GAMMA', val: (gammaAnalysis?.regime || 'NEUTRAL').split(' ')[0], color: (gammaAnalysis?.regime || '').includes('SHORT') ? BEAR : BULL },
+        { label: 'VOL', val: volState?.state || 'NORMAL', color: volState?.state === 'EXTREME' ? BEAR : CYAN },
+        { label: 'PCR', val: pcr > 0 ? pcr.toFixed(2) : '—', color: pcr > 1.2 ? BULL : pcr < 0.8 ? BEAR : NEUT },
+        { label: 'RSI', val: technicals?.rsi?.toFixed(1) || '—', color: (technicals?.rsi || 0) > 70 ? BEAR : (technicals?.rsi || 0) < 30 ? BULL : CYAN },
+        { label: 'GAP', val: 'CLOSED', color: NEUT },
+        { label: 'BIAS', val: signalBias, color: signalBias === 'BULLISH' ? BULL : signalBias === 'BEARISH' ? BEAR : NEUT },
     ];
 
     const badge = tierBadge(scoreTier);
@@ -140,7 +156,7 @@ export function SignalMatrixPanel() {
                 <div className="text-[9px] font-bold font-mono text-slate-600 uppercase tracking-[0.2em] mb-3">Order Flow Anchors</div>
                 <div className="space-y-1.5">
                     {[
-                        { label: 'GEX FLIP', value: gamma?.gex_flip, color: WARN },
+                        { label: 'GEX FLIP', value: gammaAnalysis?.flip_level, color: WARN },
                         { label: 'CALL WALL', value: keyLevels?.call_wall, color: BEAR },
                         { label: 'PUT WALL', value: keyLevels?.put_wall, color: BULL }
                     ].map((k, i) => (

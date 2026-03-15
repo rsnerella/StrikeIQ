@@ -17,20 +17,27 @@ const SkeletonPulse = ({ className }: { className: string }) => (
 );
 
 export function TrapDetectionPanel() {
-    // Law 7: Granular Store Subscriptions
-    const lastUpdate = useWSStore(s => s.lastUpdate);
-    const aiReady = useWSStore(s => s.aiReady);
-    const analysis = useWSStore(s => s.chartAnalysis);
-    
-    // v5.0 Trap Detection state
-    const trap = analysis?.trap_analysis;
-    const probability = trap?.probability || 0;
-    const direction = trap?.direction || 'NEUTRAL';
-    const strength = trap?.strength || 0;
-    const anchor = trap?.anchor_level || 0;
+    // Law 7: Granular Store Subscriptions with null-safe pattern
+    const regime       = useWSStore(s => s.regime        ?? 'RANGING')
+    const bias         = useWSStore(s => s.bias          ?? 'NEUTRAL')
+    const keyLevels    = useWSStore(s => s.keyLevels     ?? {})
+    const technicals   = useWSStore(s => s.technicals    ?? {})
+    const lastUpdate   = useWSStore(s => s.lastUpdate)
+    const hasData      = lastUpdate > 0
 
-    const hasData = lastUpdate > 0;
-    if (!hasData || !analysis) {
+    // Extract trap-related data from available fields
+    const callWall    = keyLevels?.call_wall  ?? 0
+    const putWall     = keyLevels?.put_wall   ?? 0
+    const maxPain     = keyLevels?.max_pain   ?? 0
+    const rsi         = technicals?.rsi        ?? 0
+    const momentum    = technicals?.momentum_15m ?? 0
+
+    // Simple trap detection logic
+    const trapDetected = (rsi > 70 || rsi < 30) && momentum !== 0
+    const trapDirection = rsi > 70 ? 'BEARISH' : rsi < 30 ? 'BULLISH' : 'NEUTRAL'
+    const trapStrength = Math.abs((rsi - 50) / 50)
+
+    if (!hasData) {
         return (
             <div className="trading-panel h-full flex flex-col p-6 opacity-40">
                  <div className="flex items-center justify-between mb-8">
@@ -54,8 +61,9 @@ export function TrapDetectionPanel() {
         return '#94a3b8';
     };
 
-    const trapColor = getTrapColor(direction);
-    const riskLevel = probability > 75 ? 'CRITICAL' : probability > 50 ? 'HIGH' : probability > 25 ? 'MODERATE' : 'STABLE';
+    const trapColor = getTrapColor(trapDirection);
+    const trapProbability = trapDetected ? trapStrength * 100 : 0
+    const riskLevel = trapProbability > 75 ? 'CRITICAL' : trapProbability > 50 ? 'HIGH' : trapProbability > 25 ? 'MODERATE' : 'STABLE';
 
     return (
         <div
@@ -75,20 +83,20 @@ export function TrapDetectionPanel() {
             <div className="mb-6 p-4 rounded-xl bg-white/[0.02] border border-white/5">
                 <div className="flex justify-between items-center mb-3">
                     <span className="text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest">Fakeout Probability</span>
-                    <span className="text-xl font-black font-mono" style={{ color: trapColor }}>{probability.toFixed(1)}%</span>
+                    <span className="text-xl font-black font-mono" style={{ color: trapColor }}>{trapProbability.toFixed(1)}%</span>
                 </div>
                 <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
                     <div 
                         className="h-full transition-all duration-1000" 
                         style={{ 
-                            width: `${probability}%`, 
+                            width: `${trapProbability}%`, 
                             background: `linear-gradient(90deg, transparent, ${trapColor})` 
                         }} 
                     />
                 </div>
                 <div className="flex justify-between mt-2 text-[8px] font-bold font-mono text-slate-600">
                     <span>{riskLevel} RISK</span>
-                    <span>INTENSITY: {(strength * 100).toFixed(0)}%</span>
+                    <span>INTENSITY: {(trapStrength * 100).toFixed(0)}%</span>
                 </div>
             </div>
 
@@ -97,13 +105,13 @@ export function TrapDetectionPanel() {
                 <div className="p-4 rounded-xl bg-white/[0.03] border border-white/10">
                     <div className="text-[8px] font-bold font-mono text-slate-500 uppercase mb-2">Trap Core</div>
                     <div className="text-sm font-black font-mono tracking-tight" style={{ color: trapColor }}>
-                        {direction} FAKEOUT
+                        {trapDirection} FAKEOUT
                     </div>
                 </div>
                 <div className="p-4 rounded-xl bg-white/[0.03] border border-white/10">
                     <div className="text-[8px] font-bold font-mono text-slate-500 uppercase mb-2">Anchor Level</div>
                     <div className="text-sm font-black font-mono tabular-nums">
-                        {anchor > 0 ? `₹${anchor.toLocaleString()}` : 'SCANNING...'}
+                        {callWall > 0 ? `₹${callWall.toLocaleString()}` : 'SCANNING...'}
                     </div>
                 </div>
             </div>
@@ -117,9 +125,9 @@ export function TrapDetectionPanel() {
                     <div className="flex-1">
                         <div className="text-[9px] font-bold font-mono text-slate-500 uppercase">Order Flow Insight</div>
                         <div className="text-[11px] font-mono text-slate-300 italic leading-relaxed">
-                            {direction === 'BULLISH' 
+                            {trapDirection === 'BULLISH' 
                                 ? "Institutions absorbing aggressive buying. Breakout likely exhausted."
-                                : direction === 'BEARISH'
+                                : trapDirection === 'BEARISH'
                                 ? "Retail panic selling being absorbed. Structural base forming."
                                 : "No significant institutional trap patterns detected in this window."
                             }

@@ -181,10 +181,12 @@ class OptionChainBuilder:
             lower_bound = atm - (20 * step)
             upper_bound = atm + (20 * step)
             
-            # PHASE 3: Evict strikes outside the dynamic active window
-            far = [s for s in chain.keys() if s < lower_bound or s > upper_bound]
-            for s in far:
-                chain.pop(s, None)
+            # PHASE 3: EVICT strikes outside the dynamic active window - DISABLED
+            # We now keep ALL strikes to ensure full chain PCR calculation
+            # Commented out eviction to preserve full 136+ strike chain
+            # far = [s for s in chain.keys() if s < lower_bound or s > upper_bound]
+            # for s in far:
+            #     chain.pop(s, None)
  
             last = self.last_snapshots.get(symbol, datetime.min)
             if (now - last).total_seconds() < 0.5:
@@ -456,7 +458,7 @@ class OptionChainBuilder:
             
             # Trigger analytics engine
             try:
-                await analytics_broadcaster.compute_single_analytics(snapshot.symbol, snapshot.__dict__)
+                analytics_broadcaster.compute_single_analytics(snapshot.symbol, snapshot.__dict__)
                 logger.info(f"PIPELINE → analytics engine called {snapshot.symbol}")
             except Exception as e:
                 logger.error(f"PIPELINE → analytics engine failed {snapshot.symbol}: {e}")
@@ -596,6 +598,15 @@ class OptionChainBuilder:
                     total_call_oi += ce_data.oi
                 if pe_data:
                     total_put_oi += pe_data.oi
+            
+            # Track full chain aggregates for PCR override
+            if not hasattr(self, '_total_call_oi'):
+                self._total_call_oi = {}
+            if not hasattr(self, '_total_put_oi'):
+                self._total_put_oi = {}
+            
+            self._total_call_oi[symbol] = total_call_oi
+            self._total_put_oi[symbol] = total_put_oi
             
             # Compute PCR
             pcr = total_put_oi / total_call_oi if total_call_oi > 0 else 0.0
@@ -738,20 +749,29 @@ class OptionChainBuilder:
                 continue
 
             for right in ('CE', 'PE'):
-                data = sides.get(right, {})
-                if not data:
+                raw = sides.get(right)
+                if raw is None:
                     continue
 
-                # Extract from OptionData object
-                ltp   = float(getattr(data, 'ltp', 0) or 0)
-                oi    = int(  getattr(data, 'oi', 0) or 0)
-                iv    = float(getattr(data, 'iv', 0) or 0)
-                delta = float(getattr(data, 'delta', 0) or 0)
-                gamma = float(getattr(data, 'gamma', 0) or 0)
-                theta = float(getattr(data, 'theta', 0) or 0)
-                vega  = float(getattr(data, 'vega', 0) or 0)
-                bid   = float(getattr(data, 'bid', 0) or 0)
-                ask   = float(getattr(data, 'ask', 0) or 0)
+                # OptionData is an object — use getattr, NOT dict.get()
+                def safe_attr(obj, attr, default=0):
+                    val = getattr(obj, attr, None)
+                    if val is None:
+                        return default
+                    try:
+                        return float(val)
+                    except (ValueError, TypeError):
+                        return default
+
+                ltp   = safe_attr(raw, 'ltp')
+                oi    = int(safe_attr(raw, 'oi'))
+                iv    = safe_attr(raw, 'iv')
+                delta = safe_attr(raw, 'delta')
+                gamma = safe_attr(raw, 'gamma')
+                theta = safe_attr(raw, 'theta')
+                vega  = safe_attr(raw, 'vega')
+                bid   = safe_attr(raw, 'bid')
+                ask   = safe_attr(raw, 'ask')
 
                 entry      = {
                     'ltp': ltp, 'oi': oi, 'iv': iv,
@@ -788,6 +808,18 @@ class OptionChainBuilder:
         )
         snap.calls_data         = calls_data
         snap.puts_data          = puts_data
+
+        # PCR OVERRIDE: Use tracked aggregate if available (full chain > window)
+        tracked_call_oi = getattr(self, '_total_call_oi', {}).get(symbol, 0)
+        tracked_put_oi  = getattr(self, '_total_put_oi', {}).get(symbol, 0)
+
+        if tracked_call_oi > call_oi:  # use larger (more complete) value
+            snap.total_call_oi = tracked_call_oi
+            snap.total_put_oi  = tracked_put_oi
+            snap.pcr = round(tracked_put_oi / max(tracked_call_oi, 1), 4)
+            logger.info(f"[PCR_OVERRIDE] Using full chain: pcr={snap.pcr:.4f} calls={tracked_call_oi:,} puts={tracked_put_oi:,}")
+        else:
+            logger.info(f"[PCR_WINDOW] Using window: pcr={snap.pcr:.4f} calls={call_oi:,} puts={put_oi:,}")
 
         logger.info(
             f"[SNAPSHOT] {symbol} | spot={snap.spot} "

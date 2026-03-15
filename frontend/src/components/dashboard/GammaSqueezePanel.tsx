@@ -17,21 +17,27 @@ const SkeletonPulse = ({ className }: { className: string }) => (
 );
 
 export function GammaSqueezePanel() {
-    // Law 7: Granular Store Subscriptions
-    const lastUpdate = useWSStore(s => s.lastUpdate);
-    const aiReady = useWSStore(s => s.aiReady);
-    const analysis = useWSStore(s => s.chartAnalysis);
-    
-    // v5.0 Gamma Analysis state
-    const gamma = analysis?.gamma_analysis;
-    const probability = gamma?.squeeze_probability || 0;
-    const netGamma = gamma?.net_gex || 0;
-    const flip = gamma?.gex_flip || 0;
-    const regime = gamma?.regime || 'NEUTRAL';
-    const pressure = gamma?.hedging_intensity || 0;
+    // Law 7: Granular Store Subscriptions with null-safe pattern
+    const regime        = useWSStore(s => s.regime         ?? 'RANGING')
+    const bias          = useWSStore(s => s.bias           ?? 'NEUTRAL')
+    const gammaAnalysis = useWSStore(s => s.gammaAnalysis  ?? {})
+    const keyLevels     = useWSStore(s => s.keyLevels      ?? {})
+    const lastUpdate    = useWSStore(s => s.lastUpdate)
+    const hasData       = lastUpdate > 0
 
-    const hasData = lastUpdate > 0;
-    if (!hasData || !analysis) {
+    // Extract gamma-related data from available fields
+    const netGex        = gammaAnalysis?.net_gex    ?? 0
+    const gexRegime     = (gammaAnalysis?.regime?.split(' ')[0]) ?? 'UNKNOWN'
+    const flipLevel     = gammaAnalysis?.flip_level ?? 0
+    const callWall      = keyLevels?.call_wall     ?? 0
+    const putWall       = keyLevels?.put_wall      ?? 0
+
+    // Simple gamma squeeze detection
+    const squeezeDetected = Math.abs(netGex) > 1000000000 // 1B GEX threshold
+    const squeezeDirection = netGex > 0 ? 'CALL' : 'PUT'
+    const squeezeIntensity = Math.min(Math.abs(netGex) / 1000000000, 1.0)
+
+    if (!hasData) {
         return (
             <div className="trading-panel h-full flex flex-col p-6 opacity-40">
                  <div className="flex items-center justify-between mb-8">
@@ -52,7 +58,7 @@ export function GammaSqueezePanel() {
         return '#4ade80';
     };
 
-    const pressureColor = getPressureColor(pressure);
+    const pressureColor = getPressureColor(squeezeIntensity);
     const formatGex = (val: number) => {
         const abs = Math.abs(val);
         if (abs >= 1e6) return `${(val / 1e6).toFixed(2)}M`;
@@ -77,14 +83,14 @@ export function GammaSqueezePanel() {
             {/* Hedging Intensity */}
             <div className="mb-6 p-4 rounded-xl bg-white/[0.02] border border-white/5">
                 <div className="flex justify-between items-center mb-3">
-                    <span className="text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest">Hedging Intensity</span>
-                    <span className="text-xl font-black font-mono" style={{ color: pressureColor }}>{(pressure * 100).toFixed(1)}%</span>
+                    <span className="text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest">Squeeze Intensity</span>
+                    <span className="text-xl font-black font-mono" style={{ color: pressureColor }}>{(squeezeIntensity * 100).toFixed(1)}%</span>
                 </div>
                 <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
                     <div 
                         className="h-full transition-all duration-1000" 
                         style={{ 
-                            width: `${pressure * 100}%`, 
+                            width: `${squeezeIntensity * 100}%`, 
                             background: `linear-gradient(90deg, transparent, ${pressureColor})` 
                         }} 
                     />
@@ -95,14 +101,14 @@ export function GammaSqueezePanel() {
             <div className="grid grid-cols-2 gap-4 mb-6">
                 <div className="p-4 rounded-xl bg-white/[0.03] border border-white/10">
                     <div className="text-[8px] font-bold font-mono text-slate-500 uppercase mb-2">Net GEX</div>
-                    <div className="text-sm font-black font-mono tabular-nums" style={{ color: netGamma >= 0 ? '#4ade80' : '#f87171' }}>
-                        {formatGex(netGamma)}
+                    <div className="text-sm font-black font-mono tabular-nums" style={{ color: netGex >= 0 ? '#4ade80' : '#f87171' }}>
+                        {formatGex(netGex)}
                     </div>
                 </div>
                 <div className="p-4 rounded-xl bg-white/[0.03] border border-white/10">
                     <div className="text-[8px] font-bold font-mono text-slate-500 uppercase mb-2">Flip Anchor</div>
                     <div className="text-sm font-black font-mono tabular-nums text-blue-400">
-                        {flip > 0 ? `₹${flip.toLocaleString()}` : '—'}
+                        {flipLevel > 0 ? `₹${flipLevel.toLocaleString()}` : '—'}
                     </div>
                 </div>
             </div>
@@ -111,12 +117,12 @@ export function GammaSqueezePanel() {
             <div className="mb-6 p-4 rounded-xl bg-purple-500/[0.03] border border-purple-500/10">
                 <div className="flex justify-between items-center mb-2">
                     <span className="text-[10px] font-bold font-mono text-purple-400 uppercase tracking-widest">Squeeze Risk</span>
-                    <span className="text-lg font-black font-mono text-white">{probability.toFixed(1)}%</span>
+                    <span className="text-lg font-black font-mono text-white">{(squeezeIntensity * 100).toFixed(1)}%</span>
                 </div>
                 <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
                     <div 
                         className="h-full bg-purple-500 transition-all duration-1000" 
-                        style={{ width: `${probability}%` }} 
+                        style={{ width: `${squeezeIntensity * 100}%` }} 
                     />
                 </div>
             </div>
@@ -128,8 +134,8 @@ export function GammaSqueezePanel() {
                         <Activity size={12} className="text-slate-500" />
                         <span className="text-[9px] font-bold font-mono text-slate-500 uppercase">Structural Regime</span>
                     </div>
-                    <span className={`text-[10px] font-black font-mono px-2 py-0.5 rounded ${regime.includes('NEGATIVE') ? 'bg-red-500/10 text-red-400' : 'bg-green-500/10 text-green-400'}`}>
-                        {regime}
+                    <span className={`text-[10px] font-black font-mono px-2 py-0.5 rounded ${gexRegime.includes('SHORT') ? 'bg-red-500/10 text-red-400' : 'bg-green-500/10 text-green-400'}`}>
+                        {gexRegime}
                     </span>
                 </div>
             </div>

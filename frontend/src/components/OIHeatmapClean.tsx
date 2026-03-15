@@ -65,14 +65,28 @@ const OIHeatmapClean: React.FC<OIHeatmapProps> = ({ symbol }) => {
   const { optionChainData } = useOptionChainStore();
 
   // Use structured data mapped from store
-  const actualLiveData = useMemo(() => ({ 
-    callsData: Object.values(heatmapStoreCalls || {}), 
-    putsData: Object.values(heatmapStorePuts || {}), 
-    spot: heatmapStoreSpot,
-    spot_price: heatmapStoreSpot,
-    pcr: heatmapStorePcr,
-    atm_strike: heatmapStoreAtm
-  }), [heatmapStoreCalls, heatmapStorePuts, heatmapStoreSpot, heatmapStorePcr, heatmapStoreAtm]);
+  const actualLiveData = useMemo(() => {
+    // Convert calls from Record to Array with strike as property
+    const callsArray = Object.entries(heatmapStoreCalls || {}).map(([strike, data]) => ({
+      strike: parseInt(strike),
+      ...data
+    }));
+    
+    // Convert puts from Record to Array with strike as property  
+    const putsArray = Object.entries(heatmapStorePuts || {}).map(([strike, data]) => ({
+      strike: parseInt(strike),
+      ...data
+    }));
+    
+    return { 
+      callsData: callsArray, 
+      putsData: putsArray, 
+      spot: heatmapStoreSpot,
+      spot_price: heatmapStoreSpot,
+      pcr: heatmapStorePcr,
+      atm_strike: heatmapStoreAtm
+    };
+  }, [heatmapStoreCalls, heatmapStorePuts, heatmapStoreSpot, heatmapStorePcr, heatmapStoreAtm]);
 
   // 🔥 PCR FALLBACK CALCULATION
   const calculatePCR = useCallback((data: any) => {
@@ -87,9 +101,13 @@ const OIHeatmapClean: React.FC<OIHeatmapProps> = ({ symbol }) => {
   }, []);
 
   const pcr = useMemo(() => {
-    return actualLiveData?.pcr && actualLiveData.pcr > 0
-      ? actualLiveData.pcr
-      : calculatePCR(actualLiveData);
+    // Always prefer backend PCR from market_update
+    const backendPcr = actualLiveData?.pcr;
+    if (backendPcr && backendPcr > 0) {
+      return backendPcr;
+    }
+    // Only use fallback calculation if backend PCR is not available
+    return calculatePCR(actualLiveData);
   }, [actualLiveData, calculatePCR]);
 
   const tableRef = useRef<HTMLDivElement>(null);
