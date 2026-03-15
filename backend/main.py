@@ -248,28 +248,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Token watcher start failed: {e}")
 
-    # -------- ANALYTICS ENGINE --------
-
+    # -------- ANALYTICS BROADCASTER --------
     try:
-
-        from app.services.live_structural_engine import LiveStructuralEngine, structural_engine_instance
-        from app.core.live_market_state import get_market_state_manager
-        
-        market_state_mgr = get_market_state_manager()
-        app.state.live_engine = LiveStructuralEngine(market_state_mgr)
-        structural_engine_instance = app.state.live_engine
-        
+        from app.services.analytics_broadcaster import analytics_broadcaster
         task = asyncio.create_task(
-            app.state.live_engine.start_analytics_loop(),
-            name="analytics_engine"
+            analytics_broadcaster.start(),
+            name="analytics_broadcaster"
         )
-
         app.state.background_tasks.append(task)
-
-        logger.info("🧠 Analytics Engine started")
-
+        logger.info("🧠 Analytics Broadcaster (Elite Engine) started")
     except Exception as e:
-        logger.error(f"Analytics engine failed: {e}")
+        logger.error(f"Analytics broadcaster failed: {e}")
 
     # -------- AI SCHEDULER --------
 

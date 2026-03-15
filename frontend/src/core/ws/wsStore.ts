@@ -16,18 +16,25 @@ interface WSStore {
   lastMessage: any | null
   error: string | null
   spot: number
+  spotPrice: number
+  liveSpot: number
+  currentSpot: number
+  atmStrike: number
   lastUpdate: number
   marketData: any
   optionChainSnapshot: any
   liveData: any
   wsLiveData: any
   analytics: any
-  liveMarketData: any  // FIX 8: Add liveMarketData property
-  advancedStrategies: any        // Step 14: SMC/ICT/CRT/MSNR
-  signalScore: any               // Step 15: unified score
-  chartAnalysis: any             // Chart intelligence: waves, zones, signals
-  aiPrediction: any              // AI ML Probability Prediction
-  candles: any[]                  // Candlestick data for charts
+  liveMarketData: any
+  aiIntelligence: any
+  dataQuality: any
+  aiReady: boolean
+  advancedStrategies: any
+  signalScore: any
+  chartAnalysis: any
+  aiPrediction: any
+  candles: any[]
   _lastChainUpdate: number
   _THROTTLE_MS: number
   handleMessage: (message: any) => void
@@ -48,17 +55,24 @@ export const useWSStore = create<WSStore>((set, get) => ({
   lastMessage: null,
   error: null,
   spot: 0,
+  spotPrice: 0,
+  liveSpot: 0,
+  currentSpot: 0,
+  atmStrike: 0,
   marketData: null,
   optionChainSnapshot: null,
   liveData: null,
   wsLiveData: null,
   analytics: null,
-  liveMarketData: null,  // FIX 8: Initialize liveMarketData property
-  advancedStrategies: null,   // Step 14
-  signalScore: null,          // Step 15
-  chartAnalysis: null,        // Chart intelligence
-  aiPrediction: null,         // AI ML Prediction
-  candles: [],                // Candlestick data for charts
+  liveMarketData: null,
+  aiIntelligence: null,
+  dataQuality: null,
+  aiReady: false,
+  advancedStrategies: null,
+  signalScore: null,
+  chartAnalysis: null,
+  aiPrediction: null,
+  candles: [],
   lastUpdate: 0,
   _lastChainUpdate: 0,
   _THROTTLE_MS: 50,
@@ -68,6 +82,28 @@ export const useWSStore = create<WSStore>((set, get) => ({
 
     // STEP 3: DEBUG LOG
     console.log("WS MESSAGE PROCESSED", message);
+
+    // Institutional Market Update (Elite Engine)
+    if (message.type === "market_update") {
+      const marketStore = useMarketContextStore.getState()
+      const selectedSymbol = marketStore?.symbol || 'NIFTY'
+      
+      if (message.symbol !== selectedSymbol) return
+
+      set({
+        spot: message.spotPrice,
+        spotPrice: message.spotPrice,
+        liveSpot: message.liveSpot,
+        currentSpot: message.currentSpot,
+        atmStrike: message.atmStrike,
+        aiIntelligence: message.aiIntelligence,
+        dataQuality: message.dataQuality,
+        aiReady: message.aiReady,
+        lastUpdate: Date.now(),
+        error: null
+      })
+      return
+    }
 
     // Market status update
     if (message.type === "market_status" && message.market_open !== undefined) {
@@ -111,6 +147,9 @@ export const useWSStore = create<WSStore>((set, get) => ({
       
       set({
         spot: tick.ltp ?? 0,
+        spotPrice: tick.ltp ?? 0,
+        liveSpot: tick.ltp ?? 0,
+        currentSpot: tick.ltp ?? 0,
         lastUpdate: Date.now(),
         liveData: { ...tick, symbol: message.symbol, spot_price: tick.ltp },
         wsLiveData: { ...tick, symbol: message.symbol, spot_price: tick.ltp },
