@@ -33,11 +33,9 @@ class TradePlanner:
         logger.info("TradePlanner initialized")
 
     def plan(self, symbol: str, analysis: Any, confidence: float) -> Optional[TradePlan]:
-        """
-        Generates a trade plan if confidence meets thresholds.
-        """
-        if confidence < 0.6:
-            return None
+        # No strict confidence blocker - allow "Observation Mode"
+        # if confidence < 0.6:
+        #     return None
             
         spot = analysis.key_levels.get("vwap", 0) # Use VWAP as base for entry ranges
         atr = spot * 0.005 # Simplified ATR proxy
@@ -55,7 +53,7 @@ class TradePlanner:
             
         rr = abs(targets[0] - spot) / abs(stop_loss - spot) if abs(stop_loss - spot) > 0 else 0
         
-        conviction = "HIGH" if confidence > 0.8 else "MEDIUM"
+        conviction = "HIGH" if confidence > 0.8 else "MEDIUM" if confidence > 0.6 else "LOW"
         
         reasoning = [
             f"Bias is {analysis.bias} with strength {analysis.bias_strength}",

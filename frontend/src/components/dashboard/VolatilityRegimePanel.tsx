@@ -19,29 +19,27 @@ const SkeletonPulse = ({ className }: { className: string }) => (
 export function VolatilityRegimePanel() {
     // Law 7: Granular Store Subscriptions
     const lastUpdate = useWSStore(s => s.lastUpdate);
-    const aiReady = useWSStore(s => s.aiReady);
-    const analysis = useWSStore(s => s.chartAnalysis);
-    const spot = useWSStore(s => s.spot);
+    const analysis   = useWSStore(s => s.chartAnalysis);
+    const spot       = useWSStore(s => s.spot ?? s.spotPrice ?? 0);
+    const hasData    = lastUpdate > 0 && !!analysis;
     
-    // v5.0 Volatility state
-    const vol = analysis?.volatility_state;
-    const regime = vol?.state || 'NORMAL';
-    const iv = vol?.iv_atm || 0;
-    const compression = vol?.compression || false;
-    const breachProb = vol?.breach_probability || 0;
+    // v5.0 Volatility state from chartAnalysis
+    const vol          = analysis?.volatility_state;
+    const regime       = vol?.state || 'NORMAL';
+    const ivAtm        = vol?.iv_atm || 0;
+    const ivPercentile = vol?.iv_percentile || 0;
+    const breachProb   = vol?.breach_probability || 0;
     const expectedMove = analysis?.expected_move?.[vol?.timeframe || '1h'] || 0;
-
-    const hasData = lastUpdate > 0;
     if (!hasData || !analysis) {
         return (
-            <div className="trading-panel h-full flex flex-col p-6 opacity-40">
-                 <div className="flex items-center justify-between mb-8">
+            <div className="trading-panel h-full flex flex-col p-4">
+                 <div className="flex items-center justify-between mb-5">
                     <SectionLabel>Volatility Intelligence</SectionLabel>
-                    <SkeletonPulse className="w-24 h-6 rounded-full" />
+                    <SkeletonPulse className="w-24 h-6 rounded-full bg-white/10" />
                 </div>
-                <div className="space-y-6">
-                    <SkeletonPulse className="w-full h-24" />
-                    <SkeletonPulse className="w-full h-24" />
+                <div className="space-y-4">
+                    <SkeletonPulse className="w-full h-20 bg-white/5" />
+                    <SkeletonPulse className="w-full h-20 bg-white/5" />
                 </div>
             </div>
         );
@@ -55,6 +53,19 @@ export function VolatilityRegimePanel() {
             default: return { color: '#4ade80', label: 'NORMAL', desc: 'STABLE INSTITUTIONAL FLOW CONDITIONS' };
         }
     };
+
+    // Display values
+    const ivPctDisplay = ivAtm > 0
+      ? (ivAtm * 100).toFixed(1) + '%'
+      : '—';
+
+    const ivRangeDisplay = ivPercentile > 0
+      ? `${(ivPercentile * 0.7).toFixed(1)} — ${(ivPercentile * 1.3).toFixed(1)}` 
+      : '—';
+
+    const captureDisplay = ivPercentile > 0
+      ? ivPercentile.toFixed(0) + 'th pct'
+      : '—';
 
     const rd = getRegimeDisplay(regime);
     const upperLimit = spot + expectedMove;
@@ -76,7 +87,7 @@ export function VolatilityRegimePanel() {
             </div>
 
             {/* Current Regime */}
-            <div className="mb-6 p-4 rounded-xl bg-white/[0.02] border border-white/5 relative overflow-hidden">
+            <div className="mb-4 p-3 rounded-xl bg-white/[0.02] border border-white/5 relative overflow-hidden">
                 <div className="absolute top-0 right-0 p-3 opacity-10">
                     <Activity size={40} style={{ color: rd.color }} />
                 </div>
@@ -86,15 +97,15 @@ export function VolatilityRegimePanel() {
             </div>
 
             {/* Expected Move */}
-            <div className="mb-6 space-y-4">
+            <div className="mb-4 space-y-3">
                 <div className="flex justify-between items-end">
                     <div className="flex flex-col gap-1">
-                        <span className="text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest">Expected Move (1σ)</span>
-                        <span className="text-[11px] font-mono text-slate-400">Timeframe: {vol?.timeframe || '1h'}</span>
+                        <span className="text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest">Implied Volatility</span>
+                        <span className="text-[11px] font-mono text-slate-400">Capture: {captureDisplay}</span>
                     </div>
                     <div className="text-right">
-                        <div className="text-xl font-black font-mono text-white tabular-nums">±{expectedMove.toFixed(1)}</div>
-                        <div className="text-[9px] font-bold font-mono text-cyan-400">{movePct}% Deviation</div>
+                        <div className="text-xl font-black font-mono text-white tabular-nums">{ivPctDisplay}</div>
+                        <div className="text-[9px] font-bold font-mono text-cyan-400">{ivRangeDisplay}</div>
                     </div>
                 </div>
 
@@ -105,18 +116,18 @@ export function VolatilityRegimePanel() {
 
                 <div className="flex justify-between items-center text-[10px] font-bold font-mono text-slate-500">
                     <div className="flex flex-col">
-                        <span>LOWER BOUND</span>
-                        <span className="text-red-400">₹{lowerLimit.toLocaleString()}</span>
+                        <span>EXPECTED MOVE</span>
+                        <span className="text-red-400">±{expectedMove.toFixed(1)} ({movePct}%)</span>
                     </div>
                     <div className="flex flex-col items-end">
-                        <span>UPPER BOUND</span>
-                        <span className="text-green-400">₹{upperLimit.toLocaleString()}</span>
+                        <span>TIMEFRAME</span>
+                        <span className="text-green-400">{vol?.timeframe || '1h'}</span>
                     </div>
                 </div>
             </div>
 
             {/* Expansion Probability */}
-            <div className="mt-auto pt-6 border-t border-white/5">
+            <div className="mt-auto pt-4 border-t border-white/5">
                  <div className="flex justify-between items-center mb-3">
                     <span className="text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest">Expansion Risk</span>
                     <span className={`text-[11px] font-black font-mono ${breachProb > 50 ? 'text-red-400' : 'text-blue-400'}`}>

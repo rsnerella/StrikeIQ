@@ -298,12 +298,22 @@ class OptionChainBuilder:
         # Capture price metadata
         meta = getattr(self, "price_metadata", {}).get(symbol, {})
 
-        # Create snapshot data dictionary for analytics
+        # Create snapshot data dictionary for analytics with correct mapping for GEX engine
         snapshot_data = {
             "symbol": symbol,
             "spot": spot,
-            "calls": {str(s["strike"]): s for s in strikes},
-            "puts": {str(s["strike"]): s for s in strikes}
+            "calls": {
+                str(s["strike"]): {
+                    "gamma": s.get("call_gamma", 0) or 0,
+                    "oi": s.get("call_oi", 0) or 0
+                } for s in strikes
+            },
+            "puts": {
+                str(s["strike"]): {
+                    "gamma": s.get("put_gamma", 0) or 0,
+                    "oi": s.get("put_oi", 0) or 0
+                } for s in strikes
+            }
         }
 
         # Run analytics engine
@@ -821,12 +831,32 @@ class OptionChainBuilder:
         else:
             logger.info(f"[PCR_WINDOW] Using window: pcr={snap.pcr:.4f} calls={call_oi:,} puts={put_oi:,}")
 
-        logger.info(
-            f"[SNAPSHOT] {symbol} | spot={snap.spot} "
-            f"atm={snap.atm_strike} "
-            f"calls={len(calls_data)} puts={len(puts_data)} "
-            f"call_oi={call_oi} put_oi={put_oi} pcr={snap.pcr}"
-        )
+        # PHASE 4: Inject AnalyticsEngine for live GEX/Regime
+        try:
+            from app.analytics.analytics_engine import analytics_engine
+            # Construct mapped data for engine
+            analytics_input = {
+                "symbol": symbol,
+                "spot": snap.spot,
+                "calls": {
+                    strike: {
+                        "gamma": data.get("gamma", 0),
+                        "oi": data.get("oi", 0)
+                    } for strike, data in calls_data.items()
+                },
+                "puts": {
+                    strike: {
+                        "gamma": data.get("gamma", 0),
+                        "oi": data.get("oi", 0)
+                    } for strike, data in puts_data.items()
+                }
+            }
+            snap.analytics = analytics_engine.analyze(analytics_input)
+            logger.info(f"[SNAPSHOT_ANALYTICS] Computed GEX={snap.analytics.get('net_gex', 0)} for {symbol}")
+        except Exception as e:
+            logger.error(f"[SNAPSHOT_ANALYTICS] Failed: {e}")
+            snap.analytics = {}
+
         return snap
 
     def _compute_atm(self, symbol: str, spot: float) -> int:

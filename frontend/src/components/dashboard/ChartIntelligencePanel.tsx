@@ -8,7 +8,7 @@ import { TrendingUp, TrendingDown, Minus, Activity, Layers, Target, Shield, Zap 
 import { CARD, CARD_HOVER_BORDER } from './DashboardTypes';
 import { SectionLabel } from './StatCards';
 import { useWSStore } from '../../core/ws/wsStore';
-import { AdvancedPriceChart } from '../charts/AdvancedPriceChart';
+import { StrikeIQPriceChart } from '../charts/StrikeIQPriceChart';
 import type { LiveMarketData } from '../../hooks/useLiveMarketData';
 
 // ── Colours ────────────────────────────────────────────────────────────────────

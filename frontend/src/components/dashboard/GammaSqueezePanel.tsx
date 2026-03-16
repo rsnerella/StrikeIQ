@@ -18,24 +18,28 @@ const SkeletonPulse = ({ className }: { className: string }) => (
 
 export function GammaSqueezePanel() {
     // Law 7: Granular Store Subscriptions with null-safe pattern
-    const regime        = useWSStore(s => s.regime         ?? 'RANGING')
-    const bias          = useWSStore(s => s.bias           ?? 'NEUTRAL')
-    const gammaAnalysis = useWSStore(s => s.gammaAnalysis  ?? {})
-    const keyLevels     = useWSStore(s => s.keyLevels      ?? {})
     const lastUpdate    = useWSStore(s => s.lastUpdate)
-    const hasData       = lastUpdate > 0
+    const analysis      = useWSStore(s => s.chartAnalysis)
+    const spotPrice     = useWSStore(s => s.spot ?? s.spotPrice ?? 0)
+    const hasData       = lastUpdate > 0 && !!analysis
 
-    // Extract gamma-related data from available fields
-    const netGex        = gammaAnalysis?.net_gex    ?? 0
-    const gexRegime     = (gammaAnalysis?.regime?.split(' ')[0]) ?? 'UNKNOWN'
-    const flipLevel     = gammaAnalysis?.flip_level ?? 0
+    // Extract gamma-related data from chartAnalysis
+    const gamma         = analysis?.gamma_analysis
+    const keyLevels     = analysis?.key_levels
+    const netGex        = gamma?.net_gex    ?? 0
+    const gexRegime     = gamma?.regime      ?? 'NEUTRAL'
+    const flipLevel     = gamma?.flip_level ?? keyLevels?.gex_flip ?? 0
     const callWall      = keyLevels?.call_wall     ?? 0
     const putWall       = keyLevels?.put_wall      ?? 0
 
-    // Simple gamma squeeze detection
-    const squeezeDetected = Math.abs(netGex) > 1000000000 // 1B GEX threshold
-    const squeezeDirection = netGex > 0 ? 'CALL' : 'PUT'
-    const squeezeIntensity = Math.min(Math.abs(netGex) / 1000000000, 1.0)
+    // Squeeze probability: SHORT_GAMMA near flip = high squeeze risk
+    const squeezeProbability = gexRegime === 'SHORT_GAMMA' && flipLevel > 0
+      ? Math.max(0, Math.min(100,
+          (1 - Math.abs(spotPrice - flipLevel) / spotPrice) * 100
+        ))
+      : gexRegime === 'SHORT_GAMMA'
+        ? 35  // short gamma always has some squeeze risk
+        : 0
 
     if (!hasData) {
         return (
@@ -53,12 +57,12 @@ export function GammaSqueezePanel() {
     }
 
     const getPressureColor = (p: number) => {
-        if (p > 0.75) return '#f87171';
-        if (p > 0.50) return '#fb923c';
+        if (p > 75) return '#f87171';
+        if (p > 50) return '#fb923c';
         return '#4ade80';
     };
 
-    const pressureColor = getPressureColor(squeezeIntensity);
+    const pressureColor = getPressureColor(squeezeProbability);
     const formatGex = (val: number) => {
         const abs = Math.abs(val);
         if (abs >= 1e6) return `${(val / 1e6).toFixed(2)}M`;
@@ -84,13 +88,13 @@ export function GammaSqueezePanel() {
             <div className="mb-6 p-4 rounded-xl bg-white/[0.02] border border-white/5">
                 <div className="flex justify-between items-center mb-3">
                     <span className="text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest">Squeeze Intensity</span>
-                    <span className="text-xl font-black font-mono" style={{ color: pressureColor }}>{(squeezeIntensity * 100).toFixed(1)}%</span>
+                    <span className="text-xl font-black font-mono" style={{ color: pressureColor }}>{squeezeProbability.toFixed(1)}%</span>
                 </div>
                 <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
                     <div 
                         className="h-full transition-all duration-1000" 
                         style={{ 
-                            width: `${squeezeIntensity * 100}%`, 
+                            width: `${squeezeProbability}%`, 
                             background: `linear-gradient(90deg, transparent, ${pressureColor})` 
                         }} 
                     />
@@ -117,12 +121,12 @@ export function GammaSqueezePanel() {
             <div className="mb-6 p-4 rounded-xl bg-purple-500/[0.03] border border-purple-500/10">
                 <div className="flex justify-between items-center mb-2">
                     <span className="text-[10px] font-bold font-mono text-purple-400 uppercase tracking-widest">Squeeze Risk</span>
-                    <span className="text-lg font-black font-mono text-white">{(squeezeIntensity * 100).toFixed(1)}%</span>
+                    <span className="text-lg font-black font-mono text-white">{squeezeProbability.toFixed(1)}%</span>
                 </div>
                 <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
                     <div 
                         className="h-full bg-purple-500 transition-all duration-1000" 
-                        style={{ width: `${squeezeIntensity * 100}%` }} 
+                        style={{ width: `${squeezeProbability}%` }} 
                     />
                 </div>
             </div>

@@ -169,11 +169,14 @@ async def get_historical_candles(symbol: str, tf: str = "1m", limit: int = 300):
             'FINNIFTY': 'NSE_INDEX|Nifty Fin Service',
         }.get(symbol.upper(), 'NSE_INDEX|Nifty 50')
 
+        logger.info(f"FETCHING CANDLES → symbol={symbol}, tf={tf}, interval={interval}, key={instrument_key}")
+
         # URL encode the instrument key
         encoded_key = instrument_key.replace('|', '%7C').replace(' ', '%20')
 
         token = await token_manager.get_token()
         if not token:
+            logger.error("No valid upstox token found for candle fetch")
             raise HTTPException(status_code=401, detail="No valid upstox token")
 
         async with httpx.AsyncClient() as client:
@@ -181,6 +184,8 @@ async def get_historical_candles(symbol: str, tf: str = "1m", limit: int = 300):
             url = f"https://api.upstox.com/v2/historical-candle/intraday/{encoded_key}/{interval}"
             resp = await client.get(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
             data = resp.json().get('data', {}).get('candles', [])
+            
+            logger.info(f"INTRADAY CANDLES → count={len(data)}")
 
             # If intraday is empty (market closed), fetch last 5 days historical
             if not data:
@@ -190,6 +195,7 @@ async def get_historical_candles(symbol: str, tf: str = "1m", limit: int = 300):
                 url = f"https://api.upstox.com/v2/historical-candle/{encoded_key}/{interval}/{to_date}/{from_date}"
                 resp = await client.get(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
                 data = resp.json().get('data', {}).get('candles', [])
+                logger.info(f"HISTORICAL FALLBACK → count={len(data)}")
 
             # Convert to frontend format: [timestamp, open, high, low, close, volume]
             candles = []
@@ -213,5 +219,5 @@ async def get_historical_candles(symbol: str, tf: str = "1m", limit: int = 300):
             }
 
     except Exception as e:
-        logger.error(f"Candles fetch error: {e}")
-        return {"symbol": symbol, "tf": tf, "candles": []}
+        logger.error(f"Candles fetch error for {symbol} ({tf}): {e}")
+        return {"symbol": symbol, "tf": tf, "candles": [], "error": str(e)}

@@ -77,6 +77,35 @@ class AnalyticsBroadcaster:
 
         return 0.0
 
+    def _build_summary(self, symbol, pcr, bias, regime,
+                       call_wall, put_wall, iv_atm, vol_state) -> str:
+        """Build clean institutional summary sentence instead of raw concatenated string."""
+        parts = []
+        parts.append(f"{symbol} in {regime} regime")
+
+        if bias and bias != 'NEUTRAL':
+            parts.append(f"with {bias} bias (PCR {pcr:.2f})")
+        else:
+            parts.append(f"with neutral bias (PCR {pcr:.2f})")
+
+        levels = []
+        if call_wall > 0:
+            levels.append(
+                f"Call resistance at {call_wall:,}"
+            )
+        if put_wall > 0:
+            levels.append(
+                f"Put support at {put_wall:,}"
+            )
+        if levels:
+            parts.append(". ".join(levels))
+
+        if iv_atm > 0:
+            iv_pct = iv_atm * 100 if iv_atm < 1 else iv_atm
+            parts.append(f"IV {iv_pct:.1f}% — {vol_state}")
+
+        return ". ".join(parts) + "."
+
     def compute_single_analytics(self, symbol: str, chain_data=None):
         """
         Called synchronously by option_chain_builder after each tick.
@@ -170,21 +199,38 @@ class AnalyticsBroadcaster:
             # Run liquidity vacuum analysis
             microstructure_analysis = microstructure_layer.analyze_microstructure(metrics)
 
-            # Simple bias from PCR
-            pcr = snap.pcr
-            if pcr > 1.3:
-                bias, strength, regime = "BULLISH", round(min((pcr-1.0)/0.5, 1.0), 3), "RANGING"
-            elif pcr < 0.7:
-                bias, strength, regime = "BEARISH", round(min((1.0-pcr)/0.5, 1.0), 3), "RANGING"
-            else:
-                # Neutral zone: 0.7 to 1.3
-                # PCR 0.9586 → slight put lean
-                # Distance from 1.0 center gives strength
-                distance = abs(pcr - 1.0)
-                strength = round(min(distance / 0.3, 1.0), 3)
-                bias = "NEUTRAL"
-                regime = "RANGING"
+            # PHASE 1: Master AI Engine Execution (Law 1 Alignment)
+            ai_results = {}
+            try:
+                # Convert snap attributes to dict for orchestrator
+                snap_dict = {
+                    "spot": snap.spot,
+                    "pcr": snap.pcr,
+                    "max_call_oi_strike": snap.max_call_oi_strike,
+                    "max_put_oi_strike": snap.max_put_oi_strike,
+                    "total_call_oi": snap.total_call_oi,
+                    "total_put_oi": snap.total_put_oi,
+                    "atm_strike": snap.atm_strike,
+                    "atm_iv": snap.atm_iv,
+                    "vwap": snap.vwap,
+                    "dte": snap.dte,
+                    "analytics": snap.analytics or {}
+                }
+                ai_results = await ai_orchestrator.run_cycle(symbol, snap_dict)
+                logger.info(f"[ORCHESTRATOR] ✅ Analysis computed for {symbol} ({ai_results.get('cycle_time_ms')}ms)")
+            except Exception as e:
+                logger.error(f"[ORCHESTRATOR] ❌ Pipeline crash for {symbol}: {e}")
+                # Fallback to manual heuristics if brain crashes
 
+            # Simple bias from PCR (Fallback/Parity check)
+            pcr = ai_results.get("market_analysis", {}).get("bias_strength", snap.pcr) if ai_results else snap.pcr
+            
+            # Map Orchestrator results to standard payload
+            m_analysis = ai_results.get("market_analysis", {})
+            bias = m_analysis.get("bias", "NEUTRAL")
+            strength = m_analysis.get("bias_strength", 0.0)
+            regime = m_analysis.get("regime", "RANGING")
+            
             import time
             ts  = int(time.time())
             spot = snap.spot
@@ -207,34 +253,27 @@ class AnalyticsBroadcaster:
                     "regime":        regime,
                     "bias":          bias,
                     "bias_strength": strength,
-                    "key_levels": {
+                    "key_levels":    m_analysis.get("key_levels", {
                         "call_wall": snap.max_call_oi_strike,
                         "put_wall":  snap.max_put_oi_strike,
                         "max_pain": 0,
-                        "gex_flip": 0,
+                        "gex_flip": snap.analytics.get("gex_flip", 0) if snap.analytics else 0,
                         "vwap":      snap.vwap,
-                        "ema20":     0,
-                        "ema50":     0,
-                    },
-                    "gamma_analysis": {
-                        "net_gex":     0,
-                        "regime":      "SHORT_GAMMA" if snap.total_call_oi > snap.total_put_oi else "LONG_GAMMA",
-                        "flip_level":  0,
-                        "implication": "Dealer positioning from OI structure",
-                    },
-                    "volatility_state": {
+                    }),
+                    "gamma_analysis": m_analysis.get("gamma_analysis", {
+                        "net_gex": snap.analytics.get("net_gex", 0) if snap.analytics else 0,
+                        "regime": snap.analytics.get("regime", "NEUTRAL") if snap.analytics else "NEUTRAL",
+                        "flip_level": snap.analytics.get("gex_flip", 0) if snap.analytics else 0,
+                        "implication": "Institutional Gamma Exposure Analysis",
+                    }),
+                    "volatility_state": m_analysis.get("volatility_state", {
                         "iv_atm":        snap.atm_iv,
-                        "iv_percentile": 0,
                         "state":         "NORMAL",
-                        "compression":   False,
-                    },
-                    "technical_state": {
+                    }),
+                    "technical_state": m_analysis.get("technical_state", {
                         "rsi":          0,
-                        "macd_hist":    0,
-                        "adx":          0,
                         "momentum_15m": 0,
-                        "pattern":      "NONE",
-                    },
+                    }),
                     "flow_analysis": {
                         "call_velocity": max(0.1, min(0.9, (snap.total_call_oi / 1000000))),
                         "put_velocity": max(0.1, min(0.9, (snap.total_put_oi / 1000000))),
@@ -242,69 +281,45 @@ class AnalyticsBroadcaster:
                         "intent_score": max(0.1, min(0.9, abs(snap.total_call_oi - snap.total_put_oi) / 100000)),
                         "imbalance": abs(snap.total_call_oi - snap.total_put_oi) / (snap.total_call_oi + snap.total_put_oi)
                     },
-                    "summary": (
-                        f"{symbol} | PCR={pcr:.2f} | Bias={bias} | "
-                        f"Call wall={snap.max_call_oi_strike} | "
-                        f"Put wall={snap.max_put_oi_strike} | "
-                        f"IV={snap.atm_iv:.2f}%"
-                    ),
+                    "summary": m_analysis.get("summary") or self._build_summary(symbol, snap.pcr, bias, regime,
+                                                   snap.max_call_oi_strike, snap.max_put_oi_strike,
+                                                   snap.atm_iv, "NORMAL"),
                 },
 
-                "early_warnings": [],
-
-                "trade_plan": {
+                "early_warnings": ai_results.get("early_warnings", []),
+                "trade_plan": ai_results.get("trade_plan", {
                     "plan_id":      f"PLAN-{symbol}-{ts}",
                     "instrument":   symbol,
                     "direction":    "NEUTRAL",
                     "strike":       snap.atm_strike,
-                    "entry":        0.0,
-                    "stop_loss":    0.0,
-                    "target":       0.0,
-                    "confidence":   0.0,
-                    "time_horizon": "N/A",
-                    "risk_reward":  0.0,
-                    "reason":       ["Analyzing OI structure..."],
-                    "signals_used": {
-                        "pcr":       pcr,
-                        "bias":      bias,
-                        "regime":    regime,
-                        "call_wall": snap.max_call_oi_strike,
-                        "put_wall":  snap.max_put_oi_strike,
-                    },
-                },
-
+                }),
+                "confidence_score": ai_results.get("confidence_score", 0.0),
+                "sentiment_overlay": ai_results.get("sentiment_overlay", {}),
                 "option_chain": {
-                    "pcr":           pcr,
+                    "pcr":           snap.pcr,
                     "call_wall":     snap.max_call_oi_strike,
                     "put_wall":      snap.max_put_oi_strike,
-                    "max_pain":      0,
-                    "gex_flip":      0,
-                    "net_gex":       0,
+                    "gex_flip":      snap.analytics.get("gex_flip", 0) if snap.analytics else 0,
+                    "net_gex":       snap.analytics.get("net_gex", 0) if snap.analytics else 0,
                     "iv_atm":        snap.atm_iv,
-                    "iv_percentile": 0,
-                    "straddle_pct": 0,
                     "calls":         snap.calls_data,
                     "puts":          snap.puts_data,
                 },
 
                 "paper_trading": {
                     "total_trades":    0,
-                    "wins":            0,
-                    "win_rate":        0.0,
-                    "profit_factor":   0.0,
-                    "sharpe_ratio":    0.0,
                     "total_pnl":       0.0,
                     "capital_current": 100000.0,
                 },
 
                 "news_alerts": [],
+                "chart_intelligence": ai_results.get("chart_intelligence"),
 
                 "dataQuality": {
                     "hasSpot":   spot > 0,
                     "hasOi":     snap.total_call_oi > 0,
-                    "hasGreeks": snap.atm_iv > 0,
                     "aiReady":   True,
-                    "source":    "rest_poller",
+                    "source":    "AI_ORCHESTRATOR",
                 },
             }
 
@@ -312,16 +327,9 @@ class AnalyticsBroadcaster:
             import json
             try:
                 message = json.dumps(payload, default=str)
+                await manager.broadcast(message)
             except Exception as e:
                 logger.error(f"[BROADCAST] JSON error for {symbol}: {e}")
-                return
-
-            await manager.broadcast(message)
-            logger.info(
-                f"[BROADCAST] ✅ {symbol} | spot={spot} "
-                f"pcr={pcr:.2f} calls={len(snap.calls_data)} "
-                f"puts={len(snap.puts_data)}"
-            )
 
             # Send separate chart_analysis message with all required data for components
             chart_analysis_payload = {
@@ -332,59 +340,42 @@ class AnalyticsBroadcaster:
                 "bias": bias,
                 "bias_strength": strength,
                 "regime": regime,
-                "flow_analysis": {
-                    "call_velocity": max(0.1, min(0.9, (snap.total_call_oi / 1000000))),
-                    "put_velocity": max(0.1, min(0.9, (snap.total_put_oi / 1000000))),
-                    "direction": "BULLISH" if snap.total_call_oi > snap.total_put_oi else "BEARISH",
-                    "intent_score": max(0.1, min(0.9, abs(snap.total_call_oi - snap.total_put_oi) / 100000)),
-                    "imbalance": abs(snap.total_call_oi - snap.total_put_oi) / (snap.total_call_oi + snap.total_put_oi)
+                "flow_analysis": payload["market_analysis"]["flow_analysis"],
+                "key_levels": payload["market_analysis"]["key_levels"],
+                "gamma_analysis": payload["market_analysis"]["gamma_analysis"],
+                "expiry_magnet": {
+                    "magnet_strike": snap.max_put_oi_strike if snap.max_put_oi_strike > 0 else snap.atm_strike,
+                    "pin_probability": 0.45 if snap.dte <= 1 else 0.25, 
+                    "days_to_expiry": snap.dte,
+                    "target_distance": abs(spot - (snap.max_put_oi_strike if snap.max_put_oi_strike > 0 else snap.atm_strike))
                 },
-                "key_levels": {
-                    "call_wall": snap.max_call_oi_strike,
-                    "put_wall": snap.max_put_oi_strike,
-                    "max_pain": 0,
-                    "gex_flip": 0,
-                    "vwap": snap.vwap,
-                    "ema20": 0,
-                    "ema50": 0,
-                },
-                "gamma_analysis": {
-                    "net_gex": 0,
-                    "regime": "SHORT_GAMMA" if snap.total_call_oi > snap.total_put_oi else "LONG_GAMMA",
-                    "flip_level": 0,
-                    "implication": "Dealer positioning from OI structure",
-                },
-                "volatility_state": {
-                    "iv_atm": snap.atm_iv,
-                    "iv_percentile": 0,
-                    "state": "NORMAL",
-                    "compression": False,
-                },
-                "technical_state": {
-                    "rsi": 0,
-                    "macd_hist": 0,
-                    "adx": 0,
-                    "momentum_15m": 0,
-                    "pattern": "NONE",
+                "volatility_state": payload["market_analysis"]["volatility_state"],
+                "expected_move": {
+                    "1h": round(spot * 0.004, 2), 
+                    "4h": round(spot * 0.008, 2),
+                    "1d": round(spot * 0.012, 2)
                 },
                 "liquidity_analysis": {
-                    "vacuum_start": round(spot * 0.98, 2),  # 2% below spot
-                    "vacuum_end": round(spot * 1.02, 2),    # 2% above spot
+                    "total_call_oi": snap.total_call_oi,
+                    "total_put_oi": snap.total_put_oi,
+                    "liquidity_pressure": min(1.0, (snap.total_call_oi + snap.total_put_oi) / 50000000), 
                     "book_depth": max(0.3, min(0.9, microstructure_analysis.get("liquidity_vacuum_confidence", 0.5))),
                     "expansion_probability": microstructure_analysis.get("liquidity_vacuum_confidence", 0.3),
                     "vacuum_signal": microstructure_analysis.get("liquidity_vacuum_signal", "NONE"),
                     "vacuum_direction": microstructure_analysis.get("liquidity_vacuum_direction", "NONE"),
                     "vacuum_strength": microstructure_analysis.get("liquidity_vacuum_strength", 0.0)
                 },
-                "signal": "WAIT",
-                "confidence": 0.0,
-                "computation_ms": microstructure_analysis.get("execution_time_ms", 0.0)
+                "sentiment_overlay": payload["sentiment_overlay"],
+                "chart_intelligence": payload["chart_intelligence"],
+                "summary": payload["market_analysis"]["summary"],
+                "confidence": payload["confidence_score"],
+                "computation_ms": round(ai_results.get("cycle_time_ms", 0), 2)
             }
             
             try:
                 chart_message = json.dumps(chart_analysis_payload, default=str)
                 await manager.broadcast(chart_message)
-                logger.info(f"[BROADCAST] ✅ {symbol} chart_analysis with liquidity vacuum data")
+                logger.info(f"[BROADCAST] ✅ {symbol} chart_analysis via AI_ORCHESTRATOR")
             except Exception as e:
                 logger.error(f"[BROADCAST] Chart analysis JSON error for {symbol}: {e}")
 

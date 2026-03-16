@@ -8,6 +8,7 @@ import logging
 import time
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
+from dataclasses import asdict
 
 # Import core processing and storage
 from .history_store import history_store
@@ -21,6 +22,9 @@ from .confidence_scorer import confidence_scoring_engine
 from .drift_monitor import model_drift_monitor
 from .trade_planner import trade_planner
 from .news_event_engine import news_event_engine
+
+# Import Chart Intelligence Engine
+from ..chart_intelligence.engine import chart_intelligence_engine
 
 # Institutional Layer Integrations (backend/ai/)
 try:
@@ -140,8 +144,8 @@ class AIOrchestrator:
             plan = trade_planner.plan(symbol, analysis, confidence)
             
             # Merge opt_trade into plan if available
-            if opt_trade:
-                plan_dict = plan.to_dict() if hasattr(plan, 'to_dict') else plan
+            if opt_trade and plan:
+                plan_dict = plan.to_dict() if hasattr(plan, 'to_dict') else asdict(plan) if not isinstance(plan, dict) else plan
                 plan_dict.update({
                     "strike": opt_trade["strike"],
                     "direction": opt_trade["option_type"],
@@ -151,6 +155,8 @@ class AIOrchestrator:
                     "reason": plan_dict.get("reason", []) + [opt_trade["signal_text"]]
                 })
                 plan = plan_dict
+            elif plan:
+                plan = plan.to_dict() if hasattr(plan, 'to_dict') else asdict(plan) if not isinstance(plan, dict) else plan
 
             # 9. News Event Engine (Institutional Sentiment Overlay)
             news_analysis = await news_event_engine.analyze(symbol)
@@ -159,6 +165,43 @@ class AIOrchestrator:
                 "news_impact": news_analysis.get("news_impact_bias"),
                 "status": news_analysis.get("status")
             }
+            
+            # 9.5. Chart Intelligence Engine (Pattern Detection & Overlay Objects)
+            chart_intelligence = None
+            try:
+                # Get candle data for chart intelligence (from history store)
+                candle_data = []
+                for hist_snapshot in snapshots[-200:]:  # Last 200 snapshots
+                    if 'candle' in hist_snapshot:
+                        candle_data.append(hist_snapshot['candle'])
+                
+                # Get options data for integration
+                options_data = {
+                    'call_wall': analysis.key_levels.get("call_wall", 0),
+                    'put_wall': analysis.key_levels.get("put_wall", 0),
+                    'pcr_ratio': fv.pcr_ratio if hasattr(fv, 'pcr_ratio') else 1.0,
+                    'gex_flip_level': analysis.key_levels.get("gex_flip", 0),
+                    'net_gamma': fv.net_gamma if hasattr(fv, 'net_gamma') else 0,
+                    'total_call_oi': fv.total_call_oi if hasattr(fv, 'total_call_oi') else 0,
+                    'total_put_oi': fv.total_put_oi if hasattr(fv, 'total_put_oi') else 0,
+                    'max_pain': analysis.key_levels.get("max_pain", snapshot.get("spot", 0)),
+                    'iv_atm': analysis.volatility_state.get("iv_atm", 0.20)
+                }
+                
+                if candle_data:
+                    chart_result = chart_intelligence_engine.analyze(candle_data, options_data)
+                    chart_intelligence = {
+                        "market_structure": chart_result.market_structure,
+                        "pattern_detected": chart_result.pattern_detected,
+                        "confidence": chart_result.confidence,
+                        "overlay_objects": [asdict(obj) for obj in chart_result.overlay_objects],
+                        "analysis_summary": chart_result.analysis_summary,
+                        "options_context": chart_result.options_context,
+                        "processing_time_ms": chart_result.processing_time_ms
+                    }
+            except Exception as e:
+                logger.warning(f"Chart Intelligence analysis failed for {symbol}: {e}")
+                chart_intelligence = {"error": str(e), "status": "CHART_INTELLIGENCE_ERROR"}
             
             # 10. Final Payload Assembly (Aligned with v5.0 Contract)
             elapsed_ms = (time.monotonic() - t0) * 1000
@@ -195,7 +238,8 @@ class AIOrchestrator:
                 "early_warnings": [a.to_dict() if hasattr(a, 'to_dict') else a for a in alerts],
                 "trade_plan": plan if isinstance(plan, dict) else plan.to_dict(),
                 "confidence_score": round(confidence, 3),
-                "sentiment_overlay": sentiment_overlay
+                "sentiment_overlay": sentiment_overlay,
+                "chart_intelligence": chart_intelligence
             }
             
             if elapsed_ms > 100:

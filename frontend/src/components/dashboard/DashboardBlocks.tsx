@@ -9,19 +9,19 @@ export function LoadingBlock() {
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] bg-cyan-500/5 rounded-full blur-[120px] pointer-events-none" />
 
             <div className="relative mb-10 group">
-                <div className="absolute inset-0 rounded-full bg-cyan-500/20 blur-2xl animate-pulse" />
+                <div className="absolute inset-0 rounded-full bg-cyan-500/30 blur-2xl animate-pulse" />
                 <div
-                    className="w-24 h-24 rounded-full border-[1px] animate-[spin_3s_linear_infinite] relative z-10"
-                    style={{ borderColor: 'rgba(0,229,255,0.05)', borderTopColor: '#00E5FF' }}
+                    className="w-24 h-24 rounded-full border-[2px] animate-[spin_3s_linear_infinite] relative z-10"
+                    style={{ borderColor: 'rgba(0,229,255,0.1)', borderTopColor: '#00E5FF' }}
                 />
                 <div className="absolute inset-0 flex items-center justify-center">
                     <div
-                        className="w-16 h-16 rounded-full border-[1px] animate-[spin_2s_linear_infinite] relative z-20"
-                        style={{ borderColor: 'rgba(124,58,237,0.05)', borderTopColor: '#7C3AED', animationDirection: 'reverse' }}
+                        className="w-16 h-16 rounded-full border-[2px] animate-[spin_2s_linear_infinite] relative z-20"
+                        style={{ borderColor: 'rgba(124,58,237,0.1)', borderTopColor: '#7C3AED', animationDirection: 'reverse' }}
                     />
                 </div>
                 <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-1.5 h-1.5 bg-white rounded-full animate-ping shadow-[0_0_15px_white]" />
+                    <div className="w-2 h-2 bg-white rounded-full animate-ping shadow-[0_0_20px_white]" />
                 </div>
             </div>
 

@@ -36,6 +36,14 @@ export const useExpirySelector = () => {
         const res = await fetch(`/api/v1/market/expiries?symbol=${currentSymbol}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
+        // Check if response is JSON before parsing
+        const contentType = res.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          console.warn('Backend not available - non-JSON response');
+          setExpiryError('Backend offline - expiry data unavailable');
+          return;
+        }
+
         const raw = await res.json();
 
         // Normalize: handle { expiries: [] }, { data: [] }, or flat []
@@ -69,7 +77,13 @@ export const useExpirySelector = () => {
 
       } catch (err: any) {
         console.warn('Expiry fetch failed:', err?.message);
-        setExpiryError(err?.message || 'Failed to load expiries');
+        
+        // Handle backend offline scenario specifically
+        if (err?.message?.includes('Backend not available')) {
+          setExpiryError('Backend offline - expiry data unavailable');
+        } else {
+          setExpiryError(err?.message || 'Failed to load expiries');
+        }
       } finally {
         setLoadingExpiries(false);
       }

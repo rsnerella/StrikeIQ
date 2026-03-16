@@ -1,23 +1,20 @@
 "use client";
 
 import React, { useEffect, memo } from 'react';
-import { AlertTriangle, Minus } from 'lucide-react';
 import { useLiveMarketData } from '../hooks/useLiveMarketData';
 import { useExpirySelector } from '../hooks/useExpirySelector';
 import { useMarketContextStore } from '../stores/marketContextStore';
-import { useModeGuard, useEffectiveSpot } from './SafeModeGuard';
 import SymbolSelector from './SymbolSelector';
-import { DataQualityBanner } from './DataQualityBanner';
 import dynamic from 'next/dynamic';
 const LoadingPlaceholder = () => (
-  <div className="animate-pulse flex flex-col gap-4 p-4 grayscale opacity-50">
-    <div className="h-4 bg-slate-700 rounded w-1/4"></div>
-    <div className="h-20 bg-slate-700 rounded"></div>
+  <div className="flex flex-col gap-4 p-4 opacity-70">
+    <div className="h-4 bg-slate-800 animate-pulse rounded w-1/4"></div>
+    <div className="h-20 bg-slate-800 animate-pulse rounded"></div>
   </div>
 );
 
 // ── Lazy load heavy panels (Task 10) ──────────────────────────────────────────
-const OIHeatmap = dynamic(() => import('./OIHeatmapClean'), { ssr: false, loading: () => <LoadingPlaceholder /> });
+const OIHeatmap = dynamic(() => import('./optionChain/OIHeatmap'), { ssr: false, loading: () => <LoadingPlaceholder /> });
 const AIInterpretationPanel = dynamic(() => import('./AIInterpretationPanel'), { ssr: false, loading: () => <LoadingPlaceholder /> });
 const AlertPanelFinal = dynamic(() => import('./intelligence/AlertPanelFinal'), { ssr: false, loading: () => <LoadingPlaceholder /> });
 const AICommandCenter = dynamic(() => import('./AICommandCenter'), { ssr: false, loading: () => <LoadingPlaceholder /> });
@@ -41,14 +38,12 @@ import { BiasPanel, ExpectedMovePanel } from './dashboard/BiasAndMove';
 import { SmartMoneyPanel, LiquidityPanel } from './dashboard/SmartMoneyAndLiquidity';
 import { CARD } from './dashboard/DashboardTypes';
 import type { LiveMarketData } from '../hooks/useLiveMarketData';
-import { StrikeIQChart } from './charts/StrikeIQChart';
-import { AdvancedPriceChart } from './charts/AdvancedPriceChart';
+import { StrikeIQPriceChart } from './charts/StrikeIQPriceChart';
 
 // ── Memoized heavy panels (Task 10) ─────────────────────────────────────────────
 const MemoizedOIHeatmap = memo(OIHeatmap);
 const MemoizedAIPanel = memo(AIInterpretationPanel);
 const MemoizedAlerts = memo(AlertPanelFinal);
-const MemoizedAICommandCenter = memo(AICommandCenter);
 const MemoizedStrategyPlan = memo(StrategyPlanPanel);
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -58,99 +53,96 @@ interface DashboardProps { initialSymbol?: string; }
 const DASHBOARD_CSS = `
   /* ── Panel card base ──────────────────────────────────────────── */
   .trading-panel {
-    background: rgba(6,9,18,0.72);
-    border-radius: 18px;
-    border: 1px solid rgba(255,255,255,0.07);
-    padding: 20px;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.25), 0 8px 32px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.04);
-    transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.2s ease;
+    background: rgba(6, 9, 18, 0.9);
+    border-radius: 20px;
+    border: 1px solid rgba(0, 229, 255, 0.15);
+    padding: 24px;
+    box-shadow: 
+      0 12px 20px -5px rgba(0, 0, 0, 0.4), 
+      0 8px 10px -6px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     overflow: hidden;
-    backdrop-filter: blur(24px);
+    backdrop-filter: blur(20px);
   }
+
   .trading-panel::before {
     content: '';
     position: absolute;
     top: 0; left: 0; right: 0;
     height: 1px;
-    background: linear-gradient(90deg, transparent 0%, rgba(0,229,255,0.30) 50%, transparent 100%);
+    background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.4), transparent);
     opacity: 0;
-    transition: opacity 0.3s ease;
+    transition: opacity 0.4s ease;
   }
-  .trading-panel::after {
-    content: '';
-    position: absolute;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-    background: radial-gradient(ellipse at top left, rgba(0,229,255,0.03), transparent 60%);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
-  }
+
   .trading-panel:hover {
-    border-color: rgba(0,229,255,0.20);
-    box-shadow: 0 2px 6px rgba(0,0,0,0.30), 0 12px 40px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,229,255,0.06), inset 0 1px 0 rgba(255,255,255,0.06);
+    background: rgba(15, 23, 42, 0.75);
+    border-color: rgba(56, 189, 248, 0.4);
+    box-shadow: 
+      0 25px 30px -10px rgba(0, 0, 0, 0.5), 
+      0 15px 20px -10px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
+    transform: translateY(-3px);
   }
+
   .trading-panel:hover::before { opacity: 1; }
-  .trading-panel:hover::after  { opacity: 1; }
+  
   .trading-panel.no-pad { padding: 0; }
 
   /* ── Panel section label ─────────────────────────────────────── */
   .panel-label {
     font-size: 10px;
     font-weight: 700;
-    letter-spacing: 0.18em;
+    letter-spacing: 0.2em;
     text-transform: uppercase;
-    color: rgba(148,163,184,0.55);
+    color: rgba(148, 163, 184, 0.6);
     font-family: 'JetBrains Mono', monospace;
-    margin-bottom: 4px;
+    margin-bottom: 8px;
+    display: block;
   }
 
   /* ── 12-col responsive grid ──────────────────────────────────── */
   .dash-grid {
     display: grid;
     grid-template-columns: repeat(12, 1fr);
-    gap: 18px;
+    gap: 20px;
   }
 
-  /* Desktop: exact col spans */
   .col-12 { grid-column: span 12; }
   .col-8  { grid-column: span 8;  }
   .col-6  { grid-column: span 6;  }
   .col-4  { grid-column: span 4;  }
   .col-3  { grid-column: span 3;  }
 
-  /* Tablet (768–1279px): 2 columns for most panels */
   @media (max-width: 1279px) and (min-width: 768px) {
-    .dash-grid { gap: 14px; }
+    .dash-grid { gap: 16px; }
     .col-3  { grid-column: span 6;  }
     .col-4  { grid-column: span 6;  }
     .col-8  { grid-column: span 12; }
   }
 
-  /* Mobile (<768px): full width for most, 2-col for small panels */
   @media (max-width: 767px) {
-    .dash-grid { gap: 12px; }
+    .dash-grid { gap: 14px; }
     .col-3  { grid-column: span 6;  }
     .col-4  { grid-column: span 12; }
     .col-6  { grid-column: span 12; }
     .col-8  { grid-column: span 12; }
   }
 
-  /* Extra-small (<480px): all full width */
   @media (max-width: 479px) {
+    .dash-grid { gap: 12px; }
     .col-3  { grid-column: span 12; }
   }
 
-  /* h-full support inside grid cells */
   .dash-grid > div > .trading-panel.h-full { height: 100%; }
 
   /* ── Section divider ─────────────────────────────────────────── */
   .section-divider {
     height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(0,229,255,0.12), rgba(99,102,241,0.10), transparent);
-    margin: 2px 0;
-    border-radius: 1px;
+    background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.1), transparent);
+    margin: 4px 0;
   }
 
   /* ── Metric row ──────────────────────────────────────────────── */
@@ -158,38 +150,43 @@ const DASHBOARD_CSS = `
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 5px 0;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
   }
+  
+  .metric-row:last-child {
+    border-bottom: none;
+  }
+
   .metric-label {
-    font-size: 11px;
-    font-family: 'JetBrains Mono', monospace;
-    color: rgba(148,163,184,0.55);
-  }
-  .metric-value {
     font-size: 12px;
     font-family: 'JetBrains Mono', monospace;
+    color: #94a3b8;
+  }
+
+  .metric-value {
+    font-size: 13px;
+    font-family: 'JetBrains Mono', monospace;
     font-weight: 600;
-    color: #fff;
-    font-variant-numeric: tabular-nums;
+    color: #f8fafc;
   }
 
   /* ── Stat mini-card ──────────────────────────────────────────── */
   .stat-mini {
-    background: rgba(255,255,255,0.025);
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 12px;
-    padding: 10px 12px;
-    transition: background 0.2s ease, border-color 0.2s ease;
+    background: rgba(30, 41, 59, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 14px;
+    padding: 12px 16px;
+    transition: all 0.3s ease;
   }
+
   .stat-mini:hover {
-    background: rgba(255,255,255,0.042);
-    border-color: rgba(255,255,255,0.11);
+    background: rgba(30, 41, 59, 0.5);
+    border-color: rgba(56, 189, 248, 0.3);
+    transform: scale(1.02);
   }
 `;
 
-
-
-// ── Main Dashboard ────────────────────────────────────────────────────────────
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 function DashboardComponent({ initialSymbol = 'NIFTY' }: DashboardProps) {
   const setCurrentSymbol = useMarketContextStore(state => state.setSymbol);
@@ -209,32 +206,31 @@ function DashboardComponent({ initialSymbol = 'NIFTY' }: DashboardProps) {
   const liveMarketData = useLiveMarketData(currentSymbol, selectedExpiry);
 
   return (
-    <div className="min-h-screen bg-[#020408] text-slate-200 font-sans selection:bg-blue-500/30">
+    <div className="min-h-screen bg-[#020408] text-slate-200 font-sans selection:bg-sky-500/30 overflow-x-hidden mesh-background">
       <style>{DASHBOARD_CSS}</style>
-      
+
       {/* ── Visual Grid Overlay ─────────────────────────────────────── */}
-      <div 
+      <div
         className="pointer-events-none fixed inset-0 z-0"
         style={{
-          backgroundImage: 'linear-gradient(rgba(0,229,255,1) 1px, transparent 1px), linear-gradient(90deg, rgba(0,229,255,1) 1px, transparent 1px)',
-          backgroundSize: '48px 48px',
-          opacity: 0.016,
+          backgroundImage: 'linear-gradient(rgba(56, 189, 248, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(56, 189, 248, 0.03) 1px, transparent 1px)',
+          backgroundSize: '40px 40px',
         }}
       />
 
       <div className="relative z-10 w-full max-w-[1920px] mx-auto px-3 sm:px-5 lg:px-8 py-4 sm:py-6">
         <div className="dash-grid">
 
-          {/* ROW 1 — Symbol Selector (full width) */}
-          <div className="col-12" style={{ position: 'relative', zIndex: 100 }}>
-            <div className="trading-panel" style={{ overflow: 'visible' }}>
-              <SymbolSelector />
-            </div>
-          </div>
-
-          {/* ROW 2 — Ticker Strip (full width) */}
+          {/* ROW 1 — Ticker Strip (full width) */}
           <div className="col-12">
             <TickerStrip symbol={currentSymbol} />
+          </div>
+
+          {/* ROW 2 — Symbol Selector (full width) */}
+          <div className="col-12" style={{ position: 'relative', zIndex: 100 }}>
+            <div className="trading-panel scanline-overlay" style={{ overflow: 'visible' }}>
+              <SymbolSelector />
+            </div>
           </div>
 
           {/* ROW 3 — Four Stat Cards (full width, internally 4-col) */}
@@ -258,49 +254,48 @@ function DashboardComponent({ initialSymbol = 'NIFTY' }: DashboardProps) {
           </div>
 
           {/* ROW 6 — Smart Money | Liquidity | Gamma Exposure | Institutional Flow (3 cols each) */}
-          <div className="col-3">
+          <div className="col-3 flex flex-col items-stretch">
             <SmartMoneyPanel />
           </div>
-          <div className="col-3">
+          <div className="col-3 flex flex-col items-stretch">
             <LiquidityPanel />
           </div>
-          <div className="col-3">
+          <div className="col-3 flex flex-col items-stretch">
             <GammaExposurePanel />
           </div>
-          <div className="col-3">
+          <div className="col-3 flex flex-col items-stretch">
             <InstitutionalFlowPanel />
           </div>
 
-          {/* ROW 7 — Signal Matrix (4 cols) | Trade Setup (4 cols) | Chart Intelligence (4 cols) | Strategy Plan (4 cols) */}
-          <div className="col-4">
+          {/* ROW 7 — Signal Matrix | Trade Setup | Chart Intelligence | Strategy Plan (3 cols each) */}
+          <div className="col-3 flex flex-col items-stretch h-full">
             <SignalMatrixPanel />
           </div>
-          <div className="col-4">
+          <div className="col-3 flex flex-col items-stretch h-full">
             <TradeSetupPanel />
           </div>
-          <div className="col-4">
+          <div className="col-3 flex flex-col items-stretch h-full">
             <ChartIntelligencePanel />
           </div>
-          <div className="col-4">
+          <div className="col-3 flex flex-col items-stretch h-full">
             <MemoizedStrategyPlan />
           </div>
 
           {/* ROW 8 — Volatility Regime (full width) */}
-          <div className="col-12">
+          <div className="col-6">
             <VolatilityRegimePanel />
           </div>
-
-          {/* ROW 9 — StrikeIQ Chart (full width) */}
-          <div className="col-12">
+          {/* ROW 9 — AI Interpretation Panel (full width) */}
+          <div className="col-6">
             <div className="trading-panel">
-              <StrikeIQChart />
+              <MemoizedAIPanel />
             </div>
           </div>
 
-          {/* ROW 10 — Advanced Price Chart (full width) */}
+          {/* ROW 10 — StrikeIQ Unified Chart (full width) */}
           <div className="col-12">
             <div className="trading-panel">
-              <AdvancedPriceChart data={liveMarketData.data} />
+              <StrikeIQPriceChart data={liveMarketData.data} />
             </div>
           </div>
 
@@ -316,7 +311,7 @@ function DashboardComponent({ initialSymbol = 'NIFTY' }: DashboardProps) {
             </div>
           </div>
 
-          {/* ROW 10 — Advanced Intelligence: 4 panels × 3 cols */}
+          {/* ROW 12 — Advanced Intelligence: 4 panels × 3 cols */}
           <div className="col-3">
             <TrapDetectionPanel />
           </div>
@@ -330,23 +325,11 @@ function DashboardComponent({ initialSymbol = 'NIFTY' }: DashboardProps) {
             <ExpiryMagnetPanel />
           </div>
 
-          <div className="col-12">
-            <div className="trading-panel">
-              <MemoizedStrategyPlan />
-            </div>
-          </div>
 
-          {/* ROW 12 — AI Interpretation Panel (full width) */}
+          {/* ROW 14 — AI Command Center (full width) */}
           <div className="col-12">
             <div className="trading-panel">
-              <MemoizedAIPanel />
-            </div>
-          </div>
-
-          {/* ROW 13 — AI Command Center (full width) */}
-          <div className="col-12">
-            <div className="trading-panel">
-              <MemoizedAICommandCenter />
+              <AICommandCenter />
             </div>
           </div>
 

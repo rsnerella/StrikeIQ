@@ -74,15 +74,15 @@ export function SignalMatrixPanel() {
 
     if (!hasData) {
         return (
-            <div className="trading-panel h-full flex flex-col p-6 border border-white/5 opacity-40">
+            <div className="trading-panel h-full flex flex-col p-6 border border-white/10 opacity-70">
                  <div className="flex items-center justify-between mb-8">
                     <SectionLabel>Signal Matrix</SectionLabel>
-                    <SkeletonPulse className="w-20 h-5" />
+                    <SkeletonPulse className="w-20 h-5 bg-white/10" />
                 </div>
                 <div className="space-y-4">
-                    <SkeletonPulse className="w-full h-12" />
+                    <SkeletonPulse className="w-full h-12 bg-white/5" />
                     <div className="grid grid-cols-2 gap-2">
-                        {[1, 2, 3, 4, 5, 6].map(i => <SkeletonPulse key={i} className="h-16" />)}
+                        {[1, 2, 3, 4, 5, 6].map(i => <SkeletonPulse key={i} className="h-16 bg-white/5" />)}
                     </div>
                 </div>
             </div>

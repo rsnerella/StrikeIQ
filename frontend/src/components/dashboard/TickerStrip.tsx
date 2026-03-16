@@ -26,13 +26,7 @@ export function TickerStrip({ symbol }: { symbol: string }) {
     return (
         <div
             id="section-dashboard"
-            className="trading-panel scroll-mt-20 overflow-hidden relative group"
-            style={{
-                padding: '16px 24px',
-                borderColor: 'rgba(0, 229, 255, 0.15)',
-                background: 'rgba(6, 9, 18, 0.9)',
-                backdropFilter: 'blur(20px)'
-            }}
+            className="trading-panel scroll-mt-20 overflow-hidden relative group p-4 sm:p-6"
         >
             {/* Real-time status line */}
             <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-cyan-500/50 to-transparent" />

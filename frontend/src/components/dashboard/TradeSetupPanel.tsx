@@ -38,9 +38,26 @@ export function TradeSetupPanel() {
         );
     }
 
-    const direction = tradePlan?.direction?.toUpperCase() || 'NEUTRAL';
-    const isBullish = direction === 'CE' || direction === 'BULLISH';
-    const isBearish = direction === 'PE' || direction === 'BEARISH';
+    const entryDisplay = tradePlan?.entry > 0
+      ? `₹${tradePlan.entry.toFixed(2)}` 
+      : '—'
+
+    const slDisplay = tradePlan?.stop_loss > 0
+      ? `₹${tradePlan.stop_loss.toFixed(2)}` 
+      : '—'
+
+    const targetDisplay = tradePlan?.target > 0
+      ? `₹${tradePlan.target.toFixed(2)}` 
+      : '—'
+
+    const directionDisplay = tradePlan?.direction ?? 'NEUTRAL'
+    const isBullish = directionDisplay === 'CE' || directionDisplay === 'BULLISH';
+    const isBearish = directionDisplay === 'PE' || directionDisplay === 'BEARISH';
+
+    const reasonDisplay = tradePlan?.reason?.[0]
+      ?? (hasData
+          ? 'No high-conviction setup at current levels'
+          : '—')
 
     // Directional Styling
     const directionStyle = isBullish 
@@ -74,7 +91,7 @@ export function TradeSetupPanel() {
                         }}
                     >
                         {directionStyle.icon}
-                        {tradePlan?.strike ? `BUY ${tradePlan.strike} ${tradePlan.direction}` : direction}
+                        {tradePlan?.strike ? `BUY ${tradePlan.strike} ${tradePlan.direction}` : directionDisplay}
                     </span>
                 </div>
             </div>
@@ -106,7 +123,7 @@ export function TradeSetupPanel() {
                             <span className="text-[10px] font-bold font-mono tracking-wider uppercase text-slate-400">Optimal Entry</span>
                         </div>
                         <span className="text-[16px] font-bold font-mono tracking-tight text-blue-400 tabular-nums">
-                            {tradePlan?.entry > 0 ? `₹${tradePlan.entry.toFixed(2)}` : <SkeletonPulse className="w-16 h-4" />}
+                            {entryDisplay}
                         </span>
                     </div>
                 </div>
@@ -116,14 +133,14 @@ export function TradeSetupPanel() {
                     <div className="rounded-xl p-4 border border-green-500/10 bg-green-500/[0.03]">
                         <div className="text-[9px] font-bold font-mono text-green-500/70 uppercase mb-1">Target</div>
                         <div className="text-[14px] font-bold font-mono text-green-400">
-                            {tradePlan?.target > 0 ? `₹${tradePlan.target.toFixed(2)}` : '—'}
+                            {targetDisplay}
                         </div>
                         <div className="text-[8px] font-mono text-green-500/50 mt-1">{rrRatio} RR</div>
                     </div>
                     <div className="rounded-xl p-4 border border-red-500/10 bg-red-500/[0.03]">
                         <div className="text-[9px] font-bold font-mono text-red-500/70 uppercase mb-1">Stop Loss</div>
                         <div className="text-[14px] font-bold font-mono text-red-500">
-                            {tradePlan?.stop_loss > 0 ? `₹${tradePlan.stop_loss.toFixed(2)}` : '—'}
+                            {slDisplay}
                         </div>
                     </div>
                 </div>
@@ -132,20 +149,7 @@ export function TradeSetupPanel() {
             {/* Reason Footer (Law 1 Purge) */}
             <div className="mt-auto pt-4 border-t border-white/5 flex flex-col gap-3">
                 <div className="text-[10px] font-medium font-mono tracking-tight p-3 rounded-lg bg-white/5 border border-white/10 text-slate-300 leading-relaxed min-h-[60px]">
-                    {tradePlan?.reason && tradePlan.reason.length > 0 ? (
-                        <ul className="list-disc list-inside space-y-1">
-                            {tradePlan?.reason.slice(0, 2).map((r: string, i: number) => (
-                                <li key={i} className="truncate">{r}</li>
-                            ))}
-                        </ul>
-                    ) : hasData ? (
-                        <span>{bias} setup — {regime} regime | PCR {pcr?.toFixed(2)}</span>
-                    ) : (
-                        <div className="flex flex-col gap-2">
-                            <SkeletonPulse className="w-full h-3" />
-                            <SkeletonPulse className="w-2/3 h-3" />
-                        </div>
-                    )}
+                    {reasonDisplay}
                 </div>
             </div>
         </div>

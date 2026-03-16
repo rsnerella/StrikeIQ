@@ -124,90 +124,91 @@ AI-powered options market intelligence platform for Indian markets (**NIFTY, BAN
 - **Packet Processing**: Size-agnostic protobuf decoding for all market data
 - **Async Queue Management**: Proper asyncio.Queue implementation for real-time processing
 
+### 🛡️ Production Infrastructure
+- **Unified Analytics Bundle**: WebSocket payload contains snapshot, analytics, chain, and trade_setup.
+- **Institutional Monitoring**: Real-time health signals (DATA_HEALTH, PIPELINE_LATENCY).
+- **Sub-2ms Latency**: Nanosecond precision performance tracking.
+- **Unified Redis**: Dual-provider client (Local + Upstash) with automatic fallback.
+
+## 🔄 Full-Stack Data Flow
+
+```mermaid
+sequenceDiagram
+    participant U as Upstox API
+    participant BE as Backend (FastAPI)
+    participant R as Redis (Hot Cache)
+    participant DB as PostgreSQL (History)
+    participant WS as WebSocket (Broadcaster)
+    participant FE as Frontend (Zustand Store)
+    participant UI as React UI Components
+
+    Note over U, BE: 1. Data Ingestion (Continuous)
+    U->>BE: Binary Protobuf Stream
+    BE->>BE: Protobuf Decoder -> Market Ticks
+    
+    Note over BE, R: 2. Analytics & Storage (500ms)
+    BE->>BE: OptionChainBuilder (Live State)
+    BE->>BE: Analytics Engine (Greeks, Flow, Regime)
+    BE->>R: Update Hot Analytics (UnifiedRedisClient)
+    BE->>DB: Persist Snapshot (SnapshotEngine)
+    
+    Note over BE, UI: 3. Delivery & Presentation
+    BE->>WS: Broadcast Payload (Snapshot + Analytics)
+    WS->>FE: WebSocket Message (wsStore)
+    FE->>FE: Update Global State (marketStore)
+    FE->>UI: Trigger Multi-Panel Re-render
+    UI->>UI: Throttled UI Mapping (useLiveMarketData)
+```
+
+## 🧠 AI & Intelligence Pipeline
+
+StrikeIQ utilizes a multi-layered AI orchestration system to transform raw market data into institutional-grade intelligence.
+
+### Core AI Engines
+- **AI Orchestrator**: `backend/app/ai/ai_orchestrator.py` - Cross-validates signals from multiple sources.
+- **Probability Engine**: `backend/app/ai/probability_engine.py` - XGBoost-based directional prediction.
+- **Regime Engine**: `backend/app/analytics/regime_engine.py` - Classifies market states (RANGE, TREND, BREAKOUT).
+- **Institutional Flow**: `backend/app/analytics/institutional_flow_engine.py` - Detects large-scale order flow.
+- **Adaptive Learning**: `backend/app/ai/adaptive_learning_engine.py` - Self-tuning models based on outcome feedback.
+
 ## Architecture
 
-### Backend
-- **Python with FastAPI**
-- **Data Processing**: Pandas, NumPy
-- **Database**: PostgreSQL (optional SQLite for development)
-- **Real-time**: WebSocket connections
-- **Live Data**: Upstox API integration
-- **Structural Intelligence**: Advanced analytics engines
+### Backend Stack
+- **Python 3.13+ / FastAPI**: AsyncIO-driven core core.
+- **Analytics**: Specialised engines for Greeks, Flow, and Structure.
+- **Persistence**: PostgreSQL (SQLAlchemy) + Redis (Unified Client).
+- **Real-time**: High-throughput Upstox V3 Protobuf pipeline.
 
-### Frontend
-- **Next.js with TailwindCSS**
-- **Real-time**: WebSocket connections
-- **Intelligence UI**: Bloomberg-grade terminal interface
-- **Responsive Design**: Desktop-first with tablet/mobile support
+### Frontend Stack
+- **Next.js 16 / React 18**: Server-side rendered dashboard components.
+- **State Management**: Zustand with persistent storage and selector optimization.
+- **Charting**: TradingView Lightweight Charts for institutional-grade visualization.
 
 ## Project Structure
 
 ```
 StrikeIQ/
 ├── backend/                 # FastAPI backend
-│   ├── app/                    # API endpoints
-│   │   ├── api/            # API v1 endpoints
-│   │   │   ├── auth.py         # OAuth authentication (PRODUCTION-GRADE)
-│   │   │   ├── market.py       # Market data endpoints
-│   │   │   ├── options.py      # Options data endpoints
-│   │   │   ├── system.py       # System monitoring endpoints
-│   │   │   ├── predictions.py  # Predictions endpoints
-│   │   │   └── debug.py         # Debug endpoints (PRODUCTION-SAFE)
-│   │   ├── core/           # Core configuration
-│   │   │   ├── config.py       # Settings and environment
-│   │   │   ├── database.py    # Database configuration
-│   │   │   └── live_market_state.py # Live market state management
-│   │   ├── data/           # Data layer
-│   │   │   ├── market_data.py   # Market data processing
-│   │   │   ├── options_data.py  # Options data processing
-│   │   │   └── predictions.py  # Predictions processing
-│   │   ├── engines/        # Analysis engines
-│   │   │   ├── market_bias.py # Market bias analysis
-│   │   │   ├── expected_moves.py # Expected moves
-│   │   │   ├── smart_money.py  # Smart money detection
-│   │   │   └── live_structural_engine.py # Structural intelligence engine
-│   │   └── services/       # Business logic services
-│   │       ├── upstox_auth_service.py # OAuth service (PRODUCTION-GRADE)
-│   │       ├── market_dashboard_service.py # Market data service
-│   │       ├── upstox_market_feed.py # Live market data feed
-│   │       ├── structural_alert_engine.py # Structural alerts
-│   │       ├── gamma_pressure_map.py # Gamma pressure analysis
-│   │       ├── flow_gamma_interaction.py # Flow + Gamma interaction
-│   │       ├── regime_confidence_engine.py # Regime dynamics
-│   │       └── expiry_magnet_model.py # Expiry intelligence
-│   ├── ai/                    # AI engines and scheduler
-│   │   ├── scheduler.py      # AI scheduler with market gating
-│   │   └── [engines]/       # AI analysis engines
+│   ├── app/                    # API and Engines
+│   │   ├── ai/             # AI & ML Engines (Probability, Learning, Orchestrator)
+│   │   ├── analytics/      # Structural Intelligence (Flow, Regime, Greeks)
+│   │   ├── api/            # API v1 Endpoints (Auth, Market, Options)
+│   │   ├── core/           # Infrastructure (Config, Redis, Database)
+│   │   ├── data/           # Data Models & Processing
+│   │   ├── monitoring/     # Performance & Health Tracking
+│   │   ├── services/       # Business Logic & Live Builders
+│   │   └── websocket/      # Connection Management (Broadcaster, WS Manager)
 │   ├── tests/                  # Clean test suite
-│   │   ├── test_websocket.py      # WebSocket connection tests
-│   │   ├── test_option_chain.py   # Option chain API tests
-│   │   ├── test_ai_scheduler.py   # AI scheduler tests
-│   │   ├── test_market_status.py # Market status tests
-│   │   └── test_api_endpoints.py # API endpoint tests
-│   └── main.py             # FastAPI application entry point
+│   └── main.py             # FastAPI entry point
 ├── frontend/                # Next.js frontend
-│   ├── components/           # React components
-│   │   ├── charts/           # Professional Charting
-│   │   │   └── AdvancedPriceChart.tsx  # TradingView Lightweight Charts integration
-│   │   ├── intelligence/     # Intelligence UI components
-│   │   │   ├── StructuralBannerFinal.tsx    # Regime banner
-│   │   │   ├── ConvictionPanelFinal.tsx     # Intelligence score cards
-│   │   │   ├── GammaPressurePanelFinal.tsx   # Gamma pressure map
-│   │   │   ├── AlertPanelFinal.tsx          # Structural alerts
-│   │   │   ├── InteractionPanelFinal.tsx     # Flow + Gamma interaction
-│   │   │   ├── RegimeDynamicsPanelFinal.tsx # Regime dynamics
-│   │   │   └── ExpiryPanelFinal.tsx        # Expiry intelligence
-│   │   ├── dashboard/        # Dashboard layout parts
-│   │   │   ├── ChartIntelligencePanel.tsx # Container for Advanced Chart
-│   │   │   └── [others]...
-│   │   ├── layout/          # Layout components
-│   │   │   ├── Navbar.tsx      # Navigation with smooth scrolling
-│   │   │   └── Footer.tsx      # Footer component
-│   │   ├── Dashboard.tsx    # Main dashboard (streamlined)
-│   │   ├── SymbolSelector.tsx # Index and Timeframe toggle
-│   │   ├── OIHeatmap.tsx    # OI heatmap visualization
-│   │   └── MarketData.tsx   # Real-time market data
-│   ├── pages/                # Next.js pages
+│   ├── components/           # React component library
+│   │   ├── charts/           # Advanced Price Chart (TradingView)
+│   │   ├── intelligence/     # AI Dashboards (Regime, Confidence, Gamma)
+│   │   └── layout/          # Dashboard Layout
+│   ├── core/ws/              # WebSocket state managing (wsStore)
+│   ├── stores/               # Global state (Zustand - marketStore)
+│   ├── hooks/                # Optimized UI hooks (useLiveMarketData)
+│   ├── pages/                # Next.js Routing
 │   │   └── index.tsx        # Main dashboard page
 │   ├── styles/               # CSS styling
 │   │   └── globals.css      # Global styles with smooth scrolling

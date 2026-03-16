@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React, { memo, useEffect } from 'react';
 import { useDashboardData } from '@/hooks/useDashboardData';
 
 interface SpotPriceWidgetProps {

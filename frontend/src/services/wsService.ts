@@ -180,10 +180,18 @@ export function connectMarketWS() {
     try {
       // Guard: skip non-JSON frames (plain text status/error messages)
       const raw = event.data
-      if (typeof raw !== 'string' || !raw.trim().startsWith('{')) {
+      if (typeof raw !== 'string') {
+        console.warn('WS NON-STRING FRAME SKIPPED:', typeof raw)
+        return
+      }
+      
+      // Check if it looks like JSON (starts with { or [)
+      const trimmed = raw.trim()
+      if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
         console.warn('WS NON-JSON FRAME SKIPPED:', raw?.substring(0, 100))
         return
       }
+      
       const data = JSON.parse(raw)
       
       // PERFORMANCE: Count message rate to detect performance issues
