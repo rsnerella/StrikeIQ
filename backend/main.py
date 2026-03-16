@@ -2,9 +2,23 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
+import sys
+
+# Add backend directory to path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
 import logging
 import asyncio
+import selectors
 from contextlib import asynccontextmanager
+
+# Windows async event loop fix for psycopg compatibility
+if sys.platform.startswith("win"):
+    asyncio.set_event_loop_policy(
+        asyncio.WindowsSelectorEventLoopPolicy()
+    )
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -265,13 +279,15 @@ async def lifespan(app: FastAPI):
     try:
 
         import os
-        env = os.getenv("ENV", "development")
+        # Enable AI scheduler by default to ensure database persistence and learning
+        # unless explicitly disabled via environment variable
+        run_ai = os.getenv("ENABLE_AI", "true").lower() == "true"
         
-        if env == "production":
+        if run_ai:
             ai_scheduler.start()
-            logger.info("🧠 AI Scheduler started (production)")
+            logger.info("🧠 AI Scheduler started (Database Persistence Active)")
         else:
-            logger.info("🧠 AI Scheduler disabled (development mode)")
+            logger.info("🧠 AI Scheduler disabled via ENABLE_AI=false")
 
     except Exception as e:
         logger.error(f"AI Scheduler failed: {e}")
@@ -361,48 +377,6 @@ app = FastAPI(
     version="2.1.0",
     lifespan=lifespan
 )
-
-# ================= SHUTDOWN EVENTS =================
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    logger.info("StrikeIQ shutting down")
-    
-    try:
-        from app.services.websocket_market_feed import market_feed_instance
-        if market_feed_instance:
-            await market_feed_instance.stop()
-    except Exception as e:
-        logger.warning(f"Market feed stop error: {e}")
-    
-    try:
-        from app.services.oi_heatmap_engine import oi_heatmap_engine
-        await oi_heatmap_engine.stop()
-    except Exception as e:
-        logger.warning(f"Heatmap stop error: {e}")
-    
-    try:
-        from app.services.analytics_broadcaster import analytics_broadcaster
-        await analytics_broadcaster.stop()
-    except Exception as e:
-        logger.warning(f"Analytics stop error: {e}")
-    
-    try:
-        from app.services.live_structural_engine import structural_engine_instance
-        if structural_engine_instance:
-            await structural_engine_instance.stop()
-    except Exception as e:
-        logger.warning(f"Structural engine stop error: {e}")
-    
-    try:
-        from ai.scheduler import ai_scheduler
-        if ai_scheduler.running:
-            ai_scheduler.shutdown(wait=False)
-    except Exception as e:
-        logger.warning(f"AI scheduler stop error: {e}")
-    
-    logger.info("All services stopped")
-
 
 # ================= CORS =================
 

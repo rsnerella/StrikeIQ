@@ -15,7 +15,7 @@ export function TradeSetupPanel() {
     const regime       = useWSStore(s => s.regime        ?? 'RANGING')
     const bias         = useWSStore(s => s.bias          ?? 'NEUTRAL')
     const pcr          = useWSStore(s => s.pcr           ?? 0)
-    const tradePlan    = useWSStore(s => s.tradePlan)
+    const tradeSetup    = useWSStore(s => s.tradeSetup)    // NEW: Use separated tradeSetup
     const lastUpdate   = useWSStore(s => s.lastUpdate)
     const hasData      = lastUpdate > 0
     
@@ -38,26 +38,43 @@ export function TradeSetupPanel() {
         );
     }
 
-    const entryDisplay = tradePlan?.entry > 0
-      ? `₹${tradePlan.entry.toFixed(2)}` 
+    // NEW: Handle NO_TRADE case
+    if (!tradeSetup || tradeSetup.action === "NO_TRADE") {
+        return (
+            <div className="trading-panel h-full flex flex-col justify-center items-center gap-4 opacity-60">
+                <Shield className="w-8 h-8 text-slate-400/50" />
+                <div className="flex flex-col items-center gap-2">
+                    <span className="text-[10px] font-bold font-mono tracking-[0.2em] text-slate-400 uppercase">
+                        No high conviction setup
+                    </span>
+                    <div className="text-[8px] font-mono text-slate-500 text-center">
+                        Market conditions not favorable for trading
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    const entryDisplay = tradeSetup?.entry > 0
+      ? `₹${tradeSetup.entry.toFixed(2)}` 
       : '—'
 
-    const slDisplay = tradePlan?.stop_loss > 0
-      ? `₹${tradePlan.stop_loss.toFixed(2)}` 
+    const slDisplay = tradeSetup?.stop_loss > 0
+      ? `₹${tradeSetup.stop_loss.toFixed(2)}` 
       : '—'
 
-    const targetDisplay = tradePlan?.target > 0
-      ? `₹${tradePlan.target.toFixed(2)}` 
+    const targetDisplay = tradeSetup?.target > 0
+      ? `₹${tradeSetup.target.toFixed(2)}` 
       : '—'
 
-    const directionDisplay = tradePlan?.direction ?? 'NEUTRAL'
-    const isBullish = directionDisplay === 'CE' || directionDisplay === 'BULLISH';
-    const isBearish = directionDisplay === 'PE' || directionDisplay === 'BEARISH';
+    const directionDisplay = tradeSetup?.action ?? 'NEUTRAL'
+    const isBullish = directionDisplay.includes('CE') || directionDisplay.includes('BULLISH');
+    const isBearish = directionDisplay.includes('PE') || directionDisplay.includes('BEARISH');
 
-    const reasonDisplay = tradePlan?.reason?.[0]
+    const reasonDisplay = tradeSetup?.execution_reasoning?.[0]
       ?? (hasData
-          ? 'No high-conviction setup at current levels'
-          : '—')
+            ? 'No high-conviction setup at current levels'
+            : '—')
 
     // Directional Styling
     const directionStyle = isBullish 
@@ -67,8 +84,8 @@ export function TradeSetupPanel() {
         : { color: '#94a3b8', bgColor: 'rgba(148,163,184,0.08)', borderColor: 'rgba(148,163,184,0.18)', icon: <Activity className="w-4 h-4" /> };
 
     // Risk/Reward (Law 2 Safeguard)
-    const risk = Math.abs((tradePlan?.entry || 0) - (tradePlan?.stop_loss || 0));
-    const reward = Math.abs((tradePlan?.target || 0) - (tradePlan?.entry || 0));
+    const risk = Math.abs((tradeSetup?.entry || 0) - (tradeSetup?.stop_loss || 0));
+    const reward = Math.abs((tradeSetup?.target || 0) - (tradeSetup?.entry || 0));
     const rrRatio = risk > 0 ? (reward / risk).toFixed(2) : '—';
 
     return (
@@ -91,7 +108,7 @@ export function TradeSetupPanel() {
                         }}
                     >
                         {directionStyle.icon}
-                        {tradePlan?.strike ? `BUY ${tradePlan.strike} ${tradePlan.direction}` : directionDisplay}
+                        {tradeSetup?.strike ? `${tradeSetup.action} ${tradeSetup.strike}` : directionDisplay}
                     </span>
                 </div>
             </div>

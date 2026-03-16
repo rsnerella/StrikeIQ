@@ -149,7 +149,12 @@ async def get_expiries(symbol: str):
         return []
 
 @router.get("/candles")
-async def get_historical_candles(symbol: str, tf: str = "1m", limit: int = 300):
+async def get_historical_candles(
+    symbol: str, 
+    tf: str = "1m", 
+    limit: int = 300,
+    service: MarketDashboardService = Depends(get_market_service)
+):
     """Get historical candles for chart rendering"""
     try:
         # Map tf to Upstox interval
@@ -180,26 +185,45 @@ async def get_historical_candles(symbol: str, tf: str = "1m", limit: int = 300):
             raise HTTPException(status_code=401, detail="No valid upstox token")
 
         async with httpx.AsyncClient() as client:
-            # Try intraday first
-            url = f"https://api.upstox.com/v2/historical-candle/intraday/{encoded_key}/{interval}"
-            resp = await client.get(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
-            data = resp.json().get('data', {}).get('candles', [])
+            # 1. Fetch Intraday Candles
+            url_intra = f"https://api.upstox.com/v2/historical-candle/intraday/{encoded_key}/{interval}"
+            resp_intra = await client.get(url_intra, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
+            intraday_data = resp_intra.json().get('data', {}).get('candles', [])
             
-            logger.info(f"INTRADAY CANDLES → count={len(data)}")
+            # 2. Fetch Historical Candles (last 5 days)
+            from datetime import date, timedelta
+            from_date = (date.today() - timedelta(days=5)).strftime('%Y-%m-%d')
+            to_date   = date.today().strftime('%Y-%m-%d')
+            url_hist = f"https://api.upstox.com/v2/historical-candle/{encoded_key}/{interval}/{to_date}/{from_date}"
+            resp_hist = await client.get(url_hist, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
+            historical_data = resp_hist.json().get('data', {}).get('candles', [])
+            
+            # 3. Merge and deduplicate
+            unique_candles = {}
+            # Combined list, newest data first
+            for c in (intraday_data + historical_data):
+                ts = c[0]
+                if ts not in unique_candles:
+                    unique_candles[ts] = c
+            
+            # Sort descending (newest first)
+            data = sorted(unique_candles.values(), key=lambda x: x[0], reverse=True)
+            logger.info(f"CANDLE LOADER → total={len(data)} (hist={len(historical_data)}, intra={len(intraday_data)})")
 
-            # If intraday is empty (market closed), fetch last 5 days historical
+            # 4. Failsafe fallback using live spot price
             if not data:
-                from datetime import date, timedelta
-                to_date   = date.today().strftime('%Y-%m-%d')
-                from_date = (date.today() - timedelta(days=5)).strftime('%Y-%m-%d')
-                url = f"https://api.upstox.com/v2/historical-candle/{encoded_key}/{interval}/{to_date}/{from_date}"
-                resp = await client.get(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
-                data = resp.json().get('data', {}).get('candles', [])
-                logger.info(f"HISTORICAL FALLBACK → count={len(data)}")
+                logger.info("CANDLE LOADER → Both APIs empty, attempting spot fallback")
+                dash_data = await service.get_dashboard_data(symbol.upper())
+                spot_price = dash_data.get("last_price")
+                if spot_price:
+                    logger.info(f"GENERATING FALLBACK CANDLE → price={spot_price}")
+                    now_str = datetime.now().isoformat()
+                    # Upstox format: [timestamp, open, high, low, close, volume, oi]
+                    data = [[now_str, spot_price, spot_price, spot_price, spot_price, 0]]
 
-            # Convert to frontend format: [timestamp, open, high, low, close, volume]
+            # Convert to frontend format and apply limit (take newest 'limit' candles)
             candles = []
-            for c in data[-limit:]:
+            for c in data[:limit]:
                 # Upstox returns: [timestamp, open, high, low, close, volume, oi]
                 dt = datetime.fromisoformat(c[0])
                 unix_time = int(dt.timestamp())

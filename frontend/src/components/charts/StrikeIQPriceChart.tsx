@@ -261,11 +261,16 @@ export const StrikeIQPriceChart: React.FC<StrikeIQPriceChartProps> = ({ data }) 
                             currentMinutes >= SESSION_START &&
                             currentMinutes <= SESSION_END;
 
+                        console.log("DEBUG_CANDLE_COUNT", candles.length);
+                        console.log("DEBUG_MARKET_TIME", new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata"}));
+
                         let filteredCandles = candles.filter((c: any) => {
                             const date = new Date(c.time * 1000);
                             const minutes = date.getHours() * 60 + date.getMinutes();
                             return minutes >= SESSION_START && minutes <= SESSION_END;
                         });
+
+                        console.log("DEBUG_FILTERED_CANDLES", filteredCandles.length);
 
                         if (filteredCandles.length === 0) {
                             filteredCandles = candles;
@@ -279,6 +284,9 @@ export const StrikeIQPriceChart: React.FC<StrikeIQPriceChartProps> = ({ data }) 
                         } else {
                             setChartMessage(null);
                         }
+
+                        console.log("MARKET_STATUS", isMarketOpen);
+                        console.log("FINAL_CANDLE_COUNT", filteredCandles.length);
 
                         
                         // Sanitize candles - filter out invalid data

@@ -71,6 +71,16 @@ class AIScheduler:
                 max_instances=1  # Prevent overlapping
             )
             
+            # Market snapshot collector → every 1 minute
+            self.scheduler.add_job(
+                func=self.market_snapshot_job,
+                trigger=IntervalTrigger(minutes=1),
+                id='market_snapshot',
+                name='Collect market snapshot',
+                replace_existing=True,
+                max_instances=1
+            )
+            
             # ML Model Training → everyday at 16:00 IST
             self.scheduler.add_job(
                 func=self.ml_training_job,
@@ -130,7 +140,7 @@ class AIScheduler:
                 return
                 
             from app.services.paper_trade_engine import paper_trade_engine
-            trades_closed = paper_trade_engine.monitor_open_trades()
+            trades_closed = await paper_trade_engine.monitor_open_trades()
             if trades_closed > 0:
                 logger.info(f"Paper trade monitor job: {trades_closed} trades closed")
         except Exception as e:
@@ -145,7 +155,7 @@ class AIScheduler:
                 return
                 
             from app.services.paper_trade_engine import paper_trade_engine
-            trades_created = paper_trade_engine.process_new_predictions()
+            trades_created = await paper_trade_engine.process_new_predictions()
             if trades_created > 0:
                 logger.info(f"New prediction processing job: {trades_created} trades created")
         except Exception as e:

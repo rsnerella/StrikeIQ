@@ -1,3 +1,11 @@
+# Windows async event loop fix for psycopg compatibility
+import sys
+import asyncio
+if sys.platform.startswith("win"):
+    asyncio.set_event_loop_policy(
+        asyncio.WindowsSelectorEventLoopPolicy()
+    )
+
 # Make ai folder a Python package
 from .ai_db import ai_db
 from .prediction_service import prediction_service

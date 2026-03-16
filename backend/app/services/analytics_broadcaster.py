@@ -9,12 +9,20 @@ import asyncio
 import logging
 import time
 import json
+import sys
+import os
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
+
+# AI module imports
 
 from app.core.ws_manager import manager
 from app.ai.ai_orchestrator import ai_orchestrator
 from app.services.option_chain_builder import option_chain_builder
+from ai.feature_engine import FeatureEngine
+from ai.bias_model import BiasModel
+from ai.strategy_decision_engine import StrategyDecisionEngine
+from ai.options_trade_engine import OptionsTradeEngine
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +48,13 @@ class AnalyticsBroadcaster:
         # FIX 2: REST-only mode tracking
         self._dirty: Dict[str, bool] = {}
         self._last_broadcast_time: Dict[str, float] = {}
+        
+        # Initialize new AI components
+        self.feature_engine = FeatureEngine()
+        self.bias_model = BiasModel()
+        self.strategy_engine = StrategyDecisionEngine()
+        self.options_engine = OptionsTradeEngine()
+        self.options_engine.initialize_ai_components()
 
     def _get_spot_price(self, symbol: str, snapshot) -> float:
         """
@@ -163,6 +178,169 @@ class AnalyticsBroadcaster:
             logger.debug(f"Option chain payload extraction failed: {e}")
 
         return calls, puts
+
+    async def _build_analytics_payload(self, symbol: str, snapshot) -> Dict[str, Any]:
+        """Build separated analytics and execution payloads"""
+        try:
+            # Compute features
+            features = self.feature_engine.compute_features(snapshot, snapshot.spot)
+            
+            # Convert to dict for bias calculation
+            features_dict = {
+                'gex_profile': features.gex_profile,
+                'gamma_flip_probability': features.gamma_flip_probability,
+                'call_wall_strength': features.call_wall_strength,
+                'put_wall_strength': features.put_wall_strength,
+                'call_wall_strike': features.call_wall_strike,
+                'put_wall_strike': features.put_wall_strike,
+                'pcr_trend': features.pcr_trend,
+                'oi_concentration': features.oi_concentration,
+                'oi_buildup_rate': features.oi_buildup_rate,
+                'call_oi_distribution': features.call_oi_distribution,
+                'put_oi_distribution': features.put_oi_distribution,
+                'liquidity_vacuum': features.liquidity_vacuum,
+                'order_flow_imbalance': features.order_flow_imbalance,
+                'market_impact': features.market_impact,
+                'spread_widening': features.spread_widening,
+                'iv_regime': features.iv_regime,
+                'volatility_expansion': features.volatility_expansion,
+                'term_structure': features.term_structure,
+                'implied_volatility_surface': features.implied_volatility_surface,
+                'dealer_hedging_pressure': features.dealer_hedging_pressure,
+                'institutional_flow': features.institutional_flow,
+                'support_resistance_levels': features.support_resistance_levels,
+                'pin_probability': features.pin_probability
+            }
+            
+            # Calculate bias
+            bias_result = self.bias_model.calculate_bias(features_dict)
+            
+            # Add bias to features for strategy decision
+            features_dict['bias'] = bias_result.bias
+            features_dict['bias_confidence'] = bias_result.confidence
+            
+            # Decide strategy
+            strategy_decision = self.strategy_engine.decide_strategy(bias_result, features_dict)
+            
+            # Select optimal strike if not NO_TRADE
+            execution_payload = None
+            if strategy_decision.strategy != 'NO_TRADE':
+                optimal_strike = self.options_engine.select_optimal_strike(
+                    features_dict, snapshot.spot
+                )
+                
+                if optimal_strike:
+                    execution_payload = self.build_execution_payload(
+                        optimal_strike, strategy_decision, snapshot.spot
+                    )
+                else:
+                    # Return NO_TRADE if no optimal strike found
+                    execution_payload = {"action": "NO_TRADE"}
+            
+            # Build analysis payload
+            analysis_payload = self.build_analysis_payload(
+                bias_result, strategy_decision, features_dict
+            )
+            
+            return {
+                'type': 'strategy_update',
+                'analysis': analysis_payload,
+                'trade': execution_payload
+            }
+            
+        except Exception as e:
+            logger.error(f"Analytics payload build failed: {e}")
+            return self.get_default_payload(symbol)
+    
+    def build_analysis_payload(self, bias_result, strategy_decision, features) -> Dict[str, Any]:
+        """Build analysis payload for MemoizedStrategyPlan"""
+        return {
+            'bias': bias_result.bias,
+            'confidence': bias_result.confidence,
+            'score': bias_result.score,
+            'components': bias_result.components,
+            'regime': strategy_decision.regime,
+            'strategy': strategy_decision.strategy,
+            'execution_probability': strategy_decision.execution_probability,
+            'reasoning': strategy_decision.reasoning,
+            'gamma_analysis': {
+                'gex_profile': features.get('gex_profile', {}),
+                'gamma_flip_probability': features.get('gamma_flip_probability', 0),
+                'call_wall': features.get('call_wall_strike'),
+                'put_wall': features.get('put_wall_strike')
+            },
+            'oi_analysis': {
+                'pcr_trend': features.get('pcr_trend', 0),
+                'concentration': features.get('oi_concentration', 0),
+                'buildup_rate': features.get('oi_buildup_rate', 0)
+            },
+            'liquidity_analysis': {
+                'vacuum': features.get('liquidity_vacuum', 0),
+                'order_flow': features.get('order_flow_imbalance', 0),
+                'market_impact': features.get('market_impact', 0)
+            },
+            'volatility_analysis': {
+                'regime': features.get('iv_regime', 'MEDIUM'),
+                'expansion': features.get('volatility_expansion', 0),
+                'term_structure': features.get('term_structure', 0)
+            }
+        }
+    
+    def build_execution_payload(self, optimal_strike, strategy_decision, spot_price) -> Dict[str, Any]:
+        """Build execution payload for TradeSetupPanel"""
+        try:
+            # Calculate prices (simplified)
+            current_premium = self.get_option_premium(optimal_strike['strike'], optimal_strike['option_type'])
+            
+            # Risk management
+            stop_loss = current_premium * 0.4  # 40% stop loss
+            target = current_premium * 2.0  # 2x target
+            risk_reward = (target - current_premium) / (current_premium - stop_loss)
+            
+            return {
+                'action': f"BUY_{optimal_strike['option_type']}",
+                'strike': optimal_strike['strike'],
+                'option_type': optimal_strike['option_type'],
+                'entry': current_premium,
+                'target': target,
+                'stop_loss': stop_loss,
+                'position_size': 1,  # Default 1 lot
+                'max_loss': stop_loss,
+                'risk_reward': risk_reward,
+                'probability': strategy_decision.execution_probability,
+                'conviction': 'HIGH' if strategy_decision.execution_probability > 0.7 else 'MEDIUM',
+                'liquidity_score': optimal_strike['liquidity_score'],
+                'gamma_score': optimal_strike['gamma_score'],
+                'execution_reasoning': [
+                    f"Optimal strike: {optimal_strike['strike']}",
+                    f"Option type: {optimal_strike['option_type']}",
+                    f"Liquidity score: {optimal_strike['liquidity_score']:.2f}",
+                    f"Risk/Reward: {risk_reward:.2f}"
+                ]
+            }
+            
+        except Exception as e:
+            logger.error(f"Execution payload build failed: {e}")
+            return None
+    
+    def get_option_premium(self, strike, option_type) -> float:
+        """Get current option premium - simplified"""
+        # In production, this would get from real-time data
+        return 150.0  # Default premium
+    
+    def get_default_payload(self, symbol) -> Dict[str, Any]:
+        """Default payload for error cases"""
+        return {
+            'type': 'strategy_update',
+            'analysis': {
+                'bias': 'NEUTRAL',
+                'confidence': 0.0,
+                'regime': 'UNKNOWN',
+                'strategy': 'NO_TRADE',
+                'reasoning': ['System error - no analysis available']
+            },
+            'trade': {"action": "NO_TRADE"}
+        }
 
     async def _compute_and_broadcast(self, symbol: str):
         try:
@@ -378,6 +556,16 @@ class AnalyticsBroadcaster:
                 logger.info(f"[BROADCAST] ✅ {symbol} chart_analysis via AI_ORCHESTRATOR")
             except Exception as e:
                 logger.error(f"[BROADCAST] Chart analysis JSON error for {symbol}: {e}")
+
+            # NEW: Send separated strategy_update message
+            strategy_payload = await self._build_analytics_payload(symbol, snap)
+            if strategy_payload:
+                try:
+                    strategy_message = json.dumps(strategy_payload, default=str)
+                    await manager.broadcast(strategy_message)
+                    logger.info(f"[BROADCAST] ✅ {symbol} strategy_update with separated payloads")
+                except Exception as e:
+                    logger.error(f"[BROADCAST] Strategy update JSON error for {symbol}: {e}")
 
         except Exception as e:
             logger.error(

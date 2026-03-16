@@ -192,7 +192,11 @@ class OptionChainBuilder:
             if (now - last).total_seconds() < 0.5:
                 continue
 
-            snapshot = self._create_snapshot(symbol)
+            try:
+                snapshot = self._create_snapshot(symbol)
+            except Exception as e:
+                logger.error("Snapshot build error", exc_info=True)
+                continue
 
             if not snapshot:
                 continue
@@ -280,8 +284,8 @@ class OptionChainBuilder:
             )
 
         # Calculate PCR and total OI
-        total_call_oi = sum(strike.get("call_oi", 0) for strike in strikes)
-        total_put_oi = sum(strike.get("put_oi", 0) for strike in strikes)
+        total_call_oi = sum(strike.get("call_oi", 0) or 0 for strike in strikes)
+        total_put_oi = sum(strike.get("put_oi", 0) or 0 for strike in strikes)
         pcr = total_put_oi / total_call_oi if total_call_oi > 0 else 0.0
 
         logger.info(f"[CHAIN_OI_SUMMARY] strikes={len(strikes)} call_oi={total_call_oi} put_oi={total_put_oi}")
@@ -605,9 +609,9 @@ class OptionChainBuilder:
                 pe_data = strike_data.get("PE")
                 
                 if ce_data:
-                    total_call_oi += ce_data.oi
+                    total_call_oi += ce_data.oi or 0
                 if pe_data:
-                    total_put_oi += pe_data.oi
+                    total_put_oi += pe_data.oi or 0
             
             # Track full chain aggregates for PCR override
             if not hasattr(self, '_total_call_oi'):
@@ -626,6 +630,9 @@ class OptionChainBuilder:
                 f"CHAIN_UPDATE symbol={symbol} strikes={len(chain)} "
                 f"call_oi={total_call_oi:,} put_oi={total_put_oi:,} pcr={pcr:.2f}"
             )
+            
+            # Ensure snapshot stored globally for analytics
+            self.chains[symbol] = chain
             
             # Log complete option data update (showing merged values)
             logger.info(

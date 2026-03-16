@@ -61,10 +61,11 @@ class DashboardFormatter:
             
             return MarketData(
                 symbol=symbol,
-                spot_price=spot_price,
+                last_price=spot_price,
                 previous_close=previous_close,
                 change=change,
                 change_percent=change_percent,
+                volume=0,  # Volume not available in API response
                 timestamp=timestamp,
                 market_status=market_status,
                 exchange_timestamp=exchange_timestamp
@@ -87,10 +88,10 @@ class DashboardFormatter:
         
         return MarketData(
             symbol=symbol,
-            spot_price=None,
-            previous_close=None,
-            change=None,
-            change_percent=None,
+            last_price=None,
+            change=0,
+            change_percent=0,
+            volume=0,
             timestamp=datetime.now(timezone.utc),
             market_status=market_status
         )
@@ -101,10 +102,10 @@ class DashboardFormatter:
         
         return MarketData(
             symbol=symbol,
-            spot_price=None,
-            previous_close=None,
-            change=None,
-            change_percent=None,
+            last_price=None,
+            change=0,
+            change_percent=0,
+            volume=0,
             timestamp=datetime.now(timezone.utc),
             market_status=MarketStatus.CLOSED
         )
@@ -115,7 +116,7 @@ class DashboardFormatter:
         
         result = {
             "symbol": market_data.symbol,
-            "spot_price": market_data.spot_price,
+            "last_price": market_data.last_price,
             "previous_close": market_data.previous_close,
             "change": market_data.change,
             "change_percent": market_data.change_percent,

@@ -27,10 +27,17 @@ class AsyncDatabase:
         try:
             # Parse database URL
             db_url = settings.DATABASE_URL
-            if db_url.startswith("postgresql://"):
-                # Convert to asyncpg format
-                db_url = db_url.replace("postgresql://", "postgresql+asyncpg://")
             
+            # Extract basic scheme only (asyncpg hates '+psycopg' or '+asyncpg' dialects in DSN)
+            if "://" in db_url:
+                scheme, rest = db_url.split("://", 1)
+                base_scheme = scheme.split("+")[0]
+                db_url = f"{base_scheme}://{rest}"
+            
+            # Ensure it's postgresql/postgres
+            if not (db_url.startswith("postgresql://") or db_url.startswith("postgres://")):
+                logger.warning(f"Unexpected DB scheme in {db_url}, attempting anyway...")
+
             self.pool = await asyncpg.create_pool(
                 db_url,
                 min_size=5,

@@ -299,6 +299,22 @@ class MarketDashboardService:
         logger.info(f"Mapped {symbol} to instrument key: {instrument_key}")
         return instrument_key
     
+    async def _get_client(self, token: str, version: str = "v2"):
+        """Get HTTP client for API calls"""
+        import httpx
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json"
+        }
+        
+        base_urls = {
+            "v2": "https://api.upstox.com/v2",
+            "v3": "https://api.upstox.com/v3"
+        }
+        
+        base_url = base_urls.get(version, base_urls["v2"])
+        return httpx.AsyncClient(base_url=base_url, headers=headers, timeout=10.0)
+    
     def _parse_market_data(self, symbol: str, api_response: Dict[str, Any]) -> MarketData:
         """Parse API response into MarketData"""
         try:
@@ -337,9 +353,9 @@ class MarketDashboardService:
             return MarketData(
                 symbol=symbol,
                 last_price=ltp,
-                previous_close=None,  # Would need previous close data
-                change=None,         # Would calculate from previous close
-                change_percent=None,  # Would calculate from previous close
+                change=0,
+                change_percent=0,
+                volume=0,
                 timestamp=datetime.now(timezone.utc)
             )
             
@@ -351,10 +367,10 @@ class MarketDashboardService:
         """Build no data response"""
         return MarketData(
             symbol=symbol,
-            spot_price=None,
-            previous_close=None,
-            change=None,
-            change_percent=None,
+            last_price=None,
+            change=0,
+            change_percent=0,
+            volume=0,
             timestamp=datetime.now(timezone.utc),
             market_status=MarketStatus.NO_DATA
         )
@@ -391,10 +407,10 @@ class MarketDashboardService:
         """Create market closed response"""
         return MarketData(
             symbol=symbol,
-            spot_price=None,
-            previous_close=None,
-            change=None,
-            change_percent=None,
+            last_price=None,
+            change=0,
+            change_percent=0,
+            volume=0,
             timestamp=datetime.now(timezone.utc),
             market_status=MarketStatus.CLOSED
         )
@@ -403,10 +419,10 @@ class MarketDashboardService:
         """Create error response"""
         return MarketData(
             symbol=symbol,
-            spot_price=None,
-            previous_close=None,
-            change=None,
-            change_percent=None,
+            last_price=None,
+            change=0,
+            change_percent=0,
+            volume=0,
             timestamp=datetime.now(timezone.utc),
             market_status=MarketStatus.ERROR
         )

@@ -41,6 +41,10 @@ interface WSStore {
   _lastHeatmapUpdate: number
   _THROTTLE_MS: number
   
+  // NEW: Separated AI analysis and trade setup fields
+  aiAnalysis: any | null
+  tradeSetup: any | null
+  
   // Master Contract v5.0 Extended Fields
   pcr: number
   callWall: number
@@ -77,9 +81,13 @@ interface WSStore {
   setLastMessage: (msg: any) => void
   setMarketData: (data: any) => void
   setError: (error: string | null) => void
+  
+  // NEW: Methods for separated fields
+  setAIAnalysis: (analysis: any) => void
+  setTradeSetup: (trade: any) => void
 }
 
-export const useWSStore = create<WSStore>((set, get) => ({
+export const useWSStore = create<WSStore>((set, get) =>({
 
   connected: false,
   marketOpen: null,
@@ -110,6 +118,10 @@ export const useWSStore = create<WSStore>((set, get) => ({
   _lastChainUpdate: 0,
   _lastHeatmapUpdate: 0,
   _THROTTLE_MS: 50,
+
+  // NEW: Separated AI analysis and trade setup fields
+  aiAnalysis: null,
+  tradeSetup: null,
 
   // Master Contract v5.0 Extended State
   pcr: 0,
@@ -494,6 +506,31 @@ export const useWSStore = create<WSStore>((set, get) => ({
         console.log('✅ Subscribed to', message.symbol);
         break;
 
+      case 'strategy_update': {
+        // NEW: Handle separated strategy update message
+        const { analysis, trade } = message;
+        
+        if (analysis) {
+          set((prev) => ({
+            ...prev,
+            aiAnalysis: analysis,
+            lastUpdate: Date.now(),
+            error: null
+          }));
+        }
+        
+        if (trade) {
+          set((prev) => ({
+            ...prev,
+            tradeSetup: trade,
+            lastUpdate: Date.now(),
+            error: null
+          }));
+        }
+        
+        break;
+      }
+
       default:
         // Silently skip control messages
         if (!['pong', 'ping', 'ack'].includes(message.type)) {
@@ -603,5 +640,14 @@ export const useWSStore = create<WSStore>((set, get) => ({
       error
     })
     set({ error })
+  },
+
+  // NEW: Methods for separated fields
+  setAIAnalysis: (analysis) => {
+    set({ aiAnalysis: analysis })
+  },
+
+  setTradeSetup: (trade) => {
+    set({ tradeSetup: trade })
   }
 }))

@@ -125,10 +125,10 @@ export default function Navbar() {
                     WebkitTextFillColor: 'transparent',
                   }}
                 >
-                  StrikeIQ
+                  StrikeAi
                 </div>
                 <div className="text-[9px] text-indigo-300/60 uppercase tracking-[0.22em] font-semibold">
-                  Options Intelligence
+                  Ai Driven Options Intelligence
                 </div>
               </div>
 

@@ -27,6 +27,17 @@ from .news_event_engine import news_event_engine
 from ..chart_intelligence.engine import chart_intelligence_engine
 
 # Institutional Layer Integrations (backend/ai/)
+# New AI modules - use try/except for graceful fallback
+try:
+    from ai.feature_engine import FeatureEngine
+    from ai.bias_model import BiasModel
+    from ai.strategy_decision_engine import StrategyDecisionEngine
+    from ai.options_trade_engine import OptionsTradeEngine
+    NEW_AI_MODULES_AVAILABLE = True
+except ImportError:
+    NEW_AI_MODULES_AVAILABLE = False
+
+# Legacy AI modules - optional
 try:
     from ai.dealer_gamma_engine import DealerGammaEngine
     from ai.liquidity_engine import LiquidityEngine
@@ -35,11 +46,19 @@ try:
     from ai.entry_exit_engine import EntryExitEngine
 except ImportError:
     # Fallback for different import paths
-    from ..ai.dealer_gamma_engine import DealerGammaEngine
-    from ..ai.liquidity_engine import LiquidityEngine
-    from ..ai.gamma_squeeze_engine import GammaSqueezeEngine
-    from ..ai.options_trade_engine import generate_option_trade
-    from ..ai.entry_exit_engine import EntryExitEngine
+    try:
+        from ..ai.dealer_gamma_engine import DealerGammaEngine
+        from ..ai.liquidity_engine import LiquidityEngine
+        from ..ai.gamma_squeeze_engine import GammaSqueezeEngine
+        from ..ai.options_trade_engine import generate_option_trade
+        from ..ai.entry_exit_engine import EntryExitEngine
+    except ImportError:
+        # Set to None if none available
+        DealerGammaEngine = None
+        LiquidityEngine = None
+        GammaSqueezeEngine = None
+        generate_option_trade = None
+        EntryExitEngine = None
 
 logger = logging.getLogger(__name__)
 
@@ -53,13 +72,13 @@ class AIOrchestrator:
         self.db_session = db_session
         self._last_cycle_time = 0
         
-        # Initialize Institutional Engines
-        self.dealer_gamma = DealerGammaEngine()
-        self.liquidity_engine = LiquidityEngine()
-        self.gamma_squeeze = GammaSqueezeEngine()
-        self.entry_exit = EntryExitEngine()
+        # Initialize Institutional Engines (with None checks)
+        self.dealer_gamma = DealerGammaEngine() if DealerGammaEngine else None
+        self.liquidity_engine = LiquidityEngine() if LiquidityEngine else None
+        self.gamma_squeeze = GammaSqueezeEngine() if GammaSqueezeEngine else None
+        self.entry_exit = EntryExitEngine() if EntryExitEngine else None
         
-        logger.info("Institutional AI Orcherstrator initialized with all engines")
+        logger.info("Institutional AI Orchestrator initialized with available engines")
 
     async def run_cycle(self, symbol: str, snapshot: Dict[str, Any]) -> Dict[str, Any]:
         """

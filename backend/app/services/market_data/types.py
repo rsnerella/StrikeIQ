@@ -27,6 +27,7 @@ class MarketData:
     high: Optional[float] = None
     low: Optional[float] = None
     previous_close: Optional[float] = None
+    market_status: Optional[MarketStatus] = None
 
 
 @dataclass

@@ -69,34 +69,50 @@ class PollerService:
             from app.services.websocket_market_feed import get_market_feed
             from app.services.option_chain_builder import option_chain_builder
 
+            # Get active symbol from market feed - only one symbol at a time
             feed = get_market_feed()
             if not feed:
                 return
-
+            
             symbol = feed.active_symbol
-            expiry = feed.active_expiry
-
-            if not symbol or not expiry:
+            if not symbol:
+                logger.warning("No active symbol in market feed")
                 return
+            
+            logger.info(f"POLLER → Polling active symbol: {symbol}")
+            await self._fetch_option_chain(symbol)
 
+        except Exception as e:
+            logger.error(f"Poller cycle error: {e}")
+
+    async def _fetch_option_chain(self, symbol: str):
+        """Fetch option chain for a specific symbol"""
+        try:
             # Get index key for REST call
             index_key_map = {
                 "NIFTY": "NSE_INDEX|Nifty 50",
                 "BANKNIFTY": "NSE_INDEX|Nifty Bank",
                 "FINNIFTY": "NSE_INDEX|Nifty Fin Service",
             }
-            index_key = index_key_map.get(symbol)
-            if not index_key:
+            instrument_key = index_key_map.get(symbol)
+            if not instrument_key:
                 return
+
+            # Get nearest expiry for this symbol
+            from app.services.market_data.market_dashboard_service import MarketDashboardService
+            from app.models.database import AsyncSessionLocal
+            
+            async with AsyncSessionLocal() as db:
+                dashboard_service = MarketDashboardService(db)
+                token = await token_manager.get_token()
+                if not token:
+                    return
+                
+                expiry = await dashboard_service.get_nearest_expiry(symbol, token)
+                if not expiry:
+                    return
 
             # Fetch option chain from Upstox REST API
-            from app.services.token_manager import token_manager
-            import httpx
-
-            token = await token_manager.get_token()
-            if not token:
-                return
-
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Accept": "application/json"
@@ -104,20 +120,20 @@ class PollerService:
 
             url = "https://api.upstox.com/v2/option/chain"
             params = {
-                "instrument_key": index_key,
-                "expiry_date":    expiry,
+                "instrument_key": instrument_key,
+                "expiry_date": expiry,
             }
 
             async with httpx.AsyncClient(timeout=10) as client:
                 response = await client.get(url, headers=headers, params=params)
 
                 if response.status_code != 200:
-                    logger.warning(f"Option chain REST fetch failed: {response.status_code}")
+                    logger.warning(f"Option chain REST fetch failed for {symbol}: {response.status_code}")
                     return
 
                 data = response.json().get("data", [])
                 if not data:
-                    logger.warning("Option chain REST returned empty data")
+                    logger.warning(f"Option chain REST returned empty data for {symbol}")
                     return
 
                 # Extract spot price from first data item
@@ -132,15 +148,20 @@ class PollerService:
                     )
 
                 if spot_price > 0:
+                    from app.services.option_chain_builder import option_chain_builder
                     option_chain_builder.update_index_price(symbol, spot_price)
-                    logger.info(
-                        f"[POLLER] Spot price updated: {symbol}={spot_price}"
-                    )
+                    logger.info(f"[POLLER] Spot price updated: {symbol}={spot_price}")
+                    
+                    # PERSISTENT SNAPSHOT: Ensure data is saved to database
+                    async with AsyncSessionLocal() as db:
+                        try:
+                            await self._poll_symbol(symbol, token, db)
+                            await db.commit()
+                            logger.info(f"POLLER → Persistence successful for {symbol}")
+                        except Exception as e:
+                            logger.error("Snapshot save failed", exc_info=True)
                 else:
-                    logger.warning(
-                        f"[POLLER] Could not extract spot price from "
-                        f"REST response for {symbol}"
-                    )
+                    logger.warning(f"[POLLER] Could not extract spot price from REST response for {symbol}")
 
                 # Update option chain builder with REST data
                 updated = 0
@@ -169,6 +190,7 @@ class PollerService:
                         theta = greeks.get("theta", 0)
                         vega = greeks.get("vega", 0)
 
+                        from app.services.option_chain_builder import option_chain_builder
                         option_chain_builder.update_option_tick(
                             symbol=symbol,
                             strike=float(strike),
@@ -199,7 +221,7 @@ class PollerService:
                     logger.debug(f"POLLER → Could not set dirty flag: {e}")
 
         except Exception as e:
-            logger.error(f"Poller cycle error: {e}")
+            logger.error(f"Error fetching option chain for {symbol}: {e}")
 
     # ================= SYMBOL POLLING =================
 
