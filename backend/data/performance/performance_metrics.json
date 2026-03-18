@@ -1,0 +1,41 @@
+{
+  "total_trades": 10,
+  "winning_trades": 5,
+  "win_rate": 0.5,
+  "avg_confidence": 0.6,
+  "confidence_accuracy": -1.0,
+  "regime_performance": {
+    "TRENDING": {
+      "trades": 10,
+      "wins": 5,
+      "total_confidence": 5.999999999999999,
+      "win_rate": 0.5,
+      "avg_confidence": 0.5999999999999999
+    }
+  },
+  "entry_performance": {
+    "ENTER_NOW": {
+      "trades": 10,
+      "wins": 5,
+      "total_confidence": 5.999999999999999,
+      "win_rate": 0.5,
+      "avg_confidence": 0.5999999999999999
+    }
+  },
+  "trap_performance": {
+    "trap_detected": {
+      "trades": 0,
+      "wins": 0,
+      "total_confidence": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.0
+    },
+    "no_trap": {
+      "trades": 10,
+      "wins": 5,
+      "total_confidence": 5.999999999999999,
+      "win_rate": 0.5,
+      "avg_confidence": 0.5999999999999999
+    }
+  }
+}

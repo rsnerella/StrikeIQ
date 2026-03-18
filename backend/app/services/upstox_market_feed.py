@@ -556,7 +556,7 @@ class UpstoxMarketFeed:
                     ltp = processed_data.get("ltp")
                     if ltp:
                         # Broadcast to frontend WebSocket
-                        from app.core.ws_manager import manager
+                        from app.core.ws_manager import manager, broadcast_with_strategy
                         
                         broadcast_message = {
                             "type": "market_data",
@@ -565,7 +565,7 @@ class UpstoxMarketFeed:
                         }
                         
                         logger.info(f"MARKET DATA EXTRACTED - instrument={instrument_key} ltp={ltp}")
-                        await manager.broadcast(broadcast_message)  # ISSUE 5 FIX: Use broadcast() instead of broadcast_json()
+                        await broadcast_with_strategy(broadcast_message)  # ISSUE 5 FIX: Use broadcast() instead of broadcast_json()
                         logger.info(f"WS BROADCAST SENT - instrument={instrument_key} ltp={ltp}")
 
                 # ======================================

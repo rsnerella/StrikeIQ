@@ -2,24 +2,25 @@
 
 """
 Institutional Analytics Broadcaster for StrikeIQ
-Coordinates the 10-step AI pipeline and broadcasts at 500ms intervals.
+Orchestrates AI analysis and broadcasts strategy updates
 """
 
 import asyncio
+import json
 import logging
 import time
-import json
-import sys
-import os
-from datetime import datetime, timezone
 from typing import Dict, Any, Optional
+from datetime import datetime
+
+from app.core.ws_manager import manager, broadcast_with_strategy
+from app.services.trade_lifecycle_manager import trade_lifecycle_manager
+
+logger = logging.getLogger(__name__)
 
 # AI module imports
-
-from app.core.ws_manager import manager
 from app.ai.ai_orchestrator import ai_orchestrator
 from app.services.option_chain_builder import option_chain_builder
-from ai.feature_engine import FeatureEngine
+from ai.feature_engine import FeatureEngine, OptionChainSnapshot
 from ai.bias_model import BiasModel
 from ai.strategy_decision_engine import StrategyDecisionEngine
 from ai.options_trade_engine import OptionsTradeEngine
@@ -182,11 +183,30 @@ class AnalyticsBroadcaster:
     async def _build_analytics_payload(self, symbol: str, snapshot) -> Dict[str, Any]:
         """Build separated analytics and execution payloads"""
         try:
-            # Compute features
-            features = self.feature_engine.compute_features(snapshot, snapshot.spot)
+            # STEP 1: FIX SNAPSHOT STRUCTURE
+            # Wrap raw dict to ensure proper structure
+            if hasattr(snapshot, 'strikes'):
+                raw_chain = snapshot.strikes
+                spot_price = snapshot.spot
+            else:
+                # Handle dict format - extract strikes and spot properly
+                raw_chain = snapshot.get('strikes', snapshot)
+                spot_price = snapshot.get('spot')
+            
+            snapshot_obj = OptionChainSnapshot(raw_chain, spot_price)
+            
+            # STEP 2: VALIDATION LOG
+            print("[SNAPSHOT FIX]", {
+                "has_strikes": hasattr(snapshot_obj, "strikes"),
+                "num_strikes": len(snapshot_obj.strikes) if hasattr(snapshot_obj, 'strikes') else 0
+            })
+            
+            # Compute features with proper structure
+            features = self.feature_engine.compute_features(snapshot_obj, snapshot_obj.spot)
             
             # Convert to dict for bias calculation
             features_dict = {
+                'spot': features.spot,  # CRITICAL: Add spot price
                 'gex_profile': features.gex_profile,
                 'gamma_flip_probability': features.gamma_flip_probability,
                 'call_wall_strength': features.call_wall_strength,
@@ -220,40 +240,134 @@ class AnalyticsBroadcaster:
             features_dict['bias_confidence'] = bias_result.confidence
             
             # Decide strategy
-            strategy_decision = self.strategy_engine.decide_strategy(bias_result, features_dict)
+            strategy_decision = self.strategy_engine.decide_strategy(bias_result, features_dict, snapshot)
+            
+            # Extract probabilistic score for response
+            probabilistic_score = 0.0
+            probabilistic_confidence = strategy_decision.bias_confidence
+            # Skip score_engine - not available in current strategy engine
+            
+            # Extract failed conditions from strategy decision for debugging
+            failed_conditions = []
+            if hasattr(strategy_decision, 'failed_conditions') and strategy_decision.failed_conditions:
+                failed_conditions = strategy_decision.failed_conditions
+            elif strategy_decision.strategy == 'NO_TRADE':
+                # Extract from reasoning if failed_conditions not available
+                if "Low confidence" in strategy_decision.reasoning:
+                    failed_conditions.append(f"CONFIDENCE_BELOW_THRESHOLD_{strategy_decision.bias_confidence:.3f}")
+                if "Unclear regime" in strategy_decision.reasoning:
+                    if bias_result.bias == 'BULLISH':
+                        failed_conditions.append("UNCLEAR_REGIME_FOR_BULLISH")
+                    elif bias_result.bias == 'BEARISH':
+                        failed_conditions.append("UNCLEAR_REGIME_FOR_BEARISH")
+                if "Neutral bias" in strategy_decision.reasoning:
+                    failed_conditions.append("NEUTRAL_BIAS_NO_DIRECTION")
             
             # Select optimal strike if not NO_TRADE
             execution_payload = None
             if strategy_decision.strategy != 'NO_TRADE':
+                # Get spot price from snapshot (handle both object and dict)
+                spot_price = snapshot.spot if hasattr(snapshot, 'spot') else snapshot.get('spot')
+                
                 optimal_strike = self.options_engine.select_optimal_strike(
-                    features_dict, snapshot.spot
+                    features_dict, spot_price
                 )
                 
                 if optimal_strike:
                     execution_payload = self.build_execution_payload(
-                        optimal_strike, strategy_decision, snapshot.spot
+                        optimal_strike, strategy_decision, spot_price
                     )
+                    
+                    # Insert trade into outcome_log for lifecycle tracking
+                    try:
+                        trade_id = await trade_lifecycle_manager.insert_trade(
+                            symbol=symbol,
+                            direction=strategy_decision.strategy,
+                            entry_price=execution_payload.get('entry', 0),
+                            stop_loss=execution_payload.get('stop_loss', 0),
+                            target=execution_payload.get('target', 0),
+                            confidence=probabilistic_confidence,
+                            score=probabilistic_score
+                        )
+                        
+                        # Add trade_id to execution payload for tracking
+                        if trade_id:
+                            execution_payload['trade_id'] = trade_id
+                            
+                    except Exception as e:
+                        logger.error(f"Failed to insert trade lifecycle: {e}")
                 else:
                     # Return NO_TRADE if no optimal strike found
-                    execution_payload = {"action": "NO_TRADE"}
+                    execution_payload = {
+                        "action": "NO_TRADE",
+                        "probabilistic": {
+                            "direction": "NO_TRADE",
+                            "confidence": probabilistic_confidence,
+                            "score": probabilistic_score
+                        }
+                    }
+                    failed_conditions.append("NO_OPTIMAL_STRIKE_FOUND")
             
-            # Build analysis payload
+            # Build analysis payload with required structure
             analysis_payload = self.build_analysis_payload(
-                bias_result, strategy_decision, features_dict
+                bias_result, strategy_decision, features_dict, failed_conditions
             )
             
-            return {
+            # ENSURE REQUIRED PAYLOAD STRUCTURE
+            payload = {
                 'type': 'strategy_update',
+                'symbol': symbol,  # Add symbol for frontend routing
                 'analysis': analysis_payload,
                 'trade': execution_payload
             }
             
+            # STEP 1: ENSURE strategy and confidence at top level
+            payload["strategy"] = strategy_decision.strategy
+            payload["confidence"] = strategy_decision.bias_confidence
+            
+            # CRITICAL FIX - SYNC ANALYSIS OBJECT WITH TOP LEVEL
+            # FORCE FULL SYNC
+            payload["analysis"]["strategy"] = payload.get("strategy")
+            payload["analysis"]["confidence"] = payload.get("confidence")
+            
+            # ADD DEBUG
+            print("[PAYLOAD SYNC CHECK]", {
+                "top_strategy": payload.get("strategy"),
+                "analysis_strategy": payload["analysis"].get("strategy"),
+                "top_conf": payload.get("confidence"),
+                "analysis_conf": payload["analysis"].get("confidence")
+            })
+            
+            # DEBUG: Log complete payload for verification
+            print("[BROADCAST PAYLOAD]", {
+                'regime': analysis_payload.get('regime', 'UNKNOWN'),
+                'bias': analysis_payload.get('bias', 'NEUTRAL'),
+                'biasStrength': analysis_payload.get('confidence', 0),
+                'netGex': analysis_payload.get('gamma_analysis', {}).get('net_gex', 0),
+                'keyLevels': {
+                    'gex_flip': analysis_payload.get('key_levels', {}).get('gex_flip', 0),
+                    'call_wall': analysis_payload.get('key_levels', {}).get('call_wall', 0),
+                    'put_wall': analysis_payload.get('key_levels', {}).get('put_wall', 0)
+                },
+                'technicals': {
+                    'rsi': analysis_payload.get('technical_state', {}).get('rsi', 50),
+                    'momentum_15m': analysis_payload.get('technical_state', {}).get('momentum_15m', 0)
+                }
+            })
+            
+            return payload
+            
         except Exception as e:
             logger.error(f"Analytics payload build failed: {e}")
-            return self.get_default_payload(symbol)
+            # STEP 5: HARD FAIL - NO SILENT FALLBACK
+            print("[BLOCKED] Feature engine failed → skipping broadcast")
+            return None  # Do not send strategy_update
     
-    def build_analysis_payload(self, bias_result, strategy_decision, features) -> Dict[str, Any]:
+    def build_analysis_payload(self, bias_result, strategy_decision, features, failed_conditions=None) -> Dict[str, Any]:
         """Build analysis payload for MemoizedStrategyPlan"""
+        if failed_conditions is None:
+            failed_conditions = []
+            
         return {
             'bias': bias_result.bias,
             'confidence': bias_result.confidence,
@@ -263,11 +377,31 @@ class AnalyticsBroadcaster:
             'strategy': strategy_decision.strategy,
             'execution_probability': strategy_decision.execution_probability,
             'reasoning': strategy_decision.reasoning,
+            'probabilistic': {
+                'score': features.get('probabilistic_score', 0.0),
+                'confidence': features.get('probabilistic_confidence', bias_result.confidence)
+            },
+            'debug': {
+                'confidence': strategy_decision.bias_confidence,
+                'threshold': getattr(self.strategy_engine, 'CONFIDENCE_THRESHOLD', 0.6),
+                'failedConditions': failed_conditions,
+                'timestamp': int(time.time() * 1000)
+            },
             'gamma_analysis': {
                 'gex_profile': features.get('gex_profile', {}),
                 'gamma_flip_probability': features.get('gamma_flip_probability', 0),
                 'call_wall': features.get('call_wall_strike'),
-                'put_wall': features.get('put_wall_strike')
+                'put_wall': features.get('put_wall_strike'),
+                'net_gex': features.get('net_gex', 0),
+                'regime': features.get('gamma_regime', 'NEUTRAL'),
+                'flip_level': features.get('gex_flip', 0)
+            },
+            'key_levels': {
+                'call_wall': features.get('call_wall_strike', 0),
+                'put_wall': features.get('put_wall_strike', 0),
+                'gex_flip': features.get('gex_flip', 0),
+                'max_pain': 0,
+                'vwap': features.get('vwap', 0)
             },
             'oi_analysis': {
                 'pcr_trend': features.get('pcr_trend', 0),
@@ -282,7 +416,13 @@ class AnalyticsBroadcaster:
             'volatility_analysis': {
                 'regime': features.get('iv_regime', 'MEDIUM'),
                 'expansion': features.get('volatility_expansion', 0),
-                'term_structure': features.get('term_structure', 0)
+                'term_structure': features.get('term_structure', 0),
+                'iv_atm': features.get('iv_atm', 0),
+                'iv_percentile': features.get('iv_percentile', 0)
+            },
+            'technical_state': {
+                'rsi': features.get('rsi', 50),
+                'momentum_15m': features.get('momentum_15m', 0)
             }
         }
     
@@ -296,6 +436,23 @@ class AnalyticsBroadcaster:
             stop_loss = current_premium * 0.4  # 40% stop loss
             target = current_premium * 2.0  # 2x target
             risk_reward = (target - current_premium) / (current_premium - stop_loss)
+            
+            # Get probabilistic score from strategy decision
+            probabilistic_score = 0.0
+            probabilistic_confidence = strategy_decision.bias_confidence
+            if hasattr(self.strategy_engine, 'score_engine') and hasattr(strategy_decision, 'regime'):
+                # Recalculate score if snapshot was available
+                try:
+                    # This is a simplified approach - in production, pass the actual snapshot
+                    probabilistic_score = 0.5  # Default fallback
+                    if strategy_decision.strategy in ['BUY_CALL', 'BUY_CE']:
+                        probabilistic_score = 0.4
+                    elif strategy_decision.strategy in ['BUY_PUT', 'BUY_PE']:
+                        probabilistic_score = -0.4
+                    probabilistic_confidence = abs(probabilistic_score)
+                except:
+                    probabilistic_score = 0.0
+                    probabilistic_confidence = strategy_decision.bias_confidence
             
             return {
                 'action': f"BUY_{optimal_strike['option_type']}",
@@ -316,7 +473,12 @@ class AnalyticsBroadcaster:
                     f"Option type: {optimal_strike['option_type']}",
                     f"Liquidity score: {optimal_strike['liquidity_score']:.2f}",
                     f"Risk/Reward: {risk_reward:.2f}"
-                ]
+                ],
+                'probabilistic': {
+                    'direction': strategy_decision.strategy,
+                    'confidence': probabilistic_confidence,
+                    'score': probabilistic_score
+                }
             }
             
         except Exception as e:
@@ -337,7 +499,13 @@ class AnalyticsBroadcaster:
                 'confidence': 0.0,
                 'regime': 'UNKNOWN',
                 'strategy': 'NO_TRADE',
-                'reasoning': ['System error - no analysis available']
+                'reasoning': ['System error - no analysis available'],
+                'debug': {
+                    'confidence': 0.0,
+                    'threshold': getattr(self.strategy_engine, 'CONFIDENCE_THRESHOLD', 0.6),
+                    'failedConditions': ['SYSTEM_ERROR_NO_ANALYSIS'],
+                    'timestamp': int(time.time() * 1000)
+                }
             },
             'trade': {"action": "NO_TRADE"}
         }
@@ -505,7 +673,8 @@ class AnalyticsBroadcaster:
             import json
             try:
                 message = json.dumps(payload, default=str)
-                await manager.broadcast(message)
+                print("[WS OUTGOING PAYLOAD]", payload.get("type"), payload)
+                await broadcast_with_strategy(json.loads(message))
             except Exception as e:
                 logger.error(f"[BROADCAST] JSON error for {symbol}: {e}")
 
@@ -552,18 +721,62 @@ class AnalyticsBroadcaster:
             
             try:
                 chart_message = json.dumps(chart_analysis_payload, default=str)
-                await manager.broadcast(chart_message)
+                print("[WS OUTGOING PAYLOAD]", chart_analysis_payload.get("type"), chart_analysis_payload)
+                await broadcast_with_strategy(json.loads(chart_message))
                 logger.info(f"[BROADCAST] ✅ {symbol} chart_analysis via AI_ORCHESTRATOR")
             except Exception as e:
                 logger.error(f"[BROADCAST] Chart analysis JSON error for {symbol}: {e}")
+
+            # STEP 2: FIND analytics_update PAYLOAD (SEPARATE BLOCK)
+            analytics_payload = {
+                "type": "analytics_update",
+                "symbol": symbol,
+                "timestamp": ts,
+                "analytics": payload["market_analysis"]
+            }
+            
+            # STEP 3: INJECT STRATEGY ONLY HERE
+            strategy_decision = await self._build_analytics_payload(symbol, snap)
+            
+            # STEP 1: LOG RAW strategy_decision
+            print("[DEBUG STRATEGY_DECISION]", strategy_decision)
+            
+            # STEP 2: REMOVE CONDITION (TEMP DEBUG MODE)
+            trade = strategy_decision.get("trade") if strategy_decision else None
+            print("[DEBUG TRADE]", trade)
+            
+            # STEP 3: FORCE INJECTION
+            analytics = analytics_payload.get("analytics") or {}
+            analytics["strategy"] = trade.get("action") if trade else "NO_TRADE"
+            analytics["confidence"] = trade.get("confidence") if trade else 0
+            analytics_payload["analytics"] = analytics
+            
+            # STEP 4: FINAL LOG
+            print("[FINAL ANALYTICS_UPDATE PAYLOAD]", analytics_payload)
+            
+            # STEP 5: BROADCAST BOTH
+            try:
+                analytics_message = json.dumps(analytics_payload, default=str)
+                print("[WS OUTGOING PAYLOAD]", analytics_payload.get("type"), analytics_payload)
+                await broadcast_with_strategy(json.loads(analytics_message))
+            except Exception as e:
+                logger.error(f"[BROADCAST] Analytics update JSON error for {symbol}: {e}")
 
             # NEW: Send separated strategy_update message
             strategy_payload = await self._build_analytics_payload(symbol, snap)
             if strategy_payload:
                 try:
+                    # STEP 3: VERIFY BROADCAST CALL
+                    print("[BROADCAST CHECK] sending strategy_update")
                     strategy_message = json.dumps(strategy_payload, default=str)
-                    await manager.broadcast(strategy_message)
+                    print("[WS OUTGOING PAYLOAD]", strategy_payload.get("type"), strategy_payload)
+                    await broadcast_with_strategy(json.loads(strategy_message))
                     logger.info(f"[BROADCAST] ✅ {symbol} strategy_update with separated payloads")
+                    
+                    # Check price updates for active trades
+                    if snap and hasattr(snap, 'spot'):
+                        await trade_lifecycle_manager.check_price_updates(symbol, snap.spot)
+                        
                 except Exception as e:
                     logger.error(f"[BROADCAST] Strategy update JSON error for {symbol}: {e}")
 

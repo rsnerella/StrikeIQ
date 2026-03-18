@@ -194,6 +194,12 @@ export function connectMarketWS() {
       
       const data = JSON.parse(raw)
       
+      // STEP 1: VERIFY WS RAW MESSAGE
+      console.log("[WS RAW MESSAGE FULL]", data)
+      
+      // STEP 2: VERIFY MESSAGE TYPE
+      console.log("[WS MESSAGE TYPE]", data.type)
+      
       // PERFORMANCE: Count message rate to detect performance issues
       console.count("WS_MESSAGE")
       
@@ -217,6 +223,10 @@ export function connectMarketWS() {
         if (process.env.NODE_ENV === "development") {
           console.log("📊 ANALYTICS RECEIVED:", data)
         }
+        
+        // STEP 1: VERIFY WS PAYLOAD STRUCTURE
+        console.log("[WS RAW ANALYTICS]", data.analytics)
+        
         const wsStore = useWSStore.getState()
         if (wsStore.handleAnalytics) {
           wsStore.handleAnalytics(data)
@@ -227,6 +237,10 @@ export function connectMarketWS() {
       // Route ALL other message types through handleMessage
       // This covers: index_tick, option_chain_update, heatmap_update,
       // market_tick, market_data, chain_update
+      
+      // STEP 3: VERIFY HANDLE FORWARDING
+      console.log("[WS → STORE FORWARD]", data.type)
+      
       const wsStore = useWSStore.getState()
       if (wsStore.handleMessage) {
         wsStore.handleMessage(data)

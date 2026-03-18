@@ -373,7 +373,7 @@ class OptionChainBuilder:
 
         try:
 
-            from app.core.ws_manager import manager
+            from app.core.ws_manager import manager, broadcast_with_strategy
             from app.services.analytics_broadcaster import analytics_broadcaster
 
             logger.info(f"PIPELINE → chain updated {snapshot.symbol}")
@@ -446,13 +446,61 @@ class OptionChainBuilder:
                     "analytics": snapshot.analytics,
                     "timestamp": int(snapshot.timestamp)
                 }
+                
+                # 🔥 ADD HERE ONLY - FINAL TARGETED PATCH
+                analytics = analytics_payload.get("analytics") or {}
+                
+                # Get strategy decision (need to import or call strategy engine)
                 try:
-                    await manager.broadcast(analytics_payload)
+                    from app.ai.strategy_decision_engine import StrategyDecisionEngine
+                    strategy_engine = StrategyDecisionEngine()
+                    
+                    # Build features from snapshot
+                    features = {
+                        'spot': snapshot.spot,
+                        'total_call_oi': snapshot.total_call_oi,
+                        'total_put_oi': snapshot.total_put_oi,
+                        'pcr': snapshot.pcr if hasattr(snapshot, 'pcr') else 0,
+                    }
+                    
+                    # Get strategy decision
+                    strategy_decision = strategy_engine.decide_strategy(None, features, snapshot)
+                    
+                    # HANDLE BOTH dict + object
+                    trade_action = "NO_TRADE"
+                    trade_confidence = 0
+                    
+                    if strategy_decision:
+                        if isinstance(strategy_decision, dict):
+                            trade = strategy_decision.get("trade", {})
+                            trade_action = trade.get("action", "NO_TRADE")
+                            trade_confidence = trade.get("confidence", 0)
+                        else:
+                            # StrategyDecision object
+                            trade_action = getattr(strategy_decision, "strategy", "NO_TRADE")
+                            trade_confidence = getattr(strategy_decision, "bias_confidence", 0)
+                    
+                    analytics["strategy"] = trade_action
+                    analytics["confidence"] = trade_confidence
+                    print("[FINAL FIXED EMITTER]", analytics)
+                    
+                except Exception as e:
+                    print("[STRATEGY ERROR]", str(e))
+                    analytics["strategy"] = "NO_TRADE"
+                    analytics["confidence"] = 0
+                
+                analytics_payload["analytics"] = analytics
+                print("[FINAL FIXED EMITTER]", analytics_payload)
+                
+                try:
+                    print("[WS OUTGOING PAYLOAD]", analytics_payload.get("type"), analytics_payload)
+                    await broadcast_with_strategy(analytics_payload)
                 except Exception as e:
                     logger.warning(f"Analytics broadcast failed: {e}")
             
             try:
-                await manager.broadcast(payload)
+                print("[WS OUTGOING PAYLOAD]", payload.get("type"), payload)
+                await broadcast_with_strategy(payload)
             except Exception as e:
                 logger.warning(f"WS send failed (client likely disconnected): {e}")
             pipeline_latency_ms = (time.perf_counter() - pipeline_start) * 1000

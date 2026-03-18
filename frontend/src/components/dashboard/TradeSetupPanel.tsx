@@ -16,8 +16,26 @@ export function TradeSetupPanel() {
     const bias         = useWSStore(s => s.bias          ?? 'NEUTRAL')
     const pcr          = useWSStore(s => s.pcr           ?? 0)
     const tradeSetup    = useWSStore(s => s.tradeSetup)    // NEW: Use separated tradeSetup
+    const analytics     = useWSStore(s => s.analytics)      // FIX: Read analytics for strategy/confidence
     const lastUpdate   = useWSStore(s => s.lastUpdate)
     const hasData      = lastUpdate > 0
+    
+    // STEP 2: READ CORRECT DATA
+    const strategy = analytics?.strategy
+    const confidence = analytics?.confidence
+    
+    // STEP 4: DEBUG UI DATA
+    console.log("[UI STRATEGY DATA]", strategy, confidence)
+    
+    // STEP 6: CRITICAL CHECK - Debug full store if strategy undefined
+    if (!strategy) {
+        console.log("[CRITICAL] Strategy undefined - full store:", useWSStore.getState())
+        console.log("[CRITICAL] Analytics path check:", {
+            analytics: analytics,
+            analyticsStrategy: analytics?.strategy,
+            analyticsConfidence: analytics?.confidence
+        })
+    }
     
     // Loading State (Law 2 & 7)
     if (!hasData) {
@@ -38,8 +56,51 @@ export function TradeSetupPanel() {
         );
     }
 
-    // NEW: Handle NO_TRADE case
-    if (!tradeSetup || tradeSetup.action === "NO_TRADE") {
+    // FIX G: Handle NO_TRADE case with probabilistic fallback
+    
+    // STEP 3: FIX RENDER - Show strategy when available
+    return (
+        <div className="trading-panel h-full flex flex-col justify-center items-center gap-4 opacity-60">
+                <Search className="w-8 h-8 text-blue-500/50 animate-bounce" />
+                <div className="flex flex-col items-center gap-2">
+                    {strategy ? (
+                        <div>
+                            <h1 className="text-[12px] font-bold font-mono tracking-[0.2em] text-green-400 uppercase mb-1">
+                                {strategy}
+                            </h1>
+                            <p className="text-[10px] font-mono text-blue-300">
+                                Confidence: {confidence?.toFixed(2)}
+                            </p>
+                        </div>
+                    ) : (
+                        <span className="text-[10px] font-bold font-mono tracking-[0.2em] text-blue-400 uppercase">
+                            WAITING FOR STRATEGY SIGNAL
+                        </span>
+                    )}
+                </div>
+            </div>
+        )
+    
+    const action = tradeSetup?.action || 'NO_TRADE'
+    const tradeConfidence = tradeSetup?.confidence || 0  // Rename to avoid conflict
+    const score = tradeSetup?.score || 0
+    
+    // STEP 3: FIX TradeSetupPanel.tsx - ADD DEBUG
+    console.log("[TRADE PANEL STORE DATA]", tradeSetup)
+    
+    // Debug log
+    console.log("RECEIVED TRADESETUP:", tradeSetup)
+    console.log("TRADE DATA:", { action, confidence: tradeConfidence, score })
+    
+    // FIX G: Improved NO_TRADE detection
+    const isNoTrade = (
+        !tradeSetup ||
+        action === 'NO_TRADE' ||
+        action === 'NEUTRAL' ||
+        tradeConfidence < 0.50
+    )
+    
+    if (isNoTrade) {
         return (
             <div className="trading-panel h-full flex flex-col justify-center items-center gap-4 opacity-60">
                 <Shield className="w-8 h-8 text-slate-400/50" />
@@ -48,7 +109,13 @@ export function TradeSetupPanel() {
                         No high conviction setup
                     </span>
                     <div className="text-[8px] font-mono text-slate-500 text-center">
-                        Market conditions not favorable for trading
+                        {hasData
+                            ? 'Market conditions not meeting entry criteria'
+                            : 'Connecting to market...'}
+                    </div>
+                    {/* Still show market regime info even when no trade */}
+                    <div className="text-[8px] font-mono text-slate-600 text-center">
+                        PCR: {pcr.toFixed(2)} | Regime: {regime}
                     </div>
                 </div>
             </div>
@@ -67,7 +134,7 @@ export function TradeSetupPanel() {
       ? `₹${tradeSetup.target.toFixed(2)}` 
       : '—'
 
-    const directionDisplay = tradeSetup?.action ?? 'NEUTRAL'
+    const directionDisplay = action ?? 'NEUTRAL'
     const isBullish = directionDisplay.includes('CE') || directionDisplay.includes('BULLISH');
     const isBearish = directionDisplay.includes('PE') || directionDisplay.includes('BEARISH');
 
@@ -129,6 +196,16 @@ export function TradeSetupPanel() {
                     </div>
                 </div>
             </div>
+            
+            {/* Probabilistic Score */}
+            {score !== 0 && (
+                <div className="rounded-xl p-3 flex items-center justify-between mb-4 border border-white/5 bg-white/[0.02]">
+                    <div className="text-[10px] font-bold font-mono tracking-wider uppercase text-slate-500">Probabilistic Score</div>
+                    <div className={`text-[14px] font-bold font-mono tracking-tight tabular-nums ${score > 0 ? 'text-green-400' : score < 0 ? 'text-red-400' : 'text-slate-300'}`}>
+                        {score > 0 ? '+' : ''}{score.toFixed(2)}
+                    </div>
+                </div>
+            )}
 
             {/* Trade Levels Section */}
             <div className="space-y-4 mb-6 flex-grow">

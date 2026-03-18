@@ -1,0 +1,2 @@
+{"timestamp": "2026-03-17T15:17:16.277027", "action": "BUY", "confidence": 0.75, "probability": 0.8, "spot_price": 20000, "entry_signal": "ENTER_NOW", "reasoning": ["Test signal"], "regime": "TRENDING", "trap_detected": false, "htf_bias": "BUY"}
+{"timestamp": "2026-03-17T15:17:16.278360", "action": "SELL", "confidence": 0.6, "probability": 0.4, "spot_price": 20100, "entry_signal": "WAIT_FOR_PULLBACK", "reasoning": ["Test signal 2"], "regime": "RANGING", "trap_detected": true, "htf_bias": "SELL"}

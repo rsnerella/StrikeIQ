@@ -49,6 +49,13 @@ class FeatureSnapshot:
     support_resistance_levels: Dict[str, List[float]]
     pin_probability: float
 
+class OptionChainSnapshot:
+    """Wrapper class to ensure proper snapshot structure for feature engine"""
+    def __init__(self, chains, spot):
+        self.strikes = chains
+        self.spot = spot
+
+
 class FeatureEngine:
     """Institutional-grade feature engineering"""
     
@@ -64,10 +71,9 @@ class FeatureEngine:
         start_time = time.time()
         
         try:
-            # Safety validation: Check snapshot structure
+            # CRITICAL: Validate snapshot structure with proper error handling
             if not self._validate_snapshot(option_chain_snapshot):
-                logger.warning("Invalid option chain snapshot structure - using default features")
-                return self.get_default_features(spot_price)
+                raise Exception("Invalid option chain snapshot structure - validation failed")
             
             # Compute features with timeout protection
             if time.time() - start_time > 0.2:  # 200ms timeout
@@ -106,7 +112,8 @@ class FeatureEngine:
             # Microstructure Features
             microstructure_features = self.microstructure_analyzer.analyze_microstructure(option_chain_snapshot)
             
-            return FeatureSnapshot(
+            # Create feature snapshot
+            features = FeatureSnapshot(
                 timestamp=getattr(option_chain_snapshot, 'timestamp', time.time()),
                 spot=spot_price,
                 **gamma_features,
@@ -116,63 +123,107 @@ class FeatureEngine:
                 **microstructure_features
             )
             
+            # DEBUG: Log computed features
+            print("[FEATURE DEBUG]", {
+                'timestamp': features.timestamp,
+                'spot': features.spot,
+                'oi_total': sum(features.call_oi_distribution.values()) + sum(features.put_oi_distribution.values()),
+                'oi_skew': features.pcr_trend,
+                'gex': features.gex_profile.get('net_gamma', 0),
+                'iv': features.implied_volatility_surface.get('avg_iv', 0),
+                'delta': features.dealer_hedging_pressure
+            })
+            
+            return features
+            
         except Exception as e:
             logger.error(f"Feature computation failed: {e}")
+            # CRITICAL: Only use defaults if actual computation fails, not for validation errors
+            if "Invalid snapshot structure" in str(e):
+                # Re-raise validation errors to be handled upstream
+                raise e
             return self.get_default_features(spot_price)
     
     def _validate_snapshot(self, option_chain_snapshot) -> bool:
         """Validate option chain snapshot structure"""
         try:
+            # CRITICAL: Raise exception for invalid structure instead of returning False
+            if not option_chain_snapshot:
+                raise Exception("Invalid snapshot structure - snapshot is None")
+            
             # Check if snapshot has strikes attribute
             if not hasattr(option_chain_snapshot, 'strikes'):
-                return False
+                raise Exception("Invalid snapshot structure - missing strikes attribute")
             
-            # Check if strikes is a list and not empty
-            strikes = option_chain_snapshot.strikes
-            if not isinstance(strikes, list) or len(strikes) == 0:
-                return False
+            # Get strikes - handle both dict and list formats
+            strikes = getattr(option_chain_snapshot, 'strikes', None)
+            if strikes is None:
+                raise Exception("Invalid snapshot structure - strikes is None")
             
-            # Check if at least some strikes have valid structure
-            valid_strikes = 0
-            for strike in strikes[:5]:  # Check first 5 strikes
-                if isinstance(strike, dict) and 'strike' in strike:
-                    valid_strikes += 1
-            
-            return valid_strikes > 0
+            # Handle dict format (expected) vs list format
+            if isinstance(strikes, dict):
+                if len(strikes) == 0:
+                    raise Exception("Invalid snapshot structure - empty strikes dict")
+                
+                # Check if at least some strikes have valid structure
+                valid_strikes = 0
+                sample_strikes = list(strikes.items())[:3]  # Check first 3 strikes
+                print("[DEBUG SNAPSHOT]", sample_strikes)
+                
+                for strike_key, strike_data in sample_strikes:
+                    if isinstance(strike_data, dict):
+                        # Ensure strike key is float
+                        try:
+                            float_strike = float(strike_key)
+                        except (ValueError, TypeError):
+                            raise Exception(f"Invalid strike key format: {strike_key}")
+                        
+                        # Check for both CE and PE
+                        has_ce = 'CE' in strike_data and isinstance(strike_data['CE'], dict)
+                        has_pe = 'PE' in strike_data and isinstance(strike_data['PE'], dict)
+                        
+                        if has_ce or has_pe:
+                            valid_strikes += 1
+                
+                if valid_strikes == 0:
+                    raise Exception("Invalid snapshot structure - no valid CE/PE data found")
+                
+                return True
+                
+            elif isinstance(strikes, list):
+                if len(strikes) == 0:
+                    raise Exception("Invalid snapshot structure - empty strikes list")
+                
+                # Check first few strikes
+                valid_strikes = 0
+                for strike_data in strikes[:3]:
+                    if isinstance(strike_data, dict) and 'strike' in strike_data:
+                        try:
+                            float(strike_data['strike'])
+                        except (ValueError, TypeError):
+                            continue
+                        
+                        has_ce = 'CE' in strike_data and isinstance(strike_data['CE'], dict)
+                        has_pe = 'PE' in strike_data and isinstance(strike_data['PE'], dict)
+                        
+                        if has_ce or has_pe:
+                            valid_strikes += 1
+                
+                if valid_strikes == 0:
+                    raise Exception("Invalid snapshot structure - no valid strike data in list")
+                
+                return True
+            else:
+                raise Exception(f"Invalid snapshot structure - strikes is {type(strikes)}, expected dict or list")
             
         except Exception as e:
             logger.error(f"Snapshot validation failed: {e}")
-            return False
+            # Re-raise to trigger proper error handling in compute_features
+            raise e
     
     def get_default_features(self, spot_price) -> FeatureSnapshot:
         """Default features for error cases"""
-        return FeatureSnapshot(
-            timestamp=time.time(),
-            spot=spot_price,
-            gex_profile={'total_gamma': 0, 'call_gamma': 0, 'put_gamma': 0, 'net_gamma': 0},
-            gamma_flip_probability=0.0,
-            call_wall_strength=0.0,
-            put_wall_strength=0.0,
-            call_wall_strike=None,
-            put_wall_strike=None,
-            pcr_trend=0.0,
-            oi_concentration=0.0,
-            oi_buildup_rate=0.0,
-            call_oi_distribution={},
-            put_oi_distribution={},
-            liquidity_vacuum=0.0,
-            order_flow_imbalance=0.0,
-            market_impact=0.0,
-            spread_widening=0.0,
-            iv_regime="MEDIUM",
-            volatility_expansion=0.0,
-            term_structure=0.0,
-            implied_volatility_surface={'avg_iv': 20.0},
-            dealer_hedging_pressure=0.0,
-            institutional_flow=0.0,
-            support_resistance_levels={'support': [], 'resistance': []},
-            pin_probability=0.0
-        )
+        raise Exception("Feature engine must not fallback - fix snapshot structure instead")
 
 class GammaCalculator:
     """Advanced gamma exposure calculations"""
@@ -243,7 +294,8 @@ class GammaCalculator:
             
         except Exception as e:
             logger.error(f"Gamma calculation failed: {e}")
-            return self.get_default_gamma_features()
+            print("[BLOCKED] Feature engine failed → skipping broadcast")
+            return None
     
     def calculate_gamma_flip_probability(self, net_gamma, spot):
         """Calculate probability of gamma flip"""
@@ -275,31 +327,75 @@ class OIAnalyzer:
             call_oi_distribution = {}
             put_oi_distribution = {}
             
-            for strike_data in option_chain.strikes:
-                if not isinstance(strike_data, dict):
-                    continue
+            # Get strikes from option chain - handle both dict and list formats
+            strikes = getattr(option_chain, 'strikes', None)
+            if not strikes:
+                raise Exception("No strikes data available for OI analysis")
+            
+            # Handle dict format
+            if isinstance(strikes, dict):
+                for strike_key, strike_data in strikes.items():
+                    if not isinstance(strike_data, dict):
+                        continue
                     
-                strike = strike_data.get('strike')
-                if not strike:
-                    continue
-                
-                # Call OI
-                if 'CE' in strike_data and isinstance(strike_data['CE'], dict):
-                    ce_oi = strike_data['CE'].get('oi', 0)
-                    total_call_oi += ce_oi
-                    call_oi_distribution[str(strike)] = ce_oi
-                
-                # Put OI
-                if 'PE' in strike_data and isinstance(strike_data['PE'], dict):
-                    pe_oi = strike_data['PE'].get('oi', 0)
-                    total_put_oi += pe_oi
-                    put_oi_distribution[str(strike)] = pe_oi
+                    # Call OI
+                    if 'CE' in strike_data and isinstance(strike_data['CE'], dict):
+                        ce_oi = strike_data['CE'].get('oi', 0)
+                        if ce_oi > 0:  # Only include non-zero OI
+                            total_call_oi += ce_oi
+                            call_oi_distribution[str(float(strike_key))] = ce_oi
+                    
+                    # Put OI
+                    if 'PE' in strike_data and isinstance(strike_data['PE'], dict):
+                        pe_oi = strike_data['PE'].get('oi', 0)
+                        if pe_oi > 0:  # Only include non-zero OI
+                            total_put_oi += pe_oi
+                            put_oi_distribution[str(float(strike_key))] = pe_oi
+            
+            # Handle list format
+            elif isinstance(strikes, list):
+                for strike_data in strikes:
+                    if not isinstance(strike_data, dict):
+                        continue
+                        
+                    strike = strike_data.get('strike')
+                    if not strike:
+                        continue
+                    
+                    # Call OI
+                    if 'CE' in strike_data and isinstance(strike_data['CE'], dict):
+                        ce_oi = strike_data['CE'].get('oi', 0)
+                        if ce_oi > 0:  # Only include non-zero OI
+                            total_call_oi += ce_oi
+                            call_oi_distribution[str(float(strike))] = ce_oi
+                    
+                    # Put OI
+                    if 'PE' in strike_data and isinstance(strike_data['PE'], dict):
+                        pe_oi = strike_data['PE'].get('oi', 0)
+                        if pe_oi > 0:  # Only include non-zero OI
+                            total_put_oi += pe_oi
+                            put_oi_distribution[str(float(strike))] = pe_oi
+            
+            # VALIDATION: Ensure we have real OI data
+            if total_call_oi == 0 and total_put_oi == 0:
+                raise Exception("No valid OI data found - all OI values are zero")
             
             # Calculate PCR and features
             pcr = total_put_oi / total_call_oi if total_call_oi > 0 else 1.0
             pcr_trend = self.calculate_pcr_trend(pcr)
             oi_concentration = self.calculate_oi_concentration(call_oi_distribution, put_oi_distribution)
             oi_buildup_rate = self.calculate_oi_buildup_rate(option_chain)
+            
+            # DEBUG: Log OI metrics
+            print("[OI DEBUG]", {
+                'total_call_oi': total_call_oi,
+                'total_put_oi': total_put_oi,
+                'pcr': pcr,
+                'pcr_trend': pcr_trend,
+                'oi_concentration': oi_concentration,
+                'call_strikes': len(call_oi_distribution),
+                'put_strikes': len(put_oi_distribution)
+            })
             
             return {
                 'pcr_trend': pcr_trend,
@@ -311,6 +407,9 @@ class OIAnalyzer:
             
         except Exception as e:
             logger.error(f"OI analysis failed: {e}")
+            # CRITICAL: Re-raise if no real data, otherwise return defaults
+            if "No valid OI data found" in str(e):
+                raise e
             return self.get_default_oi_features()
     
     def calculate_pcr_trend(self, current_pcr):

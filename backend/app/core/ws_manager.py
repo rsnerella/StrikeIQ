@@ -96,7 +96,11 @@ class WSManager:
         async with self._lock:
             connections = self.active_connections.copy()
 
-        logger.info(f"[WS MANAGER] Broadcasting to {len(connections)} clients | type={payload.get('type') if isinstance(payload, dict) else 'string'}")
+        # STEP 5: VERIFY WS LAYER
+        message_type = payload.get('type') if isinstance(payload, dict) else 'string'
+        print("[WS SEND]", message_type)
+
+        logger.info(f"[WS MANAGER] Broadcasting to {len(connections)} clients | type={message_type}")
 
         results = await asyncio.gather(
             *[conn.send_text(message) for conn in connections],
@@ -121,3 +125,17 @@ class WSManager:
 
 # Singleton instance
 manager = WSManager()
+
+# NUCLEAR FIX — GLOBAL STRATEGY INJECTION
+async def broadcast_with_strategy(payload):
+    """Global wrapper that passes through analytics_update payloads"""
+    
+    if payload.get("type") == "analytics_update":
+        analytics = payload.get("analytics") or {}
+        
+        # Use real strategy (already coming from backend)
+        print("[FINAL REAL ANALYTICS]", analytics)
+        
+        payload["analytics"] = analytics
+    
+    await manager.broadcast(payload)

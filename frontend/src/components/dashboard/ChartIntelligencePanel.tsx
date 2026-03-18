@@ -115,7 +115,7 @@ export function ChartIntelligencePanel() {
     const vol = useWSStore(s => s.volState);
     const tech = useWSStore(s => s.technicals);
     const summary = useWSStore(s => s.summary ?? '');
-    const keyLevels = useWSStore(s => s.keyLevels ?? {});
+    const keyLevels = useWSStore(s => s.keyLevels);
     const spot = useWSStore(s => s.spotPrice ?? 0);
     const regime = useWSStore(s => s.regime ?? 'RANGING');
     const pcr = useWSStore(s => s.pcr ?? 0);

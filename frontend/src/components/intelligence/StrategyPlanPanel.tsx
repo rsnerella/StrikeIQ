@@ -12,10 +12,12 @@ const SkeletonPulse = ({ className }: { className: string }) => (
 );
 
 const StrategyPlanPanel: React.FC = () => {
-    // Law 7: Granular Store Subscriptions
-    const lastUpdate    = useWSStore(s => s.lastUpdate);
-    const aiAnalysis    = useWSStore(s => s.aiAnalysis);    // NEW: Use separated aiAnalysis
-    const confidence    = useWSStore(s => s.biasStrength ?? 0);
+    // Law 7: Separate Store Subscriptions to prevent infinite loops
+    const lastUpdate = useWSStore(s => s.lastUpdate);
+    const analytics = useWSStore(s => s.analytics);  // FIX: Read from analytics field
+    const biasStrength = useWSStore(s => s.biasStrength ?? 0);
+    
+    const confidence = biasStrength;
 
     const hasData = lastUpdate > 0;
     if (!hasData) {
@@ -29,7 +31,7 @@ const StrategyPlanPanel: React.FC = () => {
         );
     }
 
-    if (!aiAnalysis) {
+    if (!analytics) {
         return (
             <div className="trading-panel h-full flex flex-col justify-center items-center gap-6 opacity-40">
                 <Activity className="w-8 h-8 text-slate-700 animate-pulse mb-2" />
@@ -40,8 +42,8 @@ const StrategyPlanPanel: React.FC = () => {
         );
     }
 
-    const isLowConviction = (aiAnalysis.confidence ?? 0) < 0.65;
-    const isBullish = (aiAnalysis.bias || '').toUpperCase() === 'BULLISH';
+    const isLowConviction = (analytics.confidence ?? 0) < 0.65;
+    const isBullish = (analytics.bias || '').toUpperCase() === 'BULLISH';
     
     // Theme selection: Muted for low conviction, Vibrant for high
     const accentColor = isLowConviction ? '#64748b' : (isBullish ? '#10b981' : '#f43f5e');
@@ -67,7 +69,7 @@ const StrategyPlanPanel: React.FC = () => {
                         <SectionLabel>{headerTitle}</SectionLabel>
                         <div className="flex items-center gap-3">
                             <span className="text-[12px] font-black font-mono tracking-[0.1em] uppercase" style={{ color: accentColor }}>
-                                {statusLabel}: {aiAnalysis.strategy || 'ANALYZING'}
+                                {statusLabel}: {analytics.strategy || 'ANALYZING'}
                             </span>
                         </div>
                     </div>
@@ -76,14 +78,14 @@ const StrategyPlanPanel: React.FC = () => {
                         <div className="flex flex-col items-end">
                             <span className="text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest opacity-60">Bias</span>
                             <span className={`text-lg font-black font-mono tabular-nums ${isLowConviction ? 'text-slate-400' : 'text-white'}`}>
-                                {aiAnalysis.bias}
+                                {analytics.bias}
                             </span>
                         </div>
                         <div className="h-8 w-[1px] bg-white/10" />
                         <div className="flex flex-col items-end">
                             <span className="text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest opacity-60">Confidence</span>
                             <span className={`text-lg font-black font-mono tabular-nums ${isLowConviction ? 'text-slate-400' : 'text-white'}`}>
-                                {(aiAnalysis.confidence * 100).toFixed(1)}%
+                                {(analytics.confidence * 100).toFixed(1)}%
                             </span>
                         </div>
                     </div>
@@ -92,10 +94,10 @@ const StrategyPlanPanel: React.FC = () => {
                 {/* Component Analysis */}
                 <div className="grid grid-cols-2 gap-4 mb-4">
                     {[
-                        { label: 'Gamma', val: `${(aiAnalysis.components?.gamma ?? 0).toFixed(2)}`, color: 'text-violet-400' },
-                        { label: 'OI', val: `${(aiAnalysis.components?.oi ?? 0).toFixed(2)}`, color: 'text-blue-400' },
-                        { label: 'Liquidity', val: `${(aiAnalysis.components?.liquidity ?? 0).toFixed(2)}`, color: 'text-emerald-400' },
-                        { label: 'Volatility', val: `${(aiAnalysis.components?.volatility ?? 0).toFixed(2)}`, color: 'text-orange-400' }
+                        { label: 'Gamma', val: `${(analytics.components?.gamma ?? 0).toFixed(2)}`, color: 'text-violet-400' },
+                        { label: 'OI', val: `${(analytics.components?.oi ?? 0).toFixed(2)}`, color: 'text-blue-400' },
+                        { label: 'Liquidity', val: `${(analytics.components?.liquidity ?? 0).toFixed(2)}`, color: 'text-emerald-400' },
+                        { label: 'Volatility', val: `${(analytics.components?.volatility ?? 0).toFixed(2)}`, color: 'text-orange-400' }
                     ].map((item, i) => (
                         <div key={i} className="p-3.5 rounded-xl bg-white/[0.02] border border-white/5 flex flex-col gap-1">
                             <span className="text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest">{item.label}</span>
@@ -108,7 +110,7 @@ const StrategyPlanPanel: React.FC = () => {
                 <div className="p-4 rounded-xl border border-slate-500/10 bg-slate-500/[0.03] space-y-2">
                     <span className="text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest">Analysis</span>
                     <div className="text-[8px] font-mono text-slate-300 leading-relaxed">
-                        {aiAnalysis.reasoning?.map((reason, index) => (
+                        {analytics.reasoning?.map((reason, index) => (
                             <div key={index} className="flex items-start gap-2 mb-1">
                                 <span className="text-slate-500 mt-0.5">•</span>
                                 <span>{reason}</span>
@@ -121,7 +123,7 @@ const StrategyPlanPanel: React.FC = () => {
                 <div className="p-4 rounded-xl border border-cyan-500/10 bg-cyan-500/[0.03]">
                     <span className="text-[9px] font-bold font-mono text-cyan-500/70 uppercase mb-2">Market Regime</span>
                     <div className="text-[14px] font-bold font-mono text-cyan-400 uppercase">
-                        {aiAnalysis.regime || 'UNKNOWN'}
+                        {analytics.regime || 'UNKNOWN'}
                     </div>
                 </div>
 
@@ -130,7 +132,7 @@ const StrategyPlanPanel: React.FC = () => {
                     <div className="flex items-center justify-between">
                         <span className="text-[8px] font-bold font-mono text-slate-500 uppercase">Execution Probability</span>
                         <span className={`text-[14px] font-bold font-mono tabular-nums ${isLowConviction ? 'text-slate-400' : 'text-green-400'}`}>
-                            {((aiAnalysis.execution_probability ?? 0) * 100).toFixed(1)}%
+                            {((analytics.execution_probability ?? 0) * 100).toFixed(1)}%
                         </span>
                     </div>
                 </div>

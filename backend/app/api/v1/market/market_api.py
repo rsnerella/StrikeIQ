@@ -8,6 +8,7 @@ from app.services.instrument_registry import get_instrument_registry
 import logging
 from datetime import datetime, timedelta
 import httpx
+import os
 from app.services.token_manager import token_manager
 
 router = APIRouter(tags=["market"])
@@ -159,34 +160,39 @@ async def get_historical_candles(
     try:
         # Map tf to Upstox interval
         interval_map = {
-            '1m': '1minute', 
-            '5m': '5minute', 
+            '1m': '1minute',
+            '5m': '5minute',
             '15m': '15minute',
-            '30m': '30minute',
-            '1h': '60minute', 
+            '1h': '30minute',  # Upstox doesn't have 1h, use 30m
+            '4h': 'day',
             '1d': 'day'
         }
         interval = interval_map.get(tf, '1minute')
-
-        instrument_key = {
+        
+        # Map symbol to Upstox instrument key
+        instrument_map = {
             'NIFTY': 'NSE_INDEX|Nifty 50',
             'BANKNIFTY': 'NSE_INDEX|Nifty Bank',
             'FINNIFTY': 'NSE_INDEX|Nifty Fin Service',
         }.get(symbol.upper(), 'NSE_INDEX|Nifty 50')
 
-        logger.info(f"FETCHING CANDLES → symbol={symbol}, tf={tf}, interval={interval}, key={instrument_key}")
+        logger.info(f"FETCHING CANDLES → symbol={symbol}, tf={tf}, interval={interval}, key={instrument_map}")
+        print("[CANDLE REQUEST]", {
+            'symbol': symbol,
+            'timeframe': tf,
+            'interval': interval,
+            'instrument_key': instrument_map,
+            'limit': limit
+        })
 
-        # URL encode the instrument key
-        encoded_key = instrument_key.replace('|', '%7C').replace(' ', '%20')
-
-        token = await token_manager.get_token()
+        # Get token
+        token = os.getenv("UPSTOX_TOKEN")
         if not token:
-            logger.error("No valid upstox token found for candle fetch")
             raise HTTPException(status_code=401, detail="No valid upstox token")
 
         async with httpx.AsyncClient() as client:
             # 1. Fetch Intraday Candles
-            url_intra = f"https://api.upstox.com/v2/historical-candle/intraday/{encoded_key}/{interval}"
+            url_intra = f"https://api.upstox.com/v2/historical-candle/intraday/{instrument_map}/{interval}"
             resp_intra = await client.get(url_intra, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
             intraday_data = resp_intra.json().get('data', {}).get('candles', [])
             
@@ -194,7 +200,7 @@ async def get_historical_candles(
             from datetime import date, timedelta
             from_date = (date.today() - timedelta(days=5)).strftime('%Y-%m-%d')
             to_date   = date.today().strftime('%Y-%m-%d')
-            url_hist = f"https://api.upstox.com/v2/historical-candle/{encoded_key}/{interval}/{to_date}/{from_date}"
+            url_hist = f"https://api.upstox.com/v2/historical-candle/{instrument_map}/{interval}/{to_date}/{from_date}"
             resp_hist = await client.get(url_hist, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
             historical_data = resp_hist.json().get('data', {}).get('candles', [])
             
@@ -209,14 +215,20 @@ async def get_historical_candles(
             # Sort descending (newest first)
             data = sorted(unique_candles.values(), key=lambda x: x[0], reverse=True)
             logger.info(f"CANDLE LOADER → total={len(data)} (hist={len(historical_data)}, intra={len(intraday_data)})")
+            print("[CANDLE RESPONSE]", {
+                'intraday_count': len(intraday_data),
+                'historical_count': len(historical_data),
+                'unique_count': len(data),
+                'sample_candles': data[:3] if data else []
+            })
 
             # 4. Failsafe fallback using live spot price
-            if not data:
-                logger.info("CANDLE LOADER → Both APIs empty, attempting spot fallback")
-                dash_data = await service.get_dashboard_data(symbol.upper())
-                spot_price = dash_data.get("last_price")
-                if spot_price:
-                    logger.info(f"GENERATING FALLBACK CANDLE → price={spot_price}")
+            if len(data) == 0:
+                logger.warning(f"No candles found for {symbol}, using spot price fallback")
+                from app.services.option_chain_builder import option_chain_builder
+                snapshot = option_chain_builder.get_latest_snapshot(symbol)
+                if snapshot:
+                    spot_price = snapshot.spot
                     now_str = datetime.now().isoformat()
                     # Upstox format: [timestamp, open, high, low, close, volume, oi]
                     data = [[now_str, spot_price, spot_price, spot_price, spot_price, 0]]
@@ -233,8 +245,15 @@ async def get_historical_candles(
                     'high': c[2],
                     'low': c[3],
                     'close': c[4],
-                    'volume': c[5] if len(c) > 5 else 0,
+                    'volume': c[5] if len(c) > 5 else 0
                 })
+            
+            print("[CANDLE FINAL]", {
+                'symbol': symbol,
+                'timeframe': tf,
+                'candles_returned': len(candles),
+                'has_data': len(candles) > 0
+            })
 
             return {
                 'symbol': symbol.upper(), 
@@ -244,4 +263,9 @@ async def get_historical_candles(
 
     except Exception as e:
         logger.error(f"Candles fetch error for {symbol} ({tf}): {e}")
+        print("[CANDLE ERROR]", {
+            'symbol': symbol,
+            'timeframe': tf,
+            'error': str(e)
+        })
         return {"symbol": symbol, "tf": tf, "candles": [], "error": str(e)}

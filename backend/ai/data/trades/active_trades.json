@@ -1,0 +1,15 @@
+[
+  {
+    "timestamp": "2026-03-17T15:28:26.784693",
+    "action": "BUY",
+    "entry_price": 19900,
+    "confidence": 0.6375,
+    "probability": 0.8909031788043871,
+    "entry_type": "WAIT_FOR_PULLBACK",
+    "stop_loss": 19790.3,
+    "target": 20100,
+    "position_size": 9.115770282588818,
+    "risk_amount": 999.9999999999999,
+    "direction": 1
+  }
+]

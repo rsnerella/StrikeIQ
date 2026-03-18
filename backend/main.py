@@ -265,12 +265,18 @@ async def lifespan(app: FastAPI):
     # -------- ANALYTICS BROADCASTER --------
     try:
         from app.services.analytics_broadcaster import analytics_broadcaster
+        from app.services.trade_lifecycle_manager import trade_lifecycle_manager
+        
+        # Initialize trade lifecycle manager (database will be initialized internally)
+        await trade_lifecycle_manager.initialize()
+        
         task = asyncio.create_task(
             analytics_broadcaster.start(),
             name="analytics_broadcaster"
         )
         app.state.background_tasks.append(task)
         logger.info("🧠 Analytics Broadcaster (Elite Engine) started")
+        logger.info("🧠 Trade Lifecycle Manager initialized")
     except Exception as e:
         logger.error(f"Analytics broadcaster failed: {e}")
 

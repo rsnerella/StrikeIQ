@@ -183,10 +183,10 @@ class OIHeatmapEngine:
 
         try:
 
-            from app.core.ws_manager import manager
+            from app.core.ws_manager import manager, broadcast_with_strategy
             import json
 
-            await manager.broadcast(json.dumps(heatmap_data))
+            await broadcast_with_strategy(json.loads(json.dumps(heatmap_data)))
 
             logger.debug(f"Broadcasted heatmap for {heatmap_data['symbol']}")
 

@@ -22,6 +22,12 @@ export function InstitutionalFlowPanel() {
     const aiReady = useWSStore(s => s.aiReady);
     const analysis = useWSStore(s => s.chartAnalysis);
     
+    // FIX E: Read from correct store fields for momentum and structure
+    const technicals = useWSStore(s => s.technicals);
+    const regime     = useWSStore(s => s.regime ?? 'RANGING');
+    const rsi        = useWSStore(s => s.rsi ?? technicals?.rsi ?? 50);
+    const momentum   = technicals?.momentum_15m ?? 0;
+    
     // v5.0 Flow state
     const flow = analysis?.flow_analysis;
     const callVelocity = flow?.call_velocity || 0;
@@ -122,6 +128,28 @@ export function InstitutionalFlowPanel() {
                         <span className="text-[14px] font-black font-mono text-white tracking-widest uppercase">
                             {intent >= 75 ? 'SURGE' : intent >= 50 ? 'STEADY' : 'LATENT'}
                         </span>
+                    </div>
+                </div>
+                
+                {/* FIX E: Add RSI, Momentum, and Structure display */}
+                <div className="grid grid-cols-3 gap-2 mt-4">
+                    <div className="text-center p-2 rounded bg-white/5 border border-white/5">
+                        <div className="text-[8px] font-mono text-slate-500 uppercase mb-1">RSI</div>
+                        <div className="text-[12px] font-black font-mono" style={{ color: rsi > 70 ? '#f87171' : rsi < 30 ? '#4ade80' : '#94a3b8' }}>
+                            {rsi.toFixed(1)}
+                        </div>
+                    </div>
+                    <div className="text-center p-2 rounded bg-white/5 border border-white/5">
+                        <div className="text-[8px] font-mono text-slate-500 uppercase mb-1">Momentum</div>
+                        <div className="text-[12px] font-black font-mono" style={{ color: momentum > 0.002 ? '#4ade80' : momentum < -0.002 ? '#f87171' : '#94a3b8' }}>
+                            {momentum !== 0 ? (momentum > 0 ? '+' : '') + (momentum * 100).toFixed(2) + '%' : '0.00'}
+                        </div>
+                    </div>
+                    <div className="text-center p-2 rounded bg-white/5 border border-white/5">
+                        <div className="text-[8px] font-mono text-slate-500 uppercase mb-1">Structure</div>
+                        <div className="text-[12px] font-black font-mono text-cyan-400">
+                            {regime}
+                        </div>
                     </div>
                 </div>
             </div>

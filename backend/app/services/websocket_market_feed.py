@@ -23,7 +23,7 @@ from app.services.upstox_protobuf_parser_v3 import decode_protobuf_message
 from app.services.upstox_v3_raw_converter import convert_protobuf_to_upstox_v3_format
 from app.core.market_context import MARKET_CONTEXT
 from app.services.live_chain_manager import chain_manager
-from app.core.ws_manager import manager
+from app.core.ws_manager import manager, broadcast_with_strategy
 from app.services.instrument_registry import get_instrument_registry
 from app.services.market_data.upstox_client import UpstoxClient
 from app.services.option_chain_snapshot import option_chain_snapshot
@@ -1179,7 +1179,7 @@ class WebSocketMarketFeed:
                 if raw_upstox_data and raw_upstox_data.get("feeds"):
                     logger.info("BROADCASTING RAW UPSTOX V3 FORMAT")
                     logger.info(f"RAW DATA: {json_lib.dumps(raw_upstox_data, indent=2)}")
-                    await manager.broadcast(raw_upstox_data)
+                    await broadcast_with_strategy(raw_upstox_data)
             except Exception as e:
                 logger.error(f"Failed to broadcast raw Upstox V3 format: {e}")
 

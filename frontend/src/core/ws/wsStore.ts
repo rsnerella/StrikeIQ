@@ -64,6 +64,7 @@ interface WSStore {
   gammaAnalysis: any
   volState: any
   technicals: any
+  rsi: number
   summary: string
   tradePlan: any
   earlyWarnings: any[]
@@ -142,6 +143,7 @@ export const useWSStore = create<WSStore>((set, get) =>({
   gammaAnalysis: {},
   volState: {},
   technicals: {},
+  rsi: 0,
   summary: '',
   tradePlan: null,
   earlyWarnings: [],
@@ -153,6 +155,9 @@ export const useWSStore = create<WSStore>((set, get) =>({
 
   handleMessage: (message: any) => {
     if (!message) return
+
+    // STEP 4: VERIFY STORE ENTRY
+    console.log("[STORE HANDLE ENTRY]", message.type)
 
     // STEP 5: RAW WS LOGGING
     if (message.type !== 'pong' && message.type !== 'ping') {
@@ -508,24 +513,68 @@ export const useWSStore = create<WSStore>((set, get) =>({
 
       case 'strategy_update': {
         // NEW: Handle separated strategy update message
+        console.log("WS STRATEGY UPDATE:", message)
+        
+        // STEP 5: VERIFY strategy_update CASE HIT
+        console.log("[STORE HIT] strategy_update")
+        
         const { analysis, trade } = message;
         
         if (analysis) {
           set((prev) => ({
             ...prev,
             aiAnalysis: analysis,
+            
+            // Write flat fields for component compatibility
+            regime:        analysis.regime        ?? prev.regime,
+            bias:          analysis.bias          ?? prev.bias,
+            biasStrength:  analysis.confidence    ?? prev.biasStrength,
+            summary:       analysis.reasoning?.[0] ?? prev.summary,
+            netGex:        analysis.gamma_analysis?.net_gex ?? prev.netGex,
+            rsi:           analysis.technical_state?.rsi ?? prev.technicals?.rsi ?? prev.rsi,
+            
+            // Key levels — write to BOTH flat and nested
+            callWall:      analysis.key_levels?.call_wall ?? prev.callWall,
+            putWall:       analysis.key_levels?.put_wall  ?? prev.putWall,
+            gexFlip:       analysis.key_levels?.gex_flip  ?? prev.gexFlip,
+            keyLevels:     analysis.key_levels             ?? prev.keyLevels,
+            
+            // Technical state
+            technicals: {
+              ...(prev.technicals || {}),
+              rsi:           analysis.technical_state?.rsi         ?? prev.technicals?.rsi,
+              momentum_15m: analysis.technical_state?.momentum_15m ?? prev.technicals?.momentum_15m,
+            },
+            
+            // Volatility
+            volState: {
+              ...(prev.volState || {}),
+              state:         analysis.volatility_analysis?.regime ?? prev.volState?.state,
+              iv_atm:        analysis.volatility_analysis?.iv_atm ?? prev.volState?.iv_atm,
+              iv_percentile: analysis.volatility_analysis?.iv_percentile ?? prev.volState?.iv_percentile,
+            },
+            
+            // Gamma
+            gammaAnalysis: {
+              ...(prev.gammaAnalysis || {}),
+              regime:  analysis.gamma_analysis?.regime ?? prev.gammaAnalysis?.regime,
+              net_gex: analysis.gamma_analysis?.net_gex ?? prev.gammaAnalysis?.net_gex,
+              flip_level: analysis.gamma_analysis?.flip_level ?? prev.gammaAnalysis?.flip_level,
+            },
+            
             lastUpdate: Date.now(),
             error: null
           }));
         }
         
         if (trade) {
-          set((prev) => ({
-            ...prev,
+          // STEP 3: ADD DEBUG
+          console.log("[STRATEGY UPDATE RECEIVED]", message.trade)
+          set({
             tradeSetup: trade,
             lastUpdate: Date.now(),
             error: null
-          }));
+          });
         }
         
         break;
@@ -545,23 +594,11 @@ export const useWSStore = create<WSStore>((set, get) =>({
   handleAnalytics: (payload) => {
     if (!payload) return
 
-    // PATCH 1: Prevent symbol mismatch from analytics
-    const marketStore = useMarketContextStore.getState()
-    const selectedSymbol = marketStore?.symbol || 'NIFTY'
-    
-    if (payload.symbol && payload.symbol !== selectedSymbol) {
-      return
-    }
-
     // P5: skip set if analytics timestamp hasn't changed (prevents render on identical payload)
     const prev = get().analytics
     if (prev?.timestamp && prev.timestamp === payload.timestamp) return
 
-    if (process.env.NODE_ENV === "development") {
-      console.log("Analytics stored in Zustand")
-    }
-
-    // FIX 7: Update liveMarketData structure for frontend widgets
+    // STEP 2: FIX ZUSTAND STORE MAPPING - analytics update
     const renderableData = payload.analytics 
       ? { ...payload.analytics, symbol: payload.symbol, _timestamp: payload.timestamp } 
       : { ...payload };

@@ -5,6 +5,7 @@ import { CARD, CARD_HOVER_BORDER } from './DashboardTypes';
 import { SectionLabel } from './StatCards';
 import type { LiveMarketData } from '../../hooks/useLiveMarketData';
 import { useWSStore } from '../../core/ws/wsStore';
+import { useShallow } from 'zustand/shallow';
 
 interface SignalMatrixPanelProps {
     data: LiveMarketData | null;
@@ -41,19 +42,73 @@ const SkeletonPulse = ({ className }: { className: string }) => (
 );
 
 export function SignalMatrixPanel() {
-    // Law 7: Granular Store Subscriptions with null-safe pattern
-    const pcr           = useWSStore(s => s.pcr           ?? 0)
-    const netGex        = useWSStore(s => s.netGex        ?? 0)
-    const tradePlan     = useWSStore(s => s.tradePlan)
-    const earlyWarnings = useWSStore(s => s.earlyWarnings ?? [])
-    const bias          = useWSStore(s => s.bias          ?? 'NEUTRAL')
-    const keyLevels     = useWSStore(s => s.keyLevels     ?? {})
-    const lastUpdate    = useWSStore(s => s.lastUpdate)
-    const hasData       = lastUpdate > 0
-    
+    // FIX: Move ALL hooks to TOP - no hooks inside map/condition/inline
+    const {
+        pcr,
+        netGex,
+        tradePlan,
+        earlyWarnings,
+        bias,
+        keyLevels,
+        lastUpdate,
+        spotPrice,
+        gammaAnalysis,
+        calls,
+        puts,
+        volState,
+        technicals,
+        regime,
+        summary,
+        gexFlip,
+        callWall,
+        putWall,
+        biasStrength
+    } = useWSStore(useShallow(s => ({
+        pcr: s.pcr,
+        netGex: s.netGex,
+        tradePlan: s.tradePlan,
+        earlyWarnings: s.earlyWarnings,
+        bias: s.bias,
+        keyLevels: s.keyLevels,
+        lastUpdate: s.lastUpdate,
+        spotPrice: s.spot,
+        gammaAnalysis: s.gammaAnalysis,
+        calls: s.calls,
+        puts: s.puts,
+        volState: s.volState,
+        technicals: s.technicals,
+        regime: s.regime,
+        summary: s.summary ?? s.aiAnalysis?.reasoning?.[0],
+        gexFlip: s.gexFlip ?? s.keyLevels?.gex_flip,
+        callWall: s.callWall ?? s.keyLevels?.call_wall,
+        putWall: s.putWall ?? s.keyLevels?.put_wall,
+        biasStrength: s.biasStrength
+    })))
+
+    const hasData = lastUpdate > 0
+
     // Extract signal-related data
     const maxPain       = keyLevels?.max_pain ?? 0
-    const spotPrice     = useWSStore(s => s.spot) ?? 0
+    const netGexValue = netGex ?? gammaAnalysis?.net_gex ?? 0
+    const gammaDisplay = netGexValue !== 0
+      ? (Math.abs(netGexValue) >= 1e9
+          ? (netGexValue / 1e9).toFixed(1) + 'B'
+          : Math.abs(netGexValue) >= 1e6
+            ? (netGexValue / 1e6).toFixed(0) + 'M'
+            : netGexValue.toFixed(0))
+      : '—'
+    
+    // FIX A: OI — use total call + put OI from option chain
+    const totalCallOI = Object.values(calls).reduce(
+      (sum: number, c: any) => sum + (c?.oi || 0), 0
+    )
+    const totalPutOI = Object.values(puts).reduce(
+      (sum: number, p: any) => sum + (p?.oi || 0), 0
+    )
+    const totalOI = totalCallOI + totalPutOI
+    const oiDisplay = totalOI > 0
+      ? (totalOI / 1e6).toFixed(1) + 'M'
+      : '—'
     
     // OI-to-PE ratio display
     const oiToPeRatio = pcr > 0 ? pcr.toFixed(2) : '—'
@@ -65,12 +120,22 @@ export function SignalMatrixPanel() {
     const isPinned = maxPain > 0
       ? Math.abs(spotPrice - maxPain) / spotPrice < 0.005
       : false
-    const biasStrength = useWSStore(s => s.biasStrength ?? 0)
     const score = biasStrength * 100
     const scoreTier = score > 75 ? 'INSTITUTIONAL' : score > 50 ? 'CONVICTION' : score > 25 ? 'STRUCTURAL' : 'NOISE';
-    const gammaAnalysis = useWSStore(s => s.gammaAnalysis ?? {})
-    const volState = useWSStore(s => s.volState ?? {})
-    const technicals = useWSStore(s => s.technicals ?? {})
+    
+    // FIX C: ANALYSIS — build from real data
+    const analysisText = summary && summary.length > 10
+      ? summary
+      : regime !== 'RANGING' || bias !== 'NEUTRAL'
+        ? `Market is ${regime} with ${bias} bias (${(biasStrength * 100).toFixed(0)}% strength). Gamma profile indicates ${netGexValue < 0 ? 'SHORT_GAMMA' : 'LONG_GAMMA'}.` 
+        : 'Analyzing market structure...'
+    
+    // Prepare anchor data array for rendering - using top-level variables
+    const anchorData = [
+        { label: 'GEX FLIP', value: gexFlip, color: WARN },
+        { label: 'CALL WALL', value: callWall, color: BEAR },
+        { label: 'PUT WALL', value: putWall, color: BULL }
+    ]
 
     if (!hasData) {
         return (
@@ -90,7 +155,7 @@ export function SignalMatrixPanel() {
     }
 
     const signals = [
-        { label: 'GAMMA', val: (gammaAnalysis?.regime || 'NEUTRAL').split(' ')[0], color: (gammaAnalysis?.regime || '').includes('SHORT') ? BEAR : BULL },
+        { label: 'GAMMA', val: gammaDisplay, color: netGexValue < 0 ? BEAR : BULL },
         { label: 'VOL', val: volState?.state || 'NORMAL', color: volState?.state === 'EXTREME' ? BEAR : CYAN },
         { label: 'PCR', val: pcr > 0 ? pcr.toFixed(2) : '—', color: pcr > 1.2 ? BULL : pcr < 0.8 ? BEAR : NEUT },
         { label: 'RSI', val: technicals?.rsi?.toFixed(1) || '—', color: (technicals?.rsi || 0) > 70 ? BEAR : (technicals?.rsi || 0) < 30 ? BULL : CYAN },
@@ -155,15 +220,11 @@ export function SignalMatrixPanel() {
             <div className="mt-auto space-y-2 pt-4 border-t border-white/5">
                 <div className="text-[9px] font-bold font-mono text-slate-600 uppercase tracking-[0.2em] mb-3">Order Flow Anchors</div>
                 <div className="space-y-1.5">
-                    {[
-                        { label: 'GEX FLIP', value: gammaAnalysis?.flip_level, color: WARN },
-                        { label: 'CALL WALL', value: keyLevels?.call_wall, color: BEAR },
-                        { label: 'PUT WALL', value: keyLevels?.put_wall, color: BULL }
-                    ].map((k, i) => (
+                    {anchorData.map((k, i) => (
                         <div key={i} className="flex justify-between items-center px-2 py-1.5 rounded bg-white/5 border border-white/5">
                             <span className="text-[9px] font-mono text-slate-400">{k.label}</span>
-                            <span className="text-[10px] font-black font-mono tabular-nums" style={{ color: k.color }}>
-                                {k.value ? `₹${k.value.toLocaleString()}` : '—'}
+                            <span className="text-[10px] font-black font-mono tabular-nums" style={{ color: k.value > 0 ? k.color : '#374151' }}>
+                                {k.value > 0 ? `₹${k.value.toLocaleString()}` : '—'}
                             </span>
                         </div>
                     ))}
