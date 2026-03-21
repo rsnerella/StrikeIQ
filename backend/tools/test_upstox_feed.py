@@ -91,11 +91,11 @@ async def test_websocket(url):
                             "timestamp": int(asyncio.get_event_loop().time() * 1000)
                         }
                         
-                        print(f"TICK {i+1}: {data}")
+                        print(f"TICK {i+1}: LTP={feed.ltpc.ltp if feed.ltpc else 'None'}")
                     else:
                         # Handle JSON messages
                         data = json.loads(message)
-                        print(f"JSON {i+1}: {data}")
+                        print(f"JSON {i+1}: Type={data.get('type', 'unknown')}")
                         
                 except asyncio.TimeoutError:
                     print("Timeout waiting for message")

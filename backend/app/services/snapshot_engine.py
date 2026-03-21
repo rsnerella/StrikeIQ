@@ -47,6 +47,7 @@ class SnapshotEngine:
                 await db.refresh(snapshot)
                 
                 logger.debug(f"Market snapshot created: {snapshot.symbol} @ {snapshot.spot_price}")
+                print("[SNAPSHOT CREATED]", snapshot)
                 return snapshot
                 
         except Exception as e:

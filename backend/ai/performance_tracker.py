@@ -3,14 +3,16 @@ Performance Tracking + Auto-Learning Layer for StrikeIQ
 Tracks every AI decision and evaluates performance to improve system over time.
 """
 
-from typing import Dict, Any, List, Optional
-from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
-import json
+from typing import Dict, List, Any, Optional
 import logging
+from datetime import datetime, timedelta
+from collections import defaultdict
+import json
 import os
 from pathlib import Path
 import statistics
+
+from .ai_logger import log
 
 logger = logging.getLogger(__name__)
 
@@ -349,28 +351,7 @@ class PerformanceTracker:
         try:
             metrics = self.compute_metrics()
             
-            print("[PERFORMANCE]", {
-                "win_rate": round(metrics.win_rate, 3),
-                "avg_confidence": round(metrics.avg_confidence, 3),
-                "confidence_accuracy": round(metrics.confidence_accuracy, 3),
-                "total_trades": metrics.total_trades,
-                "winning_trades": metrics.winning_trades
-            })
-            
-            # Print bucket performance
-            if metrics.regime_performance:
-                print("[REGIME PERFORMANCE]", metrics.regime_performance)
-            
-            if metrics.entry_performance:
-                print("[ENTRY PERFORMANCE]", metrics.entry_performance)
-            
-            if metrics.trap_performance:
-                print("[TRAP PERFORMANCE]", metrics.trap_performance)
-            
-            # Print auto-tuning suggestions
-            suggestions = self.get_auto_tuning_suggestions()
-            if suggestions:
-                print("[AUTO-TUNING SUGGESTIONS]", suggestions)
+            log(f"Performance: Win Rate: {metrics.win_rate:.1%} | Avg Confidence: {metrics.avg_confidence:.1f} | Total: {metrics.total_trades}")
             
         except Exception as e:
             logger.error(f"Failed to print performance debug: {e}")

@@ -3,7 +3,10 @@ Simple Scoring Engine for StrikeIQ
 Probabilistic trade scoring to replace hard NO_TRADE filtering
 """
 
+from typing import Dict, Any, Optional
 import logging
+
+from .ai_logger import log, log_market_data
 
 logger = logging.getLogger(__name__)
 
@@ -57,16 +60,8 @@ class SimpleScoreEngine:
             
             final_score = max(-1, min(1, score))
             
-            # Debug logging
-            print("[SCORE DEBUG]", {
-                'oi_momentum': oi_momentum,
-                'price_momentum': price_momentum,
-                'pcr': pcr,
-                'volume_ratio': vol,
-                'net_gex': net_gex,
-                'raw_score': score,
-                'final_score': final_score
-            })
+            # Clean logging of key metrics
+            log_market_data(price, pcr)
             
             return final_score
             

@@ -13,9 +13,9 @@ def generate_option_trade(snapshot, chain_data):
         if not snapshot or not chain_data:
             return None
 
-        symbol = snapshot.get("symbol", "NIFTY")
-        spot = snapshot.get("spot_price", 0)
-        pcr = snapshot.get("pcr", 1.0)
+        symbol = snapshot.symbol if hasattr(snapshot, 'symbol') else "NIFTY"
+        spot = snapshot.spot if hasattr(snapshot, 'spot') else 0
+        pcr = snapshot.pcr if hasattr(snapshot, 'pcr') else 1.0
         
         if spot <= 0:
             return None

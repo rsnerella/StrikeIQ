@@ -123,16 +123,8 @@ class FeatureEngine:
                 **microstructure_features
             )
             
-            # DEBUG: Log computed features
-            print("[FEATURE DEBUG]", {
-                'timestamp': features.timestamp,
-                'spot': features.spot,
-                'oi_total': sum(features.call_oi_distribution.values()) + sum(features.put_oi_distribution.values()),
-                'oi_skew': features.pcr_trend,
-                'gex': features.gex_profile.get('net_gamma', 0),
-                'iv': features.implied_volatility_surface.get('avg_iv', 0),
-                'delta': features.dealer_hedging_pressure
-            })
+            # DEBUG: Log key features only
+            print(f"[FEATURE DEBUG] Spot: {features.spot} | PCR: {features.pcr:.2f} | RSI: {features.rsi:.1f}")
             
             return features
             
@@ -386,16 +378,8 @@ class OIAnalyzer:
             oi_concentration = self.calculate_oi_concentration(call_oi_distribution, put_oi_distribution)
             oi_buildup_rate = self.calculate_oi_buildup_rate(option_chain)
             
-            # DEBUG: Log OI metrics
-            print("[OI DEBUG]", {
-                'total_call_oi': total_call_oi,
-                'total_put_oi': total_put_oi,
-                'pcr': pcr,
-                'pcr_trend': pcr_trend,
-                'oi_concentration': oi_concentration,
-                'call_strikes': len(call_oi_distribution),
-                'put_strikes': len(put_oi_distribution)
-            })
+            # DEBUG: Log OI metrics only
+            print(f"[OI DEBUG] Call OI: {total_call_oi} | Put OI: {total_put_oi} | PCR: {pcr:.2f}")
             
             return {
                 'pcr_trend': pcr_trend,

@@ -37,6 +37,12 @@ interface WSStore {
   chartAnalysis: any
   aiPrediction: any
   candles: any[]
+  
+  // 🔥 ADD PERFORMANCE DATA
+  performance: any
+  analytics_full: any
+  strategy_weights: any
+  
   _lastChainUpdate: number
   _lastHeatmapUpdate: number
   _THROTTLE_MS: number
@@ -105,7 +111,7 @@ export const useWSStore = create<WSStore>((set, get) =>({
   optionChainSnapshot: null,
   liveData: null,
   wsLiveData: null,
-  analytics: null,
+  analytics: {},
   liveMarketData: null,
   aiIntelligence: null,
   dataQuality: null,
@@ -115,6 +121,12 @@ export const useWSStore = create<WSStore>((set, get) =>({
   chartAnalysis: null,
   aiPrediction: null,
   candles: [],
+  
+  // 🔥 ADD PERFORMANCE DATA DEFAULTS
+  performance: null,
+  analytics_full: null,
+  strategy_weights: null,
+  
   lastUpdate: 0,
   _lastChainUpdate: 0,
   _lastHeatmapUpdate: 0,
@@ -158,17 +170,24 @@ export const useWSStore = create<WSStore>((set, get) =>({
 
     // STEP 4: VERIFY STORE ENTRY
     console.log("[STORE HANDLE ENTRY]", message.type)
+    console.log("[ZUSTAND SET]", message.analytics)
 
     // STEP 5: RAW WS LOGGING
     if (message.type !== 'pong' && message.type !== 'ping') {
       console.log('RAW WS MESSAGE:', message.type, Object.keys(message));
+    }
+    
+    // 🔥 TEMP DEBUG LOG (REMOVE AFTER 2-3 MINS)
+    if (message.type === 'analytics_update' || message.type === 'market_update') {
+      console.log('[WS DATA]', message);
     }
 
     const marketContextStore = useMarketContextStore.getState();
     const selectedSymbol = marketContextStore?.symbol || 'NIFTY';
 
     switch (message.type) {
-      case 'market_update': {
+      case 'market_update':
+      case 'analytics_update': {
         const now = Date.now()
         if (now - get()._lastChainUpdate < get()._THROTTLE_MS) {
           return
@@ -249,6 +268,30 @@ export const useWSStore = create<WSStore>((set, get) =>({
             lastUpdate: Date.now(),
             source:     spot > 0 ? 'live' : 'rest_poller',
           },
+          
+          // 🔥 ADD PERFORMANCE DATA
+          performance: p.performance ?? prev.performance ?? {
+            total_trades: 0,
+            wins: 0,
+            losses: 0,
+            win_rate: 0,
+            total_pnl: 0
+          },
+          analytics_full: p.analytics_full ?? prev.analytics_full ?? {
+            equity_curve: [],
+            max_drawdown: 0,
+            strategy_stats: {},
+            current_equity: 0,
+            peak_equity: 0
+          },
+          strategy_weights: p.strategy_weights ?? prev.strategy_weights ?? {
+            "TREND": 1.0,
+            "REVERSAL": 1.0,
+            "WEAK_TREND": 0.5,
+            "RANGE": 1.0,
+            "NONE": 0.0
+          },
+          
           _lastChainUpdate: now
         }));
         break;
@@ -258,27 +301,66 @@ export const useWSStore = create<WSStore>((set, get) =>({
         const a = message.analytics || {}
         const spot = a.spot || a.spotPrice || message.spot || 0
 
-        set((prev) => ({
-          spotPrice:    spot > 0 ? spot : prev.spotPrice,
-          liveSpot:     spot > 0 ? spot : prev.liveSpot,
-          currentSpot:  spot > 0 ? spot : prev.currentSpot,
-          lastUpdate:   message.timestamp || Date.now(),
-          aiReady:      true,
+        console.log("[WS FINAL ANALYTICS INCOMING]", a)
 
-          // Map from analytics object
-          regime:        a.regime         || a.market_regime   || prev.regime        || 'RANGING',
-          bias:          a.bias           || a.market_bias     || prev.bias          || 'NEUTRAL',
-          biasStrength:  a.bias_strength  || a.confidence      || prev.biasStrength  || 0,
-          keyLevels:     a.key_levels     || a.levels          || prev.keyLevels     || {},
-          gammaAnalysis: a.gamma_analysis || a.gamma           || prev.gammaAnalysis || {},
-          volState:      a.volatility_state || a.volatility    || prev.volState      || {},
-          technicals:    a.technical_state  || a.technicals    || prev.technicals    || {},
-          summary:       a.summary        || prev.summary      || '',
-          tradePlan:     a.trade_plan     || a.signal          || prev.tradePlan     || null,
-          earlyWarnings: Array.isArray(a.early_warnings) ? a.early_warnings :
-                         Array.isArray(a.warnings)       ? a.warnings       :
-                         prev.earlyWarnings || [],
-        }));
+        set((prev) => {
+          console.log("[WS FINAL ANALYTICS AFTER MERGE]", {
+            incoming: a,
+            previous: prev.analytics,
+            merged: {
+              ...prev.analytics,
+              ...a
+            }
+          })
+
+          return {
+            spotPrice:    spot > 0 ? spot : prev.spotPrice,
+            liveSpot:     spot > 0 ? spot : prev.liveSpot,
+            currentSpot:  spot > 0 ? spot : prev.currentSpot,
+            lastUpdate:   message.timestamp || Date.now(),
+            aiReady:      true,
+
+            analytics: {
+              ...prev.analytics,
+              ...a,
+
+              strategy:
+                a.strategy !== undefined
+                  ? a.strategy
+                  : prev.analytics?.strategy ?? 'NO_TRADE',
+
+              confidence:
+                a.confidence !== undefined
+                  ? a.confidence
+                  : prev.analytics?.confidence ?? null,
+
+              execution:
+                a.execution !== undefined
+                  ? a.execution
+                  : prev.analytics?.execution ?? {},
+
+              metadata: a.metadata
+                ? {
+                    ...prev.analytics?.metadata,
+                    ...a.metadata
+                  }
+                : prev.analytics?.metadata ?? {}
+            },
+
+            // Map from analytics object
+            regime:        a.regime         || a.market_regime   || prev.regime        || 'RANGING',
+            bias:          a.bias           || a.market_bias     || prev.bias          || 'NEUTRAL',
+            biasStrength:  a.bias_strength  || a.confidence      || prev.biasStrength  || 0,
+            keyLevels:     a.key_levels     || a.levels          || prev.keyLevels     || {},
+            volState:      a.volatility_state || a.volatility    || prev.volState      || {},
+            technicals:    a.technical_state  || a.technicals    || prev.technicals    || {},
+            summary:       a.summary        || prev.summary      || '',
+            tradePlan:     a.trade_plan     || a.signal          || prev.tradePlan     || null,
+            earlyWarnings: Array.isArray(a.early_warnings) ? a.early_warnings :
+                           Array.isArray(a.warnings)       ? a.warnings       :
+                           prev.earlyWarnings || [],
+          }
+        });
         break;
       }
 

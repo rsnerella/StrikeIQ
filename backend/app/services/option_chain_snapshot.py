@@ -62,7 +62,7 @@ class OptionChainSnapshot:
                     days_until_thursday = 7
                 expiry_date = (today + timedelta(days=days_until_thursday)).strftime("%Y-%m-%d")
                 
-                logger.info(f"OPTION SNAPSHOT API CALL → {symbol} instrument_key={instrument_key} expiry={expiry_date}")
+                logger.info(f"Fetching option chain for {symbol} expiry={expiry_date}")
                 
                 response = await client.get(
                     "https://api.upstox.com/v2/option/chain",
@@ -79,14 +79,9 @@ class OptionChainSnapshot:
                 
                 data = response.json()
                 
-                logger.info(f"OPTION SNAPSHOT RESPONSE RECEIVED → {symbol}")
-                logger.info(f"API RESPONSE STRUCTURE → {list(data.keys()) if data else 'None'}")
                 if data and 'data' in data:
-                    logger.info(f"API RESPONSE DATA LENGTH → {len(data['data'])} items")
-                    if data['data']:
-                        sample_item = data['data'][0]
-                        logger.info(f"API RESPONSE SAMPLE ITEM → {list(sample_item.keys())}")
-                    else:
+                    logger.info(f"Option chain received: {len(data['data'])} strikes")
+                    if not data['data']:
                         logger.warning("API RESPONSE DATA ARRAY IS EMPTY")
                 else:
                     logger.warning(f"API RESPONSE MISSING 'data' key → {data}")

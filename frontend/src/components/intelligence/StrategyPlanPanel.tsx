@@ -17,7 +17,15 @@ const StrategyPlanPanel: React.FC = () => {
     const analytics = useWSStore(s => s.analytics);  // FIX: Read from analytics field
     const biasStrength = useWSStore(s => s.biasStrength ?? 0);
     
-    const confidence = biasStrength;
+    const confidence = analytics?.confidence ?? biasStrength;
+    
+    // DEBUG LOG
+    console.log("[UI DATA]", analytics)
+
+    const gamma = analytics?.gamma ?? null
+    const oi = analytics?.oi ?? null
+    const liquidity = analytics?.liquidity ?? null
+    const volatility = analytics?.volatility ?? null
 
     const hasData = lastUpdate > 0;
     if (!hasData) {
@@ -94,10 +102,10 @@ const StrategyPlanPanel: React.FC = () => {
                 {/* Component Analysis */}
                 <div className="grid grid-cols-2 gap-4 mb-4">
                     {[
-                        { label: 'Gamma', val: `${(analytics.components?.gamma ?? 0).toFixed(2)}`, color: 'text-violet-400' },
-                        { label: 'OI', val: `${(analytics.components?.oi ?? 0).toFixed(2)}`, color: 'text-blue-400' },
-                        { label: 'Liquidity', val: `${(analytics.components?.liquidity ?? 0).toFixed(2)}`, color: 'text-emerald-400' },
-                        { label: 'Volatility', val: `${(analytics.components?.volatility ?? 0).toFixed(2)}`, color: 'text-orange-400' }
+                        { label: 'Gamma', val: gamma !== null ? gamma.toFixed(2) : '—', color: 'text-violet-400' },
+                        { label: 'OI', val: oi !== null ? oi.toFixed(2) : '—', color: 'text-blue-400' },
+                        { label: 'Liquidity', val: liquidity !== null ? liquidity.toFixed(2) : '—', color: 'text-emerald-400' },
+                        { label: 'Volatility', val: volatility !== null ? volatility.toFixed(2) : '—', color: 'text-orange-400' }
                     ].map((item, i) => (
                         <div key={i} className="p-3.5 rounded-xl bg-white/[0.02] border border-white/5 flex flex-col gap-1">
                             <span className="text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest">{item.label}</span>
@@ -127,12 +135,12 @@ const StrategyPlanPanel: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Execution Probability */}
+                {/* Trade Score Probability */}
                 <div className="mt-auto pt-4 border-t border-white/5">
                     <div className="flex items-center justify-between">
-                        <span className="text-[8px] font-bold font-mono text-slate-500 uppercase">Execution Probability</span>
+                        <span className="text-[8px] font-bold font-mono text-slate-500 uppercase">Trade Quality Score</span>
                         <span className={`text-[14px] font-bold font-mono tabular-nums ${isLowConviction ? 'text-slate-400' : 'text-green-400'}`}>
-                            {((analytics.execution_probability ?? 0) * 100).toFixed(1)}%
+                            {((analytics.metadata?.trade_score ?? 0) * 100).toFixed(1)}%
                         </span>
                     </div>
                 </div>

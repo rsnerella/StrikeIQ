@@ -60,7 +60,7 @@ class AnalyticsEngine:
                         break
             
             if not gex_flip:
-                gex_flip = snapshot.get("spot", 0)
+                gex_flip = snapshot.spot if hasattr(snapshot, 'spot') else 0
 
             # Determine Market Bias
             bias = "NEUTRAL"

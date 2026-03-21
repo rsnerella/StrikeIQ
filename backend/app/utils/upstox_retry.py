@@ -26,14 +26,24 @@ def retry_on_upstox_401(func: F) -> F:
             if e.status_code != 401:
                 raise
 
-            logger.warning(f"401 in {func.__name__} → refreshing token once")
-
+            print("[AUTH] Token expired. Refreshing...")
+            
             # refresh once
             auth_service = get_upstox_auth_service()
             await auth_service.refresh_access_token()
-
+            
+            # Update headers with new token
+            if hasattr(args[0], 'headers') and args[0].headers:
+                args[0].headers["Authorization"] = f"Bearer {auth_service.access_token}"
+            
             logger.info(f"Retrying {func.__name__} after refresh")
 
-            return await func(*args, **kwargs)
+            try:
+                return await func(*args, **kwargs)
+            except HTTPException as retry_e:
+                if retry_e.status_code == 401:
+                    print("[AUTH FAIL] Token refresh failed")
+                    return None
+                raise
 
     return cast(F, wrapper)

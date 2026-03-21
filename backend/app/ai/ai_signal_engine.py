@@ -9,6 +9,8 @@ class AISignalEngine:
         Generate AI signal based on analytics data
         """
         try:
+            print("[STRATEGY INPUT]", analytics)
+            
             pcr = analytics.get("pcr", 1)
             
             # AI Signal logic based on PCR
@@ -19,6 +21,7 @@ class AISignalEngine:
             else:
                 signal = "NEUTRAL"
 
+            print("[STRATEGY OUTPUT]", signal)
             logger.debug(f"AI signal generated: {signal} (PCR: {pcr})")
             return signal
 

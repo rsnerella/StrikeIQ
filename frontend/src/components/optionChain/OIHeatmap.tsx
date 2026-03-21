@@ -246,13 +246,13 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
         <div className="sticky top-0 z-50 bg-[#090e1a]/95 backdrop-blur-xl border-b border-white/10">
           <div className="grid grid-cols-7 py-3">
             <div className="col-span-3 text-center border-r border-white/5">
-              <span className="text-[10px] font-bold font-mono tracking-[0.3em] text-red-500/80 uppercase">Call Dynamics</span>
+              <span className="text-[10px] font-bold font-mono tracking-[0.3em] text-[#FF3131] uppercase">Call Dynamics</span>
             </div>
             <div className="col-span-1 text-center">
               <span className="text-[10px] font-bold font-mono tracking-[0.3em] text-cyan-400 uppercase">ATM</span>
             </div>
             <div className="col-span-3 text-center border-l border-white/5">
-              <span className="text-[10px] font-bold font-mono tracking-[0.3em] text-green-500/80 uppercase">Put Dynamics</span>
+              <span className="text-[10px] font-bold font-mono tracking-[0.3em] text-[#00FF9D] uppercase">Put Dynamics</span>
             </div>
           </div>
 
@@ -307,20 +307,20 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
                     backgroundColor: proximityEffect > 0 ? `rgba(0, 229, 255, ${proximityEffect * 0.04})` : undefined
                   }}
                 >
-                  {/* Intensity Gradient Bars (Reference Image Style) */}
+                  {/* Intensity Gradient Bars (Premium Neon Style) */}
                   <div className="absolute right-[57.14%] top-[2px] bottom-[2px] pointer-events-none transition-all duration-700" style={{ width: `${callIntensity * 40}%` }}>
-                    <div className="h-full bg-gradient-to-l from-red-500/[0.15] to-transparent border-r border-red-500/30" />
+                    <div className="h-full bg-gradient-to-l from-[#FF3131]/25 to-transparent border-r border-[#FF3131]/50 shadow-[-4px_0_12px_rgba(255,49,49,0.2)]" />
                   </div>
                   
                   <div className="absolute left-[57.14%] top-[2px] bottom-[2px] pointer-events-none transition-all duration-700" style={{ width: `${putIntensity * 40}%` }}>
-                    <div className="h-full bg-gradient-to-r from-green-500/[0.15] to-transparent border-l border-green-500/30" />
+                    <div className="h-full bg-gradient-to-r from-[#00FF9D]/25 to-transparent border-l border-[#00FF9D]/50 shadow-[4px_0_12px_rgba(0,255,157,0.2)]" />
                   </div>
 
                   {/* Row Values */}
-                  <div className="text-right pr-6 text-[12px] font-bold font-mono tabular-nums text-red-50/70 relative z-10">
+                  <div className="text-right pr-6 text-[12px] font-bold font-mono tabular-nums text-rose-100/90 relative z-10 transition-colors group-hover/row:text-white">
                     {row.oi > 0 ? row.oi.toLocaleString() : '—'}
                   </div>
-                  <div className={`text-center text-[11px] font-mono tabular-nums transition-colors ${row.change > 0 ? 'text-green-400' : 'text-slate-600'}`}>
+                  <div className={`text-center text-[11px] font-mono tabular-nums transition-colors ${row.change > 0 ? 'text-[#00FF9D]' : (row.change < 0 ? 'text-[#FF3131]/60' : 'text-slate-600')}`}>
                     {row.change !== 0 ? (row.change > 0 ? `+${row.change}` : row.change) : '—'}
                   </div>
                   <div className={`text-center text-[11px] font-bold font-mono text-slate-400 tabular-nums border-r border-white/5 transition-colors ${proximityEffect > 0.6 ? 'text-white' : ''}`}>
@@ -341,11 +341,11 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
                   <div className={`text-center text-[11px] font-bold font-mono text-slate-400 tabular-nums border-l border-white/5 transition-colors ${proximityEffect > 0.6 ? 'text-white' : ''}`}>
                     {row.put_ltp > 0 ? row.put_ltp.toFixed(1) : '—'}
                   </div>
-                  <div className={`text-center text-[11px] font-mono tabular-nums transition-colors ${row.put_change > 0 ? 'text-green-400' : 'text-slate-600'}`}>
+                  <div className={`text-center text-[11px] font-mono tabular-nums transition-colors ${row.put_change > 0 ? 'text-[#00FF9D]' : (row.put_change < 0 ? 'text-[#FF3131]/60' : 'text-slate-600')}`}>
                     {row.put_change !== 0 ? (row.put_change > 0 ? `+${row.put_change}` : row.put_change) : '—'}
                   </div>
                   
-                  <div className="text-left pl-6 text-[12px] font-bold font-mono tabular-nums text-green-50/70 relative z-10">
+                  <div className="text-left pl-6 text-[12px] font-bold font-mono tabular-nums text-emerald-100/90 relative z-10 transition-colors group-hover/row:text-white">
                     {row.put_oi > 0 ? row.put_oi.toLocaleString() : '—'}
                   </div>
                 </div>
@@ -359,11 +359,11 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
       <div className="mt-6 flex items-center justify-between px-2">
         <div className="flex gap-8">
           <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded bg-red-500/20 border border-red-500/40" />
+            <div className="w-2.5 h-2.5 rounded-sm bg-[#FF3131]/20 border border-[#FF3131]/40 shadow-[0_0_8px_rgba(255,49,49,0.1)]" />
             <span className="text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest">Writer Trap (CE)</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded bg-green-500/20 border border-green-500/40" />
+            <div className="w-2.5 h-2.5 rounded-sm bg-[#00FF9D]/20 border border-[#00FF9D]/40 shadow-[0_0_8px_rgba(0,255,157,0.1)]" />
             <span className="text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest">Writer Support (PE)</span>
           </div>
         </div>

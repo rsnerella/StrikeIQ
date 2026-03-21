@@ -37,7 +37,7 @@ class EarlyWarningEngine:
         warnings = []
         
         # 1. Gamma Flip Risk
-        spot = snapshot.get("spot", 0)
+        spot = snapshot.spot if hasattr(snapshot, 'spot') else 0
         gex_flip = analysis.key_levels.get("gex_flip", 0)
         dist_to_flip = abs(spot - gex_flip) / spot if spot > 0 else 1.0
         

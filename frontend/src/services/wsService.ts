@@ -226,6 +226,8 @@ export function connectMarketWS() {
         
         // STEP 1: VERIFY WS PAYLOAD STRUCTURE
         console.log("[WS RAW ANALYTICS]", data.analytics)
+        console.log("[WS RECEIVED]", data.analytics)
+        console.log("[WS FINAL ANALYTICS]", data.analytics)
         
         const wsStore = useWSStore.getState()
         if (wsStore.handleAnalytics) {

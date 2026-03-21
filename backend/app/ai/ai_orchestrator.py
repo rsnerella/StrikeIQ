@@ -114,23 +114,23 @@ class AIOrchestrator:
             gamma_metrics = {
                 "net_gamma": fv.net_gamma,
                 "gamma_flip_level": analysis.key_levels.get("gex_flip", 0),
-                "spot_price": snapshot.get("spot", 0)
+                "spot_price": snapshot.spot
             }
             inst_gamma = self.dealer_gamma.analyze(gamma_metrics)
             
             # 4.2 Squeeze & Liquidity Scanning
             inst_metrics = {
-                "spot": snapshot.get("spot", 0),
+                "spot": snapshot.spot,
                 "net_gamma": fv.net_gamma,
                 "gamma_flip_level": analysis.key_levels.get("gex_flip", 0),
-                "distance_from_flip": abs(snapshot.get("spot", 0) - analysis.key_levels.get("gex_flip", 0)),
+                "distance_from_flip": abs(snapshot.spot - analysis.key_levels.get("gex_flip", 0)),
                 "flow_direction": "call" if fv.pcr_ratio < 0.8 else "put" if fv.pcr_ratio > 1.2 else "neutral",
                 "flow_imbalance": abs(1.0 - fv.pcr_ratio),
                 "oi_velocity": fv.oi_velocity if hasattr(fv, 'oi_velocity') else 0,
                 "volatility_regime": analysis.volatility_state.get("state", "normal"),
                 "support_level": analysis.key_levels.get("put_wall", 0),
                 "resistance_level": analysis.key_levels.get("call_wall", 0),
-                "expected_move": analysis.volatility_state.get("iv_atm", 0) * snapshot.get("spot", 0) * 0.02 # Proxy
+                "expected_move": analysis.volatility_state.get("iv_atm", 0) * snapshot.spot * 0.02 # Proxy
             }
             squeeze_data = self.gamma_squeeze.analyze(inst_metrics)
             liquidity_data = self.liquidity_engine.analyze(inst_metrics)
@@ -203,7 +203,7 @@ class AIOrchestrator:
                     'net_gamma': fv.net_gamma if hasattr(fv, 'net_gamma') else 0,
                     'total_call_oi': fv.total_call_oi if hasattr(fv, 'total_call_oi') else 0,
                     'total_put_oi': fv.total_put_oi if hasattr(fv, 'total_put_oi') else 0,
-                    'max_pain': analysis.key_levels.get("max_pain", snapshot.get("spot", 0)),
+                    'max_pain': analysis.key_levels.get("max_pain", snapshot.spot),
                     'iv_atm': analysis.volatility_state.get("iv_atm", 0.20)
                 }
                 
@@ -232,6 +232,11 @@ class AIOrchestrator:
                 "status": "AI_READY",
                 "ai_ready": True,
                 "cycle_time_ms": round(elapsed_ms, 2),
+                
+                # 🔥 ADD PERFORMANCE DATA
+                "performance": self.execution_engine.get_performance(),
+                "analytics_full": self.execution_engine.get_full_analytics(),
+                "strategy_weights": self.execution_engine.strategy_weights,
                 
                 "market_analysis": {
                     "regime": analysis.regime,

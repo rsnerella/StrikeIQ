@@ -253,7 +253,8 @@ class MarketDashboardService:
                 raise APIResponseError(f"HTTP {response.status_code}: {response.text}")
             
             data = response.json()
-            logger.info(f"Upstox contract response for {instrument_key}: {data}")
+            contracts = data.get("data", [])
+            logger.info(f"Found {len(contracts)} contracts for {instrument_key}")
             
             # Validate response
             if not isinstance(data, dict) or "data" not in data:

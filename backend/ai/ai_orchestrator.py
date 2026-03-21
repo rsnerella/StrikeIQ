@@ -19,6 +19,12 @@ from .risk_engine import RiskEngine
 from .explanation_engine import ExplanationEngine
 from .learning_engine import LearningEngine
 
+# Import trade execution engine
+from app.services.trade_execution_engine import TradeExecutionEngine
+
+# Import new strategy-based trading engine
+from ai.strategy_engine import create_trade_signal, should_trade
+
 logger = logging.getLogger(__name__)
 
 class TradeSuggestionWrapper:
@@ -64,6 +70,9 @@ class AIOrchestrator:
         self.explanation_engine = ExplanationEngine()
         self.learning_engine = LearningEngine()
         
+        # Initialize trade execution engine
+        self.execution_engine = TradeExecutionEngine()
+        
         # Performance tracking
         self.pipeline_execution_times = []
         self.total_executions = 0
@@ -98,27 +107,50 @@ class AIOrchestrator:
             }
             strategy_plan = planner.plan_strategy(planning_input)
 
-            # Step 4: Strategy Engine - Choose strategy (Async)
-            # Use original strategy engine but weighted with results from history
-            strategy_choice = await self.strategy_engine.select_strategy(formula_signals)
+            # 🔥 STEP 1: STRATEGY-BASED SIGNAL GENERATION
+            signal, strategy = generate_trade(live_metrics, {
+                "pcr": live_metrics.pcr_ratio,
+                "rsi": getattr(live_metrics, 'rsi', 50),
+                "gamma": getattr(live_metrics, 'net_gamma', 'NEUTRAL'),
+                "confidence": getattr(live_metrics, 'confidence', 0.0)
+            }, self.execution_engine)
             
-            # Step 5: Strike Selection & Levels
-            # Merge planner strike outcome with selection engine
-            target_strike = strategy_plan.get('strike') or 0
+            # Create strategy-based trade signal
+            trade_signal = create_trade_signal(live_metrics, analytics_data, live_metrics.spot)
             
-            # Step 6: Entry Exit Engine - Calculate entry, target, stoploss
-            # Use the strike suggested by planner
-            direction = strategy_plan.get('direction', 'CALL')
-            option_type_map = {"CALL": "CE", "PUT": "PE", "NEUTRAL": "CE"}
-            bias_map = {"CALL": "bullish", "PUT": "bearish", "NEUTRAL": "neutral"}
+            # Check if we should trade
+            if not should_trade(trade_signal):
+                return {
+                    "symbol": live_metrics.symbol,
+                    "signal": "NONE",
+                    "strategy": None,
+                    "confidence": 0.0,
+                    "reason": "High quality filter not met"
+                }
             
-            entry_exit_levels = self.entry_exit_engine.calculate_levels(
-                target_strike, 
-                option_type_map.get(direction, "CE"),
-                live_metrics,
-                bias_map.get(direction, "neutral"),
-                regime_detection.regime
-            )
+            # Step 5: Use strategy signal for execution
+            target_strike = strategy_plan.get('strike') or int(live_metrics.spot)
+            
+            # Step 6: Use signal levels instead of entry_exit_engine
+            if trade_signal.signal != "NONE":
+                levels = {
+                    "entry_price": trade_signal.entry,
+                    "target_price": trade_signal.target,
+                    "stoploss_price": trade_signal.stop_loss
+                }
+            else:
+                # Fallback to entry_exit_engine
+                direction = strategy_plan.get('direction', 'CALL')
+                option_type_map = {"CALL": "CE", "PUT": "PE", "NEUTRAL": "CE"}
+                bias_map = {"CALL": "bullish", "PUT": "bearish", "NEUTRAL": "neutral"}
+                
+                levels = self.entry_exit_engine.calculate_levels(
+                    target_strike, 
+                    option_type_map.get(direction, "CE"),
+                    live_metrics,
+                    bias_map.get(direction, "neutral"),
+                    regime_detection.regime
+                )
             
             # Step 7: Risk and Position Sizing Engine (Step 3 & 4)
             # Use extended RiskEngine to calculate lot size and expected PnL
@@ -128,36 +160,44 @@ class AIOrchestrator:
             # Prepare trade suggestion for risk engine
             trade_calc = {
                 "strike": target_strike,
-                "entry": entry_exit_levels.entry_price,
-                "target": entry_exit_levels.target_price,
-                "stoploss": entry_exit_levels.stoploss_price,
-                "confidence": strategy_choice.confidence
+                "entry": levels["entry_price"],
+                "target": levels["target_price"],
+                "stoploss": levels["stoploss_price"],
+                "confidence": trade_signal.confidence
             }
             
             risk_metrics = risk_engine.calculate_trade_risk(trade_calc)
 
-            # Create final output
+            # Create final output with strategy-based format
             output = {
                 "symbol": live_metrics.symbol,
-                "strategy": strategy_plan.get('strategy', strategy_choice.strategy),
-                "direction": direction,
-                "trade_type": strategy_plan.get('trade_type'),
+                "signal": trade_signal.signal,
+                "strategy": trade_signal.strategy,
+                "confidence": trade_signal.confidence,
+                "entry": levels["entry_price"],
+                "target": levels["target_price"],
+                "stop_loss": levels["stoploss_price"],
                 "strike": target_strike,
-                "entry": entry_exit_levels.entry_price,
-                "target": entry_exit_levels.target_price,
-                "stoploss": entry_exit_levels.stoploss_price,
-                "confidence": min(strategy_choice.confidence, entry_exit_levels.confidence),
-                "lot_size": risk_metrics.get("lot_size", 1),
-                "expected_profit": risk_metrics.get("expected_profit", 0),
-                "expected_loss": risk_metrics.get("expected_loss", 0),
-                "risk_reward": risk_metrics.get("risk_reward_ratio", 0),
+                "risk_reward": trade_signal.metadata.get("risk_reward", 1.0) if trade_signal.metadata else 1.0,
                 "regime": regime_detection.regime,
-                "explanation": self._generate_explanation(
-                    formula_signals, regime_detection, strategy_choice,
-                    None, entry_exit_levels, live_metrics
-                ),
-                "risk_status": "APPROVED"
+                "metadata": trade_signal.metadata,
+                "risk_status": "APPROVED" if risk_metrics.get("approved", False) else "REJECTED"
             }
+            
+            # 🔥 STEP 2: TRADE ENTRY
+            trade = self.execution_engine.try_enter(output)
+            
+            if trade:
+                logger.info(f"[TRADE ENTERED] {trade.signal} @ {trade.entry}")
+                output["trade_status"] = "ENTERED"
+                output["trade_id"] = id(trade)
+            else:
+                output["trade_status"] = "NO_ENTRY"
+            
+            # 🔥 STEP 6: EXPOSE TO UI
+            output["performance"] = self.execution_engine.get_performance()
+            output["analytics"] = self.execution_engine.get_full_analytics()
+            output["strategy_weights"] = self.execution_engine.strategy_weights
             
             # Store in History for Learning (Step 5)
             # This is also called in trade_decision_engine.py but here for direct history update
@@ -176,6 +216,40 @@ class AIOrchestrator:
         except Exception as e:
             logger.error(f"AI Pipeline error for {live_metrics.symbol}: {e}")
             return self._create_hold_result(live_metrics, f"Pipeline error: {str(e)}", "UNKNOWN")
+    
+    def manage_active_trades(self, current_price: float, symbol: str) -> Optional[str]:
+        """
+        Manage active trades with current price updates
+        
+        Args:
+            current_price: Current market price
+            symbol: Symbol being traded
+            
+        Returns:
+            Trade status if trade closed, None otherwise
+        """
+        try:
+            # 🔥 STEP 3: TRADE MANAGEMENT
+            status = self.execution_engine.manage_trade(current_price)
+            
+            if status and status != "HOLD":
+                logger.info(f"[TRADE EXIT] {status}")
+                return status
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"[TRADE MANAGEMENT ERROR] {e}")
+            return None
+    
+    def get_trade_status(self) -> Dict[str, Any]:
+        """
+        Get current trade status and statistics
+        
+        Returns:
+            Dictionary with trade status information
+        """
+        return self.execution_engine.get_trade_status()
     
     def _create_hold_result(self, live_metrics, reason: str, regime: str) -> Dict[str, Any]:
         """Create consistent HOLD result"""

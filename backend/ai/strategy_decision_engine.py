@@ -8,7 +8,12 @@ from dataclasses import dataclass
 import logging
 import math
 
+from app.core.risk_mode import RISK_MODE
+from .ai_logger import log, log_decision, log_market_data, log_fetching
+
 logger = logging.getLogger(__name__)
+
+RISK_MODE = "SAFE"   # SAFE | AGGRESSIVE
 
 @dataclass
 class StrategyDecision:
@@ -20,6 +25,16 @@ class StrategyDecision:
     reasoning: list[str]
     metadata: Optional[Dict[str, Any]] = None
 
+    @property
+    def action(self) -> str:
+        """Alias for strategy for backward compatibility"""
+        return self.strategy
+    
+    @property
+    def confidence(self) -> float:
+        """Alias for bias_confidence for backward compatibility"""
+        return self.bias_confidence
+
 class StrategyDecisionEngine:
     """Smart money strategy decision engine"""
     
@@ -28,10 +43,8 @@ class StrategyDecisionEngine:
     
     def decide_strategy(self, bias_result, features, snapshot=None) -> StrategyDecision:
         """Smart money strategy decision based on institutional positioning"""
-        print("[STRATEGY ENGINE CALLED]")
-        print("[DEBUG] decide_strategy called with features:", list(features.keys()))
         try:
-            # STEP 1: ADD REQUIRED INPUTS
+            # STEP 1: EXTRACT REQUIRED INPUTS
             price = features.get("spot")
             recent_high = features.get("recent_high")
             recent_low = features.get("recent_low")
@@ -45,13 +58,17 @@ class StrategyDecisionEngine:
                 recent_low is not None,
                 volume is not None
             ])
-            
-            # STEP 2: EXTRACT REQUIRED INPUTS
+
             spot = features.get("spot", 0)
             oi_calls = sum(features.get("call_oi_distribution", {}).values())
             oi_puts = sum(features.get("put_oi_distribution", {}).values())
             
-            # STEP 1: FIX OI SIGNAL BUG (CRITICAL)
+            # Robustness Fallback: Use totals if distributions are empty
+            if not oi_calls and features.get("total_call_oi"):
+                oi_calls = features["total_call_oi"]
+            if not oi_puts and features.get("total_put_oi"):
+                oi_puts = features["total_put_oi"]
+
             oi_change_calls = features.get("oi_change_calls", 0)
             oi_change_puts = features.get("oi_change_puts", 0)
             
@@ -59,16 +76,22 @@ class StrategyDecisionEngine:
             put_wall = features.get("put_wall_strike", 0)
             net_gex = features.get("gex_profile", {}).get("net_gamma", 0)
             
+            # Additional features for tracing
+            rsi = features.get("rsi", 0)
+            iv = features.get("iv") or features.get("volatility", 0)
+            pcr = oi_puts / max(oi_calls, 1)
+            total_oi = oi_calls + oi_puts
+            oi_diff = oi_change_puts - oi_change_calls
+            
+            # Additional features
+            rsi = features.get("rsi", 0)
+            iv = features.get("iv") or features.get("volatility", 0)
+            pcr = oi_puts / max(oi_calls, 1)
+            total_oi = oi_calls + oi_puts
+            oi_diff = oi_change_puts - oi_change_calls
+
             # VALIDATE: If any critical value missing → return NO_TRADE with confidence 0
             if spot <= 0 or (oi_calls == 0 and oi_puts == 0):
-                print("[SMART MONEY DEBUG]", {
-                    "error": "MISSING_CRITICAL_DATA",
-                    "spot": spot,
-                    "oi_calls": oi_calls,
-                    "oi_puts": oi_puts,
-                    "action": "NO_TRADE",
-                    "confidence": 0.0
-                })
                 return StrategyDecision(
                     strategy='NO_TRADE',
                     regime='UNKNOWN',
@@ -79,14 +102,15 @@ class StrategyDecisionEngine:
             
             # STEP 2: UPGRADE OI SIGNAL (SMART)
             total_oi = oi_calls + oi_puts
-            threshold = total_oi * 0.05  # 5% of total OI
+            threshold = total_oi * 0.02  # 2% of total OI (more sensitive)
             
             oi_diff = oi_change_puts - oi_change_calls
             
-            if oi_diff > threshold:
-                oi_signal = +1
-            elif oi_diff < -threshold:
-                oi_signal = -1
+            # OI DEBUG
+            logger.info(f"[OI DEBUG] oi_diff={oi_diff} threshold={threshold}")
+            
+            if abs(oi_diff) > threshold:
+                oi_signal = 1 if oi_diff > 0 else -1
             else:
                 oi_signal = 0
             
@@ -118,17 +142,60 @@ class StrategyDecisionEngine:
             else:
                 regime_factor = 1 + (0.5 * gex_strength)   # trending
             
+            # PRICE MOMENTUM SIGNAL (CRITICAL)
+            price_signal = 0
+
+            if snapshot:
+                recent_prices = getattr(snapshot, "recent_prices", None)
+
+                if recent_prices and len(recent_prices) >= 3:
+                    if recent_prices[-1] < recent_prices[-2] < recent_prices[-3]:
+                        price_signal = -1   # downtrend
+                    elif recent_prices[-1] > recent_prices[-2] > recent_prices[-3]:
+                        price_signal = 1    # uptrend
+            
+            logger.info(f"[PRICE SIGNAL] {price_signal}")
+
             # Calculate adjusted score with increased signal strength
-            raw_score = oi_signal + wall_signal
+            if RISK_MODE == "AGGRESSIVE":
+                raw_score += 1.2 * price_signal
+            else:
+                raw_score += 0.8 * price_signal
             adjusted_score = raw_score * regime_factor * 1.2
             
             # STEP 6: DECISION LOGIC
-            if adjusted_score >= 1:
+            
+            threshold = 0.6
+            if RISK_MODE == "AGGRESSIVE":
+                threshold = 0.3
+
+            if adjusted_score >= threshold:
                 action = "BUY"
-            elif adjusted_score <= -1:
+            elif adjusted_score <= -threshold:
                 action = "SELL"
             else:
-                action = "NO_TRADE"
+                # FORCE WEAK SIGNAL IN AGGRESSIVE MODE
+                if RISK_MODE == "AGGRESSIVE":
+                    if adjusted_score > 0:
+                        action = "BUY"
+                    elif adjusted_score < 0:
+                        action = "SELL"
+                    else:
+                        action = "NO_TRADE"
+                else:
+                    action = "NO_TRADE"
+
+            # QUALITY FILTER (CRITICAL)
+            if RISK_MODE == "AGGRESSIVE":
+                # Avoid flat noise trades
+                if abs(adjusted_score) < 0.15:
+                    action = "NO_TRADE"
+                # Avoid zero momentum + zero OI
+                if oi_signal == 0 and wall_signal == 0:
+                    action = "NO_TRADE"
+            
+            # TRACE LOG
+            logger.info(f"[RISK MODE] {RISK_MODE} action={action} confidence={confidence if 'confidence' in locals() else 0}")
             
             # STEP 7: FIX OVERCONFIDENCE (MANDATORY)
             max_score = 2 * 1.5
@@ -155,35 +222,17 @@ class StrategyDecisionEngine:
             else:
                 reasoning.append("Positive gamma → mean reversion")
             
+            # Final Safety Filter (RELAXED)
+            if RISK_MODE == "SAFE" and confidence < 0.12:
+                action = "NO_TRADE"
+                reasoning.append("Very low conviction")
+            
+            # Minimum Confidence Floor for active signals (CRITICAL)
+            if action != "NO_TRADE" and confidence < 0.25:
+                confidence = 0.25
+            
             if action == "NO_TRADE":
                 reasoning.append("Insufficient institutional pressure")
-            
-            # STEP 10: SMART MONEY DEBUG OUTPUT
-            print("[SMART MONEY DEBUG]", {
-                "spot": spot,
-                "oi_calls": oi_calls,
-                "oi_puts": oi_puts,
-                "oi_change_calls": oi_change_calls,
-                "oi_change_puts": oi_change_puts,
-                "oi_diff": oi_diff,
-                "threshold": threshold,
-                "call_wall": call_wall,
-                "put_wall": put_wall,
-                "distance_call": distance_call,
-                "distance_put": distance_put,
-                "call_pressure": call_pressure,
-                "put_pressure": put_pressure,
-                "net_gex": net_gex,
-                "gex_strength": gex_strength,
-                "oi_signal": oi_signal,
-                "wall_signal": wall_signal,
-                "regime_factor": regime_factor,
-                "raw_score": raw_score,
-                "adjusted_score": adjusted_score,
-                "confidence": confidence,
-                "action": action,
-                "reasoning": reasoning
-            })
             
             # Classify market regime
             regime = self.classify_market_regime(features)
@@ -229,14 +278,14 @@ class StrategyDecisionEngine:
             # STEP 6: ADD CONFIDENCE DAMPENERS
             # Reduce confidence in weak environments
             if regime_factor < 1:  # mean reversion
-                confidence *= 0.6
+                confidence *= 0.8
             
             if trap_signal:
-                confidence *= 0.7
+                confidence *= 0.85
                 reasoning.append("Trap detected → confidence reduced")
             
             if entry_signal != "ENTER_NOW":
-                confidence *= 0.85
+                confidence *= 0.9
                 reasoning.append("Suboptimal entry timing")
             
             # STEP 7: ADD MULTI-TIMEFRAME FILTER (ADVANCED)
@@ -244,13 +293,12 @@ class StrategyDecisionEngine:
             
             if htf_bias:
                 if htf_bias != action:
-                    confidence *= 0.6
+                    confidence *= 0.8
                     reasoning.append("Higher timeframe opposes trade")
             
             # STEP 8: LOW CONFIDENCE FILTER (RELAXED)
-            if confidence < 0.25:
-                action = "NO_TRADE"
-                reasoning.append("Very low confidence → trade filtered")
+            if confidence < 0.18:
+                reasoning.append("Very low confidence → weak signal")
             elif 0.25 <= confidence < 0.4:
                 reasoning.append("Medium confidence trade (allowed)")
             
@@ -267,13 +315,26 @@ class StrategyDecisionEngine:
             elif entry_signal == "WAIT_FOR_PULLBACK":
                 reasoning.append("Wait for better price near support/resistance")
             
-            # STEP 11: OPTIMIZED DEBUG OUTPUT
-            print("[OPTIMIZED DEBUG]", {
-                "adjusted_score": adjusted_score,
-                "confidence": confidence,
-                "action": action
-            })
+            # STEP 11: CLEAN DECISION LOG
+            log_decision(confidence, action)
             
+            # TRADE SCORE (0 to 1)
+            trade_score = 0
+            # OI strength
+            if abs(oi_signal) == 1:
+                trade_score += 0.3
+            # Wall strength
+            if abs(wall_signal) == 1:
+                trade_score += 0.3
+            # Momentum strength
+            if abs(price_signal) == 1:
+                trade_score += 0.2
+            # Gamma alignment
+            if net_gex < 0:
+                trade_score += 0.2
+            # Clamp
+            trade_score = min(trade_score, 1.0)
+
             # STEP 12: VERIFY STRATEGY OUTPUT
             strategy_decision = StrategyDecision(
                 strategy=action,
@@ -283,14 +344,21 @@ class StrategyDecisionEngine:
                 reasoning=reasoning,
                 metadata={
                     "entry": entry_signal,
-                    "trap": trap_signal
+                    "trap": trap_signal,
+                    "trade_score": trade_score
                 }
             )
-            print("[STRATEGY OUTPUT]", {
-                "strategy": strategy_decision.strategy,
-                "confidence": strategy_decision.bias_confidence
-            })
             
+            # --- TRACE 3: PRODUCTION SAFE LIGHT TRACE ---
+            import time
+            now = time.time()
+            if not hasattr(self, "_last_trace_ts"):
+                self._last_trace_ts = 0
+            
+            if now - self._last_trace_ts > 10:
+                score = adjusted_score
+                log_market_data(price, pcr)
+                self._last_trace_ts = now
             return strategy_decision
             
         except Exception as e:

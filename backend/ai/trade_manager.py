@@ -171,16 +171,8 @@ class TradeManager:
             self._active_trades.append(trade)
             self.save_active_trades()
             
-            # Debug output
-            print("[TRADE ENGINE]", {
-                "action": trade.action,
-                "entry": trade.entry_price,
-                "stop_loss": trade.stop_loss,
-                "target": trade.target,
-                "size": trade.position_size,
-                "risk_amount": trade.risk_amount,
-                "confidence": trade.confidence
-            })
+            # Clean trade execution log
+            log(f"Trade Executed: {trade.action} @ {trade.entry_price} | SL: {trade.stop_loss} | Target: {trade.target} | Size: {trade.position_size} | Risk: ${trade.risk_amount:.2f}")
             
             return True
             
@@ -344,17 +336,7 @@ class TradeManager:
         try:
             metrics = self.calculate_risk_metrics()
             
-            print("[RISK METRICS]", {
-                "total_trades": metrics.total_trades,
-                "win_rate": round(metrics.win_rate, 3),
-                "total_pnl": round(metrics.total_pnl, 2),
-                "max_drawdown": round(metrics.max_drawdown, 2),
-                "avg_win": round(metrics.avg_win, 2),
-                "avg_loss": round(metrics.avg_loss, 2),
-                "risk_reward_ratio": round(metrics.risk_reward_ratio, 2),
-                "current_drawdown": round(metrics.current_drawdown, 2),
-                "active_trades": len(self._active_trades)
-            })
+            log(f"Risk Metrics: Total: {metrics.total_trades} | Win Rate: {metrics.win_rate:.1%} | P&L: ${metrics.total_pnl:.2f} | Max DD: ${metrics.max_drawdown:.2f}")
             
         except Exception as e:
             logger.error(f"Failed to print risk debug: {e}")

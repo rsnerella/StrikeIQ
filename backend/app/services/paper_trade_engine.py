@@ -175,11 +175,11 @@ class PaperTradeEngine:
         try:
             query = """
                 SELECT id, prediction_id, symbol, strike_price, option_type, 
-                       entry_price, quantity, entry_time
+                       entry_price, quantity, timestamp
                 FROM paper_trade_log
                 WHERE trade_status = 'OPEN'
-                AND entry_time <= NOW() - INTERVAL '5 minutes'
-                ORDER BY entry_time ASC
+                AND timestamp <= NOW() - INTERVAL '5 minutes'
+                ORDER BY timestamp ASC
                 LIMIT 100
             """
             
@@ -195,7 +195,7 @@ class PaperTradeEngine:
                     'option_type': row[4],
                     'entry_price': row[5],
                     'quantity': row[6],
-                    'entry_time': row[7]
+                    'timestamp': row[7]
                 })
                 
             logger.debug(f"Found {len(open_trades)} open trades to monitor")
@@ -300,7 +300,7 @@ class PaperTradeEngine:
             
             for trade in open_trades:
                 # Check if trade has reached its duration
-                entry_time = trade['entry_time']
+                entry_time = trade['timestamp']
                 if isinstance(entry_time, str):
                     entry_time = datetime.fromisoformat(entry_time.replace('Z', '+00:00'))
                 

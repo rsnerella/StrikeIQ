@@ -360,55 +360,10 @@ class WebSocketMarketFeed:
         for task in tasks:
             if task and not task.done():
                 task.cancel()
-        
-        # Wait for tasks to complete without recursion
-        await asyncio.gather(*[t for t in tasks if t], return_exceptions=True)
-
-    async def _connect(self, token: str):
-        """Internal connection method using Upstox V3 API"""
-        
-        if not token:
-            raise Exception("Upstox token missing")
-        
-        logger.info("Getting Upstox V3 WebSocket URL...")
-        
-        # Get authorized WebSocket URL from V3 API
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json"
-        }
-        
-        client = self._client
-        response = await client.get(
-            "https://api.upstox.com/v3/feed/market-data-feed/authorize",
-            headers=headers
-        )
-        
-        if response.status_code != 200:
-            raise Exception(f"V3 authorization failed: {response.status_code}")
-        
-        data = json_lib.loads(response.text)
-        ws_url = data.get("data", {}).get("authorized_redirect_uri")
-        
-        if not ws_url:
-            raise Exception("No WebSocket URL in V3 response")
-        
-        logger.info(f"Connecting to Upstox V3 WebSocket: {ws_url}")
-        
-        # Connect to V3 WebSocket (binary data expected)
-        self.websocket = await websockets.connect(
-            ws_url,
-            ping_interval=20,
-            ping_timeout=20
-        )
-        self._is_connected = True
-        
-        logger.info("🟢 UPSTOX WS CONNECTED")
-        logger.info("WS HANDSHAKE COMPLETE — STABILIZING CONNECTION")
-        await asyncio.sleep(1)
-        logger.info("READY TO SEND SUBSCRIPTION")
-        
-        await self.subscribe_indices()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
         
         # PATCH: Auto-trigger default subscription for initial data flow
         try:
@@ -529,10 +484,7 @@ class WebSocketMarketFeed:
                 await self.websocket.send(
                     json_lib.dumps(payload).encode("utf-8")
                 )
-                logger.info(
-                    "INDEX SUBSCRIPTION SENT → %s",
-                    index_keys
-                )
+                logger.info(f"[SUBSCRIPTION] INDEX → {index_keys}")
             else:
                 logger.warning("Cannot send index subscription - WebSocket not ready")
 
@@ -570,13 +522,13 @@ class WebSocketMarketFeed:
                 "guid": "strikeiq-options",
                 "method": "sub",
                 "data": {
-                    "mode": "full_d30",
+                    "mode": "full_d30",  # Changed back to "full_d30"
                     "instrumentKeys": new_keys
                 }
             }
             
             if self.websocket:
-                logger.info("SUBSCRIPTION PAYLOAD → %s", json_lib.dumps(payload, indent=2))
+                logger.debug("[SUBSCRIPTION] Options payload prepared")
                 # ==================== STRICT PROTECTED SECTION ====================
                 # WARNING: DO NOT MODIFY THIS LINE WITHOUT EXPLICIT REVIEW.
                 # This WebSocket subscription must be sent as UTF-8 encoded bytes.
@@ -586,12 +538,12 @@ class WebSocketMarketFeed:
                 # ==================================================================
                 await self.websocket.send(json_lib.dumps(payload).encode("utf-8"))
                 logger.info("SUBSCRIPTION SENT SUCCESSFULLY")
-                logger.info("SUBSCRIPTION MODE → full_d30 (Upstox Plus active)")
+                logger.debug("[SUBSCRIPTION] Mode set to full_d30")
                 self.current_option_keys = new_keys
                 self.subscribed_instruments.update(new_keys)
                 self.last_subscription_time = time.time()
                 self.last_atm = atm
-                logger.info(f"✅ OPTIONS SUBSCRIPTION SENT: {len(new_keys)} instruments")
+                logger.debug(f"[SUBSCRIPTION] {len(new_keys)} instruments subscribed")
             else:
                 logger.error("Cannot subscribe to options - WebSocket not connected")
                 
@@ -626,84 +578,6 @@ class WebSocketMarketFeed:
         logger.warning(f"Invalid expiry format: {expiry}")
         return None
 
-    async def _check_and_subscribe_options(self, symbol: str, atm: int):
-        """Helper to manage ATM-based option subscriptions for a specific symbol"""
-        if atm != self.current_atms.get(symbol):
-            # Rate limiter: prevent subscription spam, but allow ATM changes
-            if time.time() - self.last_subscription_time < 2 and atm == self.last_atms.get(symbol):
-                return
-            
-            self.current_atms[symbol] = atm
-            expiry = self.active_expiry
-            
-            if not expiry:
-                return
-                
-            option_keys = build_option_keys(
-                symbol=symbol,
-                atm=atm,
-                expiry=expiry
-            )
-            logger.info(f"DEBUG TOTAL OPTION INSTRUMENTS FOR {symbol} → {len(option_keys)}")
-            
-            # Limit subscription to prevent overload
-            if len(option_keys) > 60:
-                option_keys = option_keys[:60]
-            
-            logger.debug(f"SUBSCRIBING OPTIONS AROUND ATM {atm} for {symbol}")
-            logger.debug(f"EXPIRY → {expiry}")
-            
-            payload = {
-                "guid": f"strikeiq-options-{symbol.lower()}",
-                "method": "sub",
-                "data": {
-                    "mode": "full_d30",  # Changed back to "full_d30"
-                    "instrumentKeys": option_keys
-                }
-            }
-            
-            if self.websocket:
-                logger.info("SUBSCRIPTION PAYLOAD → %s", json_lib.dumps(payload, indent=2))
-                payload_bytes = json_lib.dumps(payload).encode("utf-8")
-                # store payload for failsafe resubscribe
-                self._subscription_payload = payload
-                await self.websocket.send(payload_bytes)
-                logger.info(f"OPTIONS SUBSCRIPTION SENT → {len(option_keys)} instruments for {symbol}")
-            
-            self.last_subscription_time = time.time()
-            self.last_atms[symbol] = atm
-
-    def get_nearest_nifty_expiry(self, symbol: str = "NIFTY"):
-        """Get the nearest expiry for symbol from instrument registry"""
-        if not self.instrument_registry:
-            logger.error("Instrument registry not loaded")
-            return None
-
-        expiries = []
-        logger.info(f"SCANNING REGISTRY FOR {symbol} EXPIRIES")
-
-        # Use registry methods instead of direct data access
-        expiries = self.instrument_registry.get_expiries(symbol)
-
-        valid_expiries = []
-
-        for expiry in expiries:
-            parsed = self.parse_expiry(expiry)
-            
-            if parsed:
-                valid_expiries.append((parsed, expiry))
-
-        if not valid_expiries:
-            logger.error(f"No valid {symbol} expiries detected")
-            return None
-
-        nearest_expiry, nearest_expiry_str = min(valid_expiries, key=lambda x: x[0])
-
-        logger.debug(f"AVAILABLE EXPIRIES for {symbol} → {expiries}")
-        logger.debug(f"DETECTED {symbol} EXPIRY → {nearest_expiry_str}")
-
-        return nearest_expiry_str
-
     async def unsubscribe_options(self):
         """Unsubscribe from current option instruments"""
         if not self.current_option_keys:
@@ -720,7 +594,7 @@ class WebSocketMarketFeed:
             
             if self.websocket:
                 await self.websocket.send(json_lib.dumps(payload).encode("utf-8"))
-                logger.info(f"UNSUBSCRIBED {len(self.current_option_keys)} OLD OPTIONS")
+                logger.debug(f"[UNSUBSCRIBE] {len(self.current_option_keys)} options")
                 self.current_option_keys = []
             else:
                 logger.warning("Cannot unsubscribe from options - WebSocket not connected")
@@ -1167,6 +1041,7 @@ class WebSocketMarketFeed:
 
             # STEP 1: Convert and broadcast raw Upstox V3 format
             try:
+                import time
                 # Debug: Log raw protobuf structure
                 from google.protobuf.json_format import MessageToJson
                 from app.proto.MarketDataFeedV3_pb2 import FeedResponse
@@ -1177,8 +1052,12 @@ class WebSocketMarketFeed:
                 
                 raw_upstox_data = await convert_protobuf_to_upstox_v3_format(raw)
                 if raw_upstox_data and raw_upstox_data.get("feeds"):
-                    logger.info("BROADCASTING RAW UPSTOX V3 FORMAT")
-                    logger.info(f"RAW DATA: {json_lib.dumps(raw_upstox_data, indent=2)}")
+                    now = time.time()
+                    if not hasattr(self, '_last_raw_broadcast_log_ts'):
+                        self._last_raw_broadcast_log_ts = 0
+                    if now - self._last_raw_broadcast_log_ts > 5:
+                        logger.info("BROADCASTING RAW UPSTOX V3 FORMAT")
+                        self._last_raw_broadcast_log_ts = now
                     await broadcast_with_strategy(raw_upstox_data)
             except Exception as e:
                 logger.error(f"Failed to broadcast raw Upstox V3 format: {e}")
@@ -1725,7 +1604,12 @@ class WebSocketMarketFeed:
             logger.warning("NO FEEDS RECEIVED — RESUBSCRIBING")
             
             if self.websocket and hasattr(self, '_subscription_payload'):
-                logger.info("SUBSCRIPTION PAYLOAD → %s", json.dumps(self._subscription_payload, indent=2))
+                now = time.time()
+                if not hasattr(self, '_last_subscription_log_ts'):
+                    self._last_subscription_log_ts = 0
+                if now - self._last_subscription_log_ts > 5:
+                    logger.info(f"SUBSCRIPTION MODE → full_d30 (Upstox Plus active)")
+                    self._last_subscription_log_ts = now
                 payload_bytes = json.dumps(self._subscription_payload).encode("utf-8")
                 await self.websocket.send(payload_bytes)
                 logger.info("SUBSCRIPTION SENT SUCCESSFULLY")

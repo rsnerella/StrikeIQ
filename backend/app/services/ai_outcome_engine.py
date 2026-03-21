@@ -209,7 +209,7 @@ class AIOutcomeEngine:
             query = """
                 SELECT outcome, COUNT(*) as count
                 FROM outcome_log
-                WHERE evaluation_time >= NOW() - INTERVAL %s
+                WHERE evaluation_time >= NOW() - (%s)::interval
                 GROUP BY outcome
                 ORDER BY count DESC
             """

@@ -59,8 +59,7 @@ class TradeLifecycleManager:
                     'created_at': datetime.now()
                 }
                 
-                print(f"[TRADE] INSERTED: {symbol} {direction} @ {entry_price} "
-                      f"SL={stop_loss} TGT={target} score={score:.3f} id={trade_id}")
+                logger.info(f"[TRADE] INSERTED: {symbol} {direction}")
                 
                 return trade_id
                 
@@ -140,9 +139,7 @@ class TradeLifecycleManager:
                 if trade_id in self.active_trades:
                     del self.active_trades[trade_id]
                 
-                print(f"[TRADE CLOSED] {trade['symbol']} {trade['direction']} "
-                      f"Result: {result} PnL: {pnl:.2f} "
-                      f"Entry: {trade['entry']} Exit: {exit_price}")
+                logger.info(f"[TRADE CLOSED] {trade['symbol']} {trade['direction']}")
                 
         except Exception as e:
             logger.error(f"Failed to close trade {trade_id}: {e}")

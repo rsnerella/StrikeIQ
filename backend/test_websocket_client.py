@@ -34,8 +34,7 @@ async def test_websocket_client():
                 message_count += 1
                 data = json.loads(message)
                 
-                print(f"\n📨 Message #{message_count}:")
-                print(f"Type: {data.get('type')}")
+                print(f"\n📨 Message #{message_count}: Type={data.get('type')}")
                 
                 # Check for analytics_update messages
                 if data.get('type') == 'analytics_update':

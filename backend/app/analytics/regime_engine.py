@@ -161,10 +161,8 @@ class RegimeEngine:
             reasoning = self._generate_regime_reasoning(regime_name, indicators, confidence)
             
             # Apply minimum confidence threshold
-            if confidence < 0.5:
-                regime_name = "RANGE"
-                confidence = 0.5
-                reasoning = "Low confidence in specific regime, defaulting to range-bound"
+            if confidence < 0.35:
+                confidence = 0.35
             
             return RegimeDetection(
                 regime=regime_name,

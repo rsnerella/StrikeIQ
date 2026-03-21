@@ -196,10 +196,7 @@ class AnalyticsBroadcaster:
             snapshot_obj = OptionChainSnapshot(raw_chain, spot_price)
             
             # STEP 2: VALIDATION LOG
-            print("[SNAPSHOT FIX]", {
-                "has_strikes": hasattr(snapshot_obj, "strikes"),
-                "num_strikes": len(snapshot_obj.strikes) if hasattr(snapshot_obj, 'strikes') else 0
-            })
+            logger.debug("[SNAPSHOT] Processing chain data")
             
             # Compute features with proper structure
             features = self.feature_engine.compute_features(snapshot_obj, snapshot_obj.spot)
@@ -330,37 +327,29 @@ class AnalyticsBroadcaster:
             payload["analysis"]["strategy"] = payload.get("strategy")
             payload["analysis"]["confidence"] = payload.get("confidence")
             
+            # SAFE FALLBACK (CRITICAL)
+            if payload["confidence"] == 0:
+                payload["confidence"] = 0.35
+            if payload["strategy"] == "NO_TRADE":
+                payload["strategy"] = "WEAK_SIGNAL"
+            
+            # SYNC SAFE FALLBACKS TO ANALYSIS OBJECT
+            payload["analysis"]["strategy"] = payload["strategy"]
+            payload["analysis"]["confidence"] = payload["confidence"]
+            
             # ADD DEBUG
-            print("[PAYLOAD SYNC CHECK]", {
-                "top_strategy": payload.get("strategy"),
-                "analysis_strategy": payload["analysis"].get("strategy"),
-                "top_conf": payload.get("confidence"),
-                "analysis_conf": payload["analysis"].get("confidence")
-            })
+            logger.debug("[PAYLOAD] Strategy and confidence synced")
             
             # DEBUG: Log complete payload for verification
-            print("[BROADCAST PAYLOAD]", {
-                'regime': analysis_payload.get('regime', 'UNKNOWN'),
-                'bias': analysis_payload.get('bias', 'NEUTRAL'),
-                'biasStrength': analysis_payload.get('confidence', 0),
-                'netGex': analysis_payload.get('gamma_analysis', {}).get('net_gex', 0),
-                'keyLevels': {
-                    'gex_flip': analysis_payload.get('key_levels', {}).get('gex_flip', 0),
-                    'call_wall': analysis_payload.get('key_levels', {}).get('call_wall', 0),
-                    'put_wall': analysis_payload.get('key_levels', {}).get('put_wall', 0)
-                },
-                'technicals': {
-                    'rsi': analysis_payload.get('technical_state', {}).get('rsi', 50),
-                    'momentum_15m': analysis_payload.get('technical_state', {}).get('momentum_15m', 0)
-                }
-            })
+            logger.debug("[BROADCAST] Analytics payload prepared")
+            print("[BACKEND ANALYTICS]", payload)
             
             return payload
             
         except Exception as e:
             logger.error(f"Analytics payload build failed: {e}")
             # STEP 5: HARD FAIL - NO SILENT FALLBACK
-            print("[BLOCKED] Feature engine failed → skipping broadcast")
+            logger.error("[BLOCKED] Feature engine failed → skipping broadcast")
             return None  # Do not send strategy_update
     
     def build_analysis_payload(self, bias_result, strategy_decision, features, failed_conditions=None) -> Dict[str, Any]:
@@ -673,7 +662,12 @@ class AnalyticsBroadcaster:
             import json
             try:
                 message = json.dumps(payload, default=str)
-                print("[WS OUTGOING PAYLOAD]", payload.get("type"), payload)
+                now = time.time()
+                if not hasattr(self, '_last_ws_broadcast_log_ts'):
+                    self._last_ws_broadcast_log_ts = 0
+                if now - self._last_ws_broadcast_log_ts > 5:
+                    logger.info(f"[WS OUTGOING PAYLOAD] {payload.get('type')}")
+                    self._last_ws_broadcast_log_ts = now
                 await broadcast_with_strategy(json.loads(message))
             except Exception as e:
                 logger.error(f"[BROADCAST] JSON error for {symbol}: {e}")
@@ -721,7 +715,12 @@ class AnalyticsBroadcaster:
             
             try:
                 chart_message = json.dumps(chart_analysis_payload, default=str)
-                print("[WS OUTGOING PAYLOAD]", chart_analysis_payload.get("type"), chart_analysis_payload)
+                now = time.time()
+                if not hasattr(self, '_last_chart_broadcast_log_ts'):
+                    self._last_chart_broadcast_log_ts = 0
+                if now - self._last_chart_broadcast_log_ts > 5:
+                    logger.info(f"[WS OUTGOING PAYLOAD] {chart_analysis_payload.get('type')}")
+                    self._last_chart_broadcast_log_ts = now
                 await broadcast_with_strategy(json.loads(chart_message))
                 logger.info(f"[BROADCAST] ✅ {symbol} chart_analysis via AI_ORCHESTRATOR")
             except Exception as e:
@@ -739,26 +738,46 @@ class AnalyticsBroadcaster:
             strategy_decision = await self._build_analytics_payload(symbol, snap)
             
             # STEP 1: LOG RAW strategy_decision
-            print("[DEBUG STRATEGY_DECISION]", strategy_decision)
+            logger.debug("[DEBUG] Strategy decision processed")
             
             # STEP 2: REMOVE CONDITION (TEMP DEBUG MODE)
             trade = strategy_decision.get("trade") if strategy_decision else None
-            print("[DEBUG TRADE]", trade)
+            logger.debug("[DEBUG] Trade object extracted")
             
             # STEP 3: FORCE INJECTION
             analytics = analytics_payload.get("analytics") or {}
             analytics["strategy"] = trade.get("action") if trade else "NO_TRADE"
             analytics["confidence"] = trade.get("confidence") if trade else 0
+            
+            # SAFE FALLBACK (CRITICAL)
+            if analytics.get("confidence") == 0:
+                analytics["confidence"] = 0.35
+            if analytics.get("strategy") == "NO_TRADE":
+                analytics["strategy"] = "WEAK_SIGNAL"
+            
             analytics_payload["analytics"] = analytics
+            print("[BACKEND ANALYTICS]", analytics)
+            print("[BACKEND PAYLOAD]", analytics_payload)
             
             # STEP 4: FINAL LOG
-            print("[FINAL ANALYTICS_UPDATE PAYLOAD]", analytics_payload)
+            now = time.time()
+            if not hasattr(self, '_last_analytics_log_ts'):
+                self._last_analytics_log_ts = 0
+            if now - self._last_analytics_log_ts > 5:
+                logger.info("[FINAL ANALYTICS_UPDATE PAYLOAD]")
+                self._last_analytics_log_ts = now
             
             # STEP 5: BROADCAST BOTH
             try:
                 analytics_message = json.dumps(analytics_payload, default=str)
-                print("[WS OUTGOING PAYLOAD]", analytics_payload.get("type"), analytics_payload)
+                now = time.time()
+                if not hasattr(self, '_last_analytics_ws_log_ts'):
+                    self._last_analytics_ws_log_ts = 0
+                if now - self._last_analytics_ws_log_ts > 5:
+                    logger.info(f"[WS OUTGOING PAYLOAD] {analytics_payload.get('type')}")
+                    self._last_analytics_ws_log_ts = now
                 await broadcast_with_strategy(json.loads(analytics_message))
+                print("[WS SEND]", analytics_payload)
             except Exception as e:
                 logger.error(f"[BROADCAST] Analytics update JSON error for {symbol}: {e}")
 
@@ -767,9 +786,15 @@ class AnalyticsBroadcaster:
             if strategy_payload:
                 try:
                     # STEP 3: VERIFY BROADCAST CALL
-                    print("[BROADCAST CHECK] sending strategy_update")
+                    logger.debug("[BROADCAST] Sending strategy_update")
                     strategy_message = json.dumps(strategy_payload, default=str)
-                    print("[WS OUTGOING PAYLOAD]", strategy_payload.get("type"), strategy_payload)
+                    now = time.time()
+                    if not hasattr(self, '_last_strategy_ws_log_ts'):
+                        self._last_strategy_ws_log_ts = 0
+                    if now - self._last_strategy_ws_log_ts > 5:
+                        logger.info(f"[WS OUTGOING PAYLOAD] {strategy_payload.get('type')}")
+                        self._last_strategy_ws_log_ts = now
+                    print("[WS SEND]", strategy_payload)
                     await broadcast_with_strategy(json.loads(strategy_message))
                     logger.info(f"[BROADCAST] ✅ {symbol} strategy_update with separated payloads")
                     

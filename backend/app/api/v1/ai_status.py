@@ -108,7 +108,7 @@ async def get_ai_dashboard():
             SELECT p.id, p.formula_id, p.signal, p.confidence, p.nifty_spot, 
                    p.prediction_time, o.outcome, o.evaluation_time
             FROM prediction_log p
-            LEFT JOIN outcome_log o ON p.id = o.prediction_id
+            LEFT JOIN outcome_log o ON p.id::text = o.prediction_id::text
             WHERE p.prediction_time >= NOW() - INTERVAL '24 hours'
             AND p.signal IN ('BUY', 'SELL')
             ORDER BY p.prediction_time DESC
@@ -132,12 +132,12 @@ async def get_ai_dashboard():
         
         # Get recent paper trades (last 24 hours)
         recent_trades_query = """
-            SELECT id, prediction_id, symbol, strike_price, option_type,
-                   entry_price, exit_price, quantity, pnl, trade_status,
-                   entry_time, exit_time
+            SELECT id, prediction_id, symbol, strike_price,
+                   entry_price, exit_price, quantity, pnl, trade_type,
+                   timestamp
             FROM paper_trade_log
-            WHERE entry_time >= NOW() - INTERVAL '24 hours'
-            ORDER BY entry_time DESC
+            WHERE timestamp >= NOW() - INTERVAL '24 hours'
+            ORDER BY timestamp DESC
             LIMIT 20
         """
         
@@ -150,14 +150,12 @@ async def get_ai_dashboard():
                 'prediction_id': row[1],
                 'symbol': row[2],
                 'strike_price': row[3],
-                'option_type': row[4],
-                'entry_price': row[5],
-                'exit_price': row[6],
-                'quantity': row[7],
-                'pnl': row[8],
-                'trade_status': row[9],
-                'entry_time': row[10].isoformat() if row[10] else None,
-                'exit_time': row[11].isoformat() if row[11] else None
+                'entry_price': row[4],
+                'exit_price': row[5],
+                'quantity': row[6],
+                'pnl': row[7],
+                'trade_status': row[8],  # Map trade_type to trade_status for API consistency
+                'entry_time': row[9].isoformat() if row[9] else None  # Map timestamp to entry_time for API consistency
             })
         
         # Get formula performance
@@ -231,7 +229,7 @@ async def get_recent_predictions(limit: int = 50, hours: int = 24):
             SELECT p.id, p.formula_id, p.signal, p.confidence, p.nifty_spot, 
                    p.prediction_time, o.outcome, o.evaluation_time, o.confidence as outcome_confidence
             FROM prediction_log p
-            LEFT JOIN outcome_log o ON p.id = o.prediction_id
+            LEFT JOIN outcome_log o ON p.id::text = o.prediction_id::text
             WHERE p.prediction_time >= NOW() - INTERVAL %s
             AND p.signal IN ('BUY', 'SELL')
             ORDER BY p.prediction_time DESC
@@ -280,14 +278,14 @@ async def get_recent_trades(limit: int = 50, hours: int = 24):
     """
     try:
         query = """
-            SELECT pt.id, pt.prediction_id, pt.symbol, pt.strike_price, pt.option_type,
-                   pt.entry_price, pt.exit_price, pt.quantity, pt.pnl, pt.trade_status,
-                   pt.entry_time, pt.exit_time,
+            SELECT pt.id, pt.prediction_id, pt.symbol, pt.strike_price,
+                   pt.entry_price, pt.exit_price, pt.quantity, pt.pnl, pt.trade_type,
+                   pt.timestamp,
                    p.signal as prediction_signal, p.confidence as prediction_confidence
             FROM paper_trade_log pt
             LEFT JOIN prediction_log p ON pt.prediction_id = p.id
-            WHERE pt.entry_time >= NOW() - INTERVAL %s
-            ORDER BY pt.entry_time DESC
+            WHERE pt.timestamp >= NOW() - INTERVAL %s
+            ORDER BY pt.timestamp DESC
             LIMIT %s
         """
         
@@ -300,16 +298,14 @@ async def get_recent_trades(limit: int = 50, hours: int = 24):
                 'prediction_id': row[1],
                 'symbol': row[2],
                 'strike_price': row[3],
-                'option_type': row[4],
-                'entry_price': row[5],
-                'exit_price': row[6],
-                'quantity': row[7],
-                'pnl': row[8],
-                'trade_status': row[9],
-                'entry_time': row[10].isoformat() if row[10] else None,
-                'exit_time': row[11].isoformat() if row[11] else None,
-                'prediction_signal': row[12],
-                'prediction_confidence': row[13]
+                'entry_price': row[4],
+                'exit_price': row[5],
+                'quantity': row[6],
+                'pnl': row[7],
+                'trade_status': row[8],
+                'entry_time': row[9].isoformat() if row[9] else None,
+                'prediction_signal': row[10],
+                'prediction_confidence': row[11]
             })
         
         return {

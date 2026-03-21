@@ -1,13 +1,13 @@
 /** @type {import('next').NextConfig} */
 
 const nextConfig = {
+  output: 'export',
   reactStrictMode: true,
-
-  turbopack: {
-    root: __dirname,
-  },
+  basePath: '/StrikeIQ',
+  assetPrefix: '/StrikeIQ',
 
   images: {
+    unoptimized: true,
     remotePatterns: [
       {
         protocol: "http",
@@ -21,13 +21,8 @@ const nextConfig = {
     ],
   },
 
-  async rewrites() {
-    return [
-      {
-        source: "/api/:path*",
-        destination: "http://127.0.0.1:8000/api/:path*", // FIXED
-      },
-    ];
+  turbopack: {
+    root: __dirname,
   },
 
   allowedDevOrigins: ["*"],

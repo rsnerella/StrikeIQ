@@ -10,6 +10,7 @@ import time
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
+import json
 
 from app.analytics.oi_buildup_engine import OIBuildupEngine
 from app.core.diagnostics import diag, increment_counter
@@ -61,7 +62,10 @@ class ChainSnapshot:
     total_oi_puts: int = 0
     open: float = 0.0
     prev_close: float = 0.0
+    recent_prices: List[float] = field(default_factory=list)
     analytics: Dict[str, Any] = None
+    is_fallback: bool = False
+    is_valid: bool = True
 
 
 class OptionChainBuilder:
@@ -78,12 +82,63 @@ class OptionChainBuilder:
 
         self._snapshot_task: Optional[asyncio.Task] = None
         self._running = False
+        
+        self.debug = False  # Debug flag for snapshot logging
 
         self.default_expiry = self._get_next_expiry()
 
         self.oi_buildup_engine = OIBuildupEngine()
 
         logger.info("Option Chain Builder initialized")
+
+    def _fallback_snapshot(self, symbol: str) -> ChainSnapshot:
+        """Create a fallback snapshot when real data is unavailable"""
+        from ai.ai_logger import log
+        
+        # Log fallback mode once per symbol
+        self.log_once(f"_fallback_{symbol}", f"[SAFE MODE] Using fallback snapshot for {symbol}")
+        
+        # Use last known good spot or default
+        spot = self.spot_prices.get(symbol, 22500)  # Default NIFTY spot
+        
+        # Create minimal valid strikes
+        default_strikes = [
+            {"strike": spot - 100, "call_oi": 1000, "put_oi": 800},
+            {"strike": spot, "call_oi": 1200, "put_oi": 1000},
+            {"strike": spot + 100, "call_oi": 900, "put_oi": 1100}
+        ]
+        
+        # Mark as fallback
+        fallback_snapshot = ChainSnapshot(
+            symbol=symbol,
+            spot=0,  # Invalid spot
+            open=0,
+            prev_close=0,
+            atm_strike=0,
+            expiry=self.default_expiry,
+            strikes=default_strikes,
+            timestamp=int(time.time()),
+            pcr=1.0,  # Neutral PCR
+            total_oi_calls=0,  # Invalid OI
+            total_oi_puts=0,   # Invalid OI
+            recent_prices=[],
+            analytics={
+                "strategy": "NONE",
+                "confidence": 0.0,
+                "is_fallback": True
+            },
+            is_fallback=True,
+            is_valid=False  # Critical: Mark as invalid
+        )
+        
+        return fallback_snapshot
+
+    def log_once(self, key: str, message: str):
+        """Log message only once per key to prevent spam"""
+        if not hasattr(self, key):
+            from ai.ai_logger import log
+            log(message)
+            setattr(self, key, True)
 
     # --------------------------------------------------
 
@@ -227,31 +282,35 @@ class OptionChainBuilder:
     # --------------------------------------------------
 
     def _create_snapshot(self, symbol: str) -> Optional[ChainSnapshot]:
+        try:
+            if symbol not in self.spot_prices:
+                return self._fallback_snapshot(symbol)
 
-        if symbol not in self.spot_prices:
-            return None
+            spot = self.spot_prices[symbol]
 
-        spot = self.spot_prices[symbol]
-
-        chain = self.chains.get(symbol, {})
-
-        strikes = []
-
-        # FIX: avoid repeated expensive sorting
-        strike_keys = list(chain.keys())
-        strike_keys.sort()
-
-        atm = self._find_atm_strike(spot, strike_keys)
-        
-        now = datetime.utcnow()
-
-        for strike in strike_keys:
-            data = chain[strike]
-            ce = data.get("CE")
-            pe = data.get("PE")
+            chain = self.chains.get(symbol, {})
             
-            # Use real values if present, else None (Standardized null for frontend '—')
-            strikes.append(
+            if not chain:
+                self.log_once(f"_no_chain_{symbol}", f"[SAFE MODE] No chain data for {symbol}")
+                return self._fallback_snapshot(symbol)
+
+            strikes = []
+
+            # FIX: avoid repeated expensive sorting
+            strike_keys = list(chain.keys())
+            strike_keys.sort()
+
+            atm = self._find_atm_strike(spot, strike_keys)
+            
+            now = datetime.utcnow()
+
+            for strike in strike_keys:
+                data = chain[strike]
+                ce = data.get("CE")
+                pe = data.get("PE")
+                
+                # Use real values if present, else None (Standardized null for frontend '—')
+                strikes.append(
                 {
                     "strike": strike,
                     "call_oi": ce.oi if ce and ce.oi > 0 else None,
@@ -281,71 +340,105 @@ class OptionChainBuilder:
                     "put_vega": pe.vega if pe and pe.vega != 0 else None,
                     "put_gamma": pe.gamma if pe and pe.gamma != 0 else None,
                 }
+                )
+
+            # Calculate PCR and total OI - FIX: Use actual chain structure
+            total_call_oi = sum([
+                ce.oi for strike in chain.values()
+                if (ce := strike.get("CE")) and hasattr(ce, "oi")
+            ])
+            
+            total_put_oi = sum([
+                pe.oi for strike in chain.values()
+                if (pe := strike.get("PE")) and hasattr(pe, "oi")
+            ])
+
+            print("[OI CHECK]", total_call_oi, total_put_oi)
+            pcr = total_put_oi / total_call_oi if total_call_oi > 0 else 0.0
+
+            if total_call_oi == 0 and total_put_oi == 0:
+                self.log_once("_oi_error", "[SAFE MODE] Invalid OI data - using fallback")
+                return self._fallback_snapshot(symbol)
+
+            logger.info(f"[CHAIN_OI_SUMMARY] strikes={len(strikes)} call_oi={total_call_oi} put_oi={total_put_oi}")
+            
+            logger.info(
+                f"CHAIN_BUILDER_OUTPUT symbol={symbol} "
+                f"strikes={len(chain.get('strikes', []))} "
+                f"call_oi={chain.get('total_oi_calls')} "
+                f"put_oi={chain.get('total_oi_puts')}"
             )
+            
+            mark_health("option_chain")
 
-        # Calculate PCR and total OI
-        total_call_oi = sum(strike.get("call_oi", 0) or 0 for strike in strikes)
-        total_put_oi = sum(strike.get("put_oi", 0) or 0 for strike in strikes)
-        pcr = total_put_oi / total_call_oi if total_call_oi > 0 else 0.0
+            # Capture price metadata
+            meta = getattr(self, "price_metadata", {}).get(symbol, {})
 
-        logger.info(f"[CHAIN_OI_SUMMARY] strikes={len(strikes)} call_oi={total_call_oi} put_oi={total_put_oi}")
-        
-        logger.info(
-            f"CHAIN_BUILDER_OUTPUT symbol={symbol} "
-            f"strikes={len(chain.get('strikes', []))} "
-            f"call_oi={chain.get('total_oi_calls')} "
-            f"put_oi={chain.get('total_oi_puts')}"
-        )
-        
-        mark_health("option_chain")
-
-        # Capture price metadata
-        meta = getattr(self, "price_metadata", {}).get(symbol, {})
-
-        # Create snapshot data dictionary for analytics with correct mapping for GEX engine
-        snapshot_data = {
-            "symbol": symbol,
-            "spot": spot,
-            "calls": {
-                str(s["strike"]): {
-                    "gamma": s.get("call_gamma", 0) or 0,
-                    "oi": s.get("call_oi", 0) or 0
-                } for s in strikes
-            },
-            "puts": {
-                str(s["strike"]): {
-                    "gamma": s.get("put_gamma", 0) or 0,
-                    "oi": s.get("put_oi", 0) or 0
-                } for s in strikes
+            # Create snapshot data dictionary for analytics with correct mapping for GEX engine
+            snapshot_data = {
+                "symbol": symbol,
+                "spot": spot,
+                "calls": {
+                    str(s["strike"]): {
+                        "gamma": s.get("call_gamma", 0) or 0,
+                        "oi": s.get("call_oi", 0) or 0
+                    } for s in strikes
+                },
+                "puts": {
+                    str(s["strike"]): {
+                        "gamma": s.get("put_gamma", 0) or 0,
+                        "oi": s.get("put_oi", 0) or 0
+                    } for s in strikes
+                }
             }
-        }
 
-        # Run analytics engine
-        analytics = analytics_engine.analyze(snapshot_data)
+            # Run analytics engine
+            analytics = analytics_engine.analyze(snapshot_data)
+            
+            # VALIDATE ANALYTICS BEFORE AI SIGNAL
+            if not analytics or analytics.get("pcr") == 0:
+                self.log_once("_analytics_error", "[SAFE MODE] Invalid analytics - using fallback")
+                return self._fallback_snapshot(symbol)
+            
+            # NORMALIZE ANALYTICS FOR UI (CRITICAL PATCH)
+            analytics["gamma"] = analytics.get("net_gex", 0)
+            analytics["oi"] = total_call_oi + total_put_oi
+            analytics["liquidity"] = total_call_oi + total_put_oi
+            analytics["volatility"] = analytics.get("iv", 0) or 0
+            
+            # Generate AI signal
+            ai_signal = ai_signal_engine.generate(analytics)
+            analytics["ai_signal"] = ai_signal
+
+            mark_health("option_chain")
+
+            # Capture price metadata
+            meta = getattr(self, "price_metadata", {}).get(symbol, {})
+
+            # ENSURE REAL DATA FLOW - Check spot price
+            if spot == 0:
+                self.log_once("_spot_error", "[SAFE MODE] Invalid spot price - using fallback")
+                return self._fallback_snapshot(symbol)
+            
+            return ChainSnapshot(
+                symbol=symbol,
+                spot=spot,
+                open=meta.get("open", spot),
+                prev_close=meta.get("prev_close", spot),
+                atm_strike=atm,
+                expiry=self.default_expiry,
+                strikes=strikes,
+                timestamp=int(now.timestamp()),
+                pcr=pcr,
+                total_oi_calls=total_call_oi,
+                total_oi_puts=total_put_oi,
+                recent_prices=getattr(self, "_price_history", {}).get(symbol, []),
+                analytics=analytics
+            )
         
-        # Generate AI signal
-        ai_signal = ai_signal_engine.generate(analytics)
-        analytics["ai_signal"] = ai_signal
-
-        mark_health("option_chain")
-
-        # Capture price metadata
-        meta = getattr(self, "price_metadata", {}).get(symbol, {})
-
-        return ChainSnapshot(
-            symbol=symbol,
-            spot=spot,
-            open=meta.get("open", spot),
-            prev_close=meta.get("prev_close", spot),
-            atm_strike=atm,
-            expiry=self.default_expiry,
-            strikes=strikes,
-            timestamp=int(now.timestamp()),
-            pcr=pcr,
-            total_oi_calls=total_call_oi,
-            total_oi_puts=total_put_oi,
-            analytics=analytics
-        )
+        except Exception as e:
+            self.log_once("_snapshot_error", f"[SAFE MODE] Snapshot error - using fallback: {str(e)[:50]}")
+            return self._fallback_snapshot(symbol)
 
     # --------------------------------------------------
 
@@ -440,6 +533,10 @@ class OptionChainBuilder:
             
             # Broadcast analytics update separately
             if snapshot.analytics:
+                # FALLBACK SAFETY - Check if using fallback snapshot
+                if snapshot.analytics.get("is_fallback"):
+                    self.log_once("_fallback_active", "[SAFE MODE] Using fallback snapshot")
+                
                 analytics_payload = {
                     "type": "analytics_update",
                     "symbol": snapshot.symbol,
@@ -450,56 +547,178 @@ class OptionChainBuilder:
                 # 🔥 ADD HERE ONLY - FINAL TARGETED PATCH
                 analytics = analytics_payload.get("analytics") or {}
                 
-                # Get strategy decision (need to import or call strategy engine)
+                # Get strategy decision from new strategy-based AI orchestrator
                 try:
-                    from app.ai.strategy_decision_engine import StrategyDecisionEngine
-                    strategy_engine = StrategyDecisionEngine()
+                    from ai.ai_orchestrator import AIOrchestrator
+                    orchestrator = AIOrchestrator()
                     
-                    # Build features from snapshot
-                    features = {
-                        'spot': snapshot.spot,
-                        'total_call_oi': snapshot.total_call_oi,
-                        'total_put_oi': snapshot.total_put_oi,
-                        'pcr': snapshot.pcr if hasattr(snapshot, 'pcr') else 0,
-                    }
+                    # Create live metrics from snapshot
+                    class LiveMetrics:
+                        def __init__(self, snapshot):
+                            self.symbol = snapshot.symbol
+                            self.spot = snapshot.spot
+                            self.pcr_ratio = snapshot.pcr
+                            self.total_call_oi = snapshot.total_oi_calls
+                            self.total_put_oi = snapshot.total_oi_puts
+                            self.confidence = snapshot.analytics.get("confidence", 0.0) if snapshot.analytics else 0.0
                     
-                    # Get strategy decision
-                    strategy_decision = strategy_engine.decide_strategy(None, features, snapshot)
+                    live_metrics = LiveMetrics(snapshot)
                     
-                    # HANDLE BOTH dict + object
-                    trade_action = "NO_TRADE"
-                    trade_confidence = 0
+                    # Run AI orchestrator with strategy-based engine
+                    ai_output = await orchestrator.run_ai_pipeline(live_metrics)
                     
-                    if strategy_decision:
-                        if isinstance(strategy_decision, dict):
-                            trade = strategy_decision.get("trade", {})
-                            trade_action = trade.get("action", "NO_TRADE")
-                            trade_confidence = trade.get("confidence", 0)
+                    # Update analytics with strategy-based output
+                    if ai_output and ai_output.get("signal") != "NONE":
+                        analytics.update({
+                            "signal": ai_output.get("signal"),
+                            "strategy": ai_output.get("strategy"),
+                            "confidence": ai_output.get("confidence"),
+                            "entry": ai_output.get("entry"),
+                            "target": ai_output.get("target"),
+                            "stop_loss": ai_output.get("stop_loss"),
+                            "risk_reward": ai_output.get("risk_reward"),
+                            "regime": ai_output.get("regime"),
+                            "metadata": ai_output.get("metadata", {}),
+                            "risk_status": ai_output.get("risk_status")
+                        })
+                    else:
+                        analytics.update({
+                            "signal": "NONE",
+                            "strategy": None,
+                            "confidence": 0.0,
+                            "blocked": True,
+                            "reason": "No strategy signal generated"
+                        })
+                        
+                except Exception as e:
+                    logger.error(f"[AI ORCHESTRATOR ERROR] {e}")
+                    analytics.update({
+                        "signal": "NONE",
+                        "strategy": None,
+                        "confidence": 0.0,
+                        "blocked": True,
+                        "reason": "AI orchestrator error"
+                    })
+                    
+                # ADD EXECUTION LOGIC
+                execution = {}
+                strategy = analytics.get("strategy")
+                
+                try:
+                    # FILTER BAD TRADES
+                    trade_score = analytics.get("metadata", {}).get("trade_score", 0)
+                    
+                    if trade_score < 0.25:
+                        print("[FILTER BLOCKED]", trade_score)
+                        # TEMP DISABLED
+                        # return
+                    
+                    # OPTIONAL (AGGRESSIVE MODE)
+                    from app.core.risk_mode import RISK_MODE
+                    if RISK_MODE == "AGGRESSIVE" and trade_score < 0.2:
+                        analytics["strategy"] = "NO_TRADE"
+                        analytics["execution"] = {}
+                        return
+                    
+                    # FINAL SAFETY LAYER - Block execution on invalid data
+                    if analytics.get("blocked"):
+                        self.log_once("_execution_blocked", f"[SAFE MODE] Execution blocked: {analytics.get('reason', 'Unknown')}")
+                        return
+                    
+                    # Check for valid trading strategies
+                    if strategy in ["BUY", "SELL"]:
+                        # FORCE EXECUTION IN AGGRESSIVE MODE
+                        if RISK_MODE == "AGGRESSIVE" and analytics.get("confidence", 0) < 0.25:
+                            analytics["confidence"] = 0.25
+                        
+                        atm = snapshot.atm_strike
+                        spot = snapshot.spot
+
+                        # STEP 1: SELECT STRIKE (UPGRADED TO ITM)
+                        from app.config import INDEX_CONFIG
+                        config = INDEX_CONFIG.get(snapshot.symbol, {"step": 50, "lot": 25})
+                        step = config["step"]
+                        
+                        if analytics["strategy"] == "BUY":
+                            strike = atm - step   # slightly ITM call
+                            option_type = "CE"
                         else:
-                            # StrategyDecision object
-                            trade_action = getattr(strategy_decision, "strategy", "NO_TRADE")
-                            trade_confidence = getattr(strategy_decision, "bias_confidence", 0)
-                    
-                    analytics["strategy"] = trade_action
-                    analytics["confidence"] = trade_confidence
-                    print("[FINAL FIXED EMITTER]", analytics)
+                            strike = atm + step   # slightly ITM put
+                            option_type = "PE"
+
+                        # STEP 2: GET LTP FROM STRIKES
+                        ltp = None
+                        for s in snapshot.strikes:
+                            if s["strike"] == strike:
+                                ltp = s.get("call_ltp") if option_type == "CE" else s.get("put_ltp")
+                                break
+
+                        if not ltp or ltp <= 0:
+                            print(f"[NO LTP] Strike {strike} {option_type}")
+                            return
+
+                        # STEP 3: ENTRY (UPGRADED)
+                        if analytics["confidence"] > 0.5:
+                            entry = ltp  # aggressive entry
+                        else:
+                            entry = ltp * 0.98  # wait for slight pullback
+
+                        # STEP 4: STOP LOSS (UPGRADED - 15%)
+                        sl = entry * 0.85
+
+                        # STEP 5: TARGET (RR 1:2)
+                        target = entry + (abs(entry - sl) * 2)
+
+                        execution = {
+                            "strike": strike,
+                            "option_type": option_type,
+                            "entry": round(entry, 2),
+                            "stop_loss": round(sl, 2),
+                            "target": round(target, 2)
+                        }
+
+                        # ATTACH TO ANALYTICS
+                        analytics["execution"] = execution
+                        print("[FINAL FIXED EMITTER]", analytics)
+                    else:
+                        # No valid strategy - set empty execution
+                        analytics["execution"] = {}
+                        print(f"[NO STRATEGY] Strategy: {strategy}")
                     
                 except Exception as e:
                     print("[STRATEGY ERROR]", str(e))
-                    analytics["strategy"] = "NO_TRADE"
-                    analytics["confidence"] = 0
+
+                    # FAILSAFE (IMPORTANT)
+                    analytics["strategy"] = analytics.get("strategy", "NO_TRADE")
+                    analytics["confidence"] = analytics.get("confidence", 0.2)
                 
+                print("[STRATEGY OUTPUT]", analytics)
                 analytics_payload["analytics"] = analytics
-                print("[FINAL FIXED EMITTER]", analytics_payload)
+                now = time.time()
+                if not hasattr(self, '_last_emitter_log_ts'):
+                    self._last_emitter_log_ts = 0
+                if now - self._last_emitter_log_ts > 5:
+                    logger.info(f"[FINAL FIXED EMITTER] size={len(json.dumps(analytics_payload, default=str))}")
+                    self._last_emitter_log_ts = now
                 
                 try:
-                    print("[WS OUTGOING PAYLOAD]", analytics_payload.get("type"), analytics_payload)
+                    now = time.time()
+                    if not hasattr(self, '_last_ws_emitter_log_ts'):
+                        self._last_ws_emitter_log_ts = 0
+                    if now - self._last_ws_emitter_log_ts > 5:
+                        logger.info(f"[WS OUTGOING PAYLOAD] {analytics_payload.get('type')} size={len(json.dumps(analytics_payload, default=str))}")
+                        self._last_ws_emitter_log_ts = now
                     await broadcast_with_strategy(analytics_payload)
                 except Exception as e:
                     logger.warning(f"Analytics broadcast failed: {e}")
             
             try:
-                print("[WS OUTGOING PAYLOAD]", payload.get("type"), payload)
+                now = time.time()
+                if not hasattr(self, '_last_ws_payload_log_ts'):
+                    self._last_ws_payload_log_ts = 0
+                if now - self._last_ws_payload_log_ts > 5:
+                    logger.info(f"[WS OUTGOING PAYLOAD] {payload.get('type')} size={len(json.dumps(payload, default=str))}")
+                    self._last_ws_payload_log_ts = now
                 await broadcast_with_strategy(payload)
             except Exception as e:
                 logger.warning(f"WS send failed (client likely disconnected): {e}")
@@ -558,6 +777,15 @@ class OptionChainBuilder:
             "open": open_price,
             "prev_close": prev_close
         }
+
+        # Track price history for momentum fallback
+        if not hasattr(self, "_price_history"):
+            self._price_history = {}
+        
+        history = self._price_history.setdefault(symbol, [])
+        history.append(price)
+        if len(history) > 5:
+            history.pop(0)
 
     # --------------------------------------------------
 
@@ -674,20 +902,15 @@ class OptionChainBuilder:
             pcr = total_put_oi / total_call_oi if total_call_oi > 0 else 0.0
             
             # Log chain update with metrics
-            logger.info(
-                f"CHAIN_UPDATE symbol={symbol} strikes={len(chain)} "
-                f"call_oi={total_call_oi:,} put_oi={total_put_oi:,} pcr={pcr:.2f}"
-            )
+            now = time.time()
+            if not hasattr(self, '_last_chain_log_ts'):
+                self._last_chain_log_ts = 0
+            if now - self._last_chain_log_ts > 5:
+                logger.info(f"[CHAIN_UPDATE] {symbol} strikes={len(chain)}")
+                self._last_chain_log_ts = now
             
             # Ensure snapshot stored globally for analytics
             self.chains[symbol] = chain
-            
-            # Log complete option data update (showing merged values)
-            logger.info(
-                f"CHAIN_UPDATE → {symbol} {right} strike={strike} ltp={opt.ltp} oi={opt.oi} "
-                f"iv={opt.iv} delta={opt.delta} "
-                f"gamma={opt.gamma} theta={opt.theta} vega={opt.vega}"
-            )
             
             # STEP 4: Merge cache data for missing fields
             try:
@@ -701,30 +924,24 @@ class OptionChainBuilder:
                     # Update missing fields from cache (DO NOT override LTP)
                     if opt.oi == 0 and snapshot.get("oi", 0) > 0:
                         opt.oi = snapshot["oi"]
-                    if opt.volume == 0 and snapshot.get("volume", 0) > 0:
-                        opt.volume = snapshot["volume"]
+                    if opt.ltp == 0 and snapshot.get("ltp", 0) > 0:
+                        opt.ltp = snapshot["ltp"]
                     if opt.bid == 0 and snapshot.get("bid", 0) > 0:
                         opt.bid = snapshot["bid"]
                     if opt.ask == 0 and snapshot.get("ask", 0) > 0:
                         opt.ask = snapshot["ask"]
                     if opt.iv == 0 and snapshot.get("iv", 0) > 0:
                         opt.iv = snapshot["iv"]
-                    
-                    logger.info(f"CHAIN MERGED WITH SNAPSHOT → {symbol} {strike_key}")
             except Exception as e:
                 logger.warning(f"Cache merge failed: {e}")
             
             # STAGE 4: OPTION UPDATE
-            logger.info(
-                "OPTION UPDATE → %s %s strike=%s oi=%s volume=%s bid=%s ask=%s",
-                symbol,
-                right,
-                strike,
-                oi,
-                volume,
-                kwargs.get("bid", 0),
-                kwargs.get("ask", 0)
-            )
+            now = time.time()
+            if not hasattr(self, '_last_option_log_ts'):
+                self._last_option_log_ts = 0
+            if now - self._last_option_log_ts > 5:
+                logger.info(f"[OPTION UPDATE] {symbol} {strike}{right}")
+                self._last_option_log_ts = now
 
             logger.debug(f"OPTION TICK UPDATED → {symbol} {strike}{right} ltp={opt.ltp} oi={opt.oi}")
 

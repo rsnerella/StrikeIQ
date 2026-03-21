@@ -1,6 +1,13 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+import builtins
+
+# HARD SAFETY PATCH - Block all print statements
+# builtins.print = lambda *args, **kwargs: None  # COMMENTED FOR DEBUG
+
+print(" MAIN STARTED")
+
 import os
 import sys
 
@@ -10,6 +17,9 @@ if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
 import logging
+
+# HARD LIMIT - Reduce log level to ERROR only
+logging.getLogger().setLevel(logging.ERROR)
 import asyncio
 import selectors
 from contextlib import asynccontextmanager
@@ -96,7 +106,7 @@ async def snapshot_cleanup_worker():
 
                 cleanup_result = result.scalar()
 
-            logger.info(f"🧹 Snapshot cleanup executed: {cleanup_result}")
+            logger.info("Snapshot cleanup executed")
 
             await asyncio.sleep(86400)
 
@@ -145,7 +155,7 @@ async def token_watcher():
 
         await start_market_feed()
 
-        logger.info("📡 Market feed started")
+        logger.info("Market feed started")
 
     except asyncio.CancelledError:
         logger.info("Token watcher cancelled")
@@ -184,7 +194,7 @@ async def poller_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
-    logger.info("🚀 Starting StrikeIQ API...")
+    logger.info("Starting StrikeIQ API...")
 
     app.state.background_tasks = []
 
@@ -202,7 +212,7 @@ async def lifespan(app: FastAPI):
 
         if db_ok:
             diag("DB", "Connection OK")
-            logger.info("✅ Database connected")
+            logger.info("Database connected")
         else:
             diag("DB", "Connection FAILED")
 
@@ -216,7 +226,7 @@ async def lifespan(app: FastAPI):
         redis_ok = await test_redis_connection()
 
         if redis_ok:
-            logger.info("✅ Redis connected")
+            logger.info("Redis connected")
         else:
             logger.warning("Redis unavailable")
 
@@ -233,7 +243,7 @@ async def lifespan(app: FastAPI):
 
         app.state.registry = registry
 
-        logger.info("🟢 Instrument registry ready")
+        logger.info("Instrument registry ready")
 
     except Exception as e:
         logger.error(f"Instrument registry failed: {e}")
@@ -246,7 +256,7 @@ async def lifespan(app: FastAPI):
 
         await market_context_engine.initialize()
 
-        logger.info("📈 Market context engine ready")
+        logger.info("Market context engine ready")
 
     except Exception as e:
         logger.error(f"Market context engine failed: {e}")
@@ -275,8 +285,8 @@ async def lifespan(app: FastAPI):
             name="analytics_broadcaster"
         )
         app.state.background_tasks.append(task)
-        logger.info("🧠 Analytics Broadcaster (Elite Engine) started")
-        logger.info("🧠 Trade Lifecycle Manager initialized")
+        logger.info("Analytics Broadcaster (Elite Engine) started")
+        logger.info("Trade Lifecycle Manager initialized")
     except Exception as e:
         logger.error(f"Analytics broadcaster failed: {e}")
 
@@ -291,9 +301,9 @@ async def lifespan(app: FastAPI):
         
         if run_ai:
             ai_scheduler.start()
-            logger.info("🧠 AI Scheduler started (Database Persistence Active)")
+            logger.info("AI Scheduler started (Database Persistence Active)")
         else:
-            logger.info("🧠 AI Scheduler disabled via ENABLE_AI=false")
+            logger.info("AI Scheduler disabled via ENABLE_AI=false")
 
     except Exception as e:
         logger.error(f"AI Scheduler failed: {e}")
@@ -378,11 +388,18 @@ async def lifespan(app: FastAPI):
 
 # ================= FASTAPI APP =================
 
-app = FastAPI(
-    title="StrikeIQ API",
-    version="2.1.0",
-    lifespan=lifespan
-)
+try:
+    app = FastAPI(
+        title="StrikeIQ API",
+        version="2.1.0",
+        lifespan=lifespan
+    )
+    print("✅ FastAPI app created successfully")
+except Exception as e:
+    print("❌ APP INIT ERROR:", e)
+    import traceback
+    traceback.print_exc()
+    raise
 
 # ================= CORS =================
 
@@ -430,7 +447,30 @@ app.include_router(ws_router)
 app.include_router(ai_status_router, prefix="/api/v1/ai")
 app.include_router(ui_ws_router)
 app.include_router(diagnostics_router)
-app.include_router(redis_health_router, prefix="/api/v1/redis")
+# ================= RISK CONTROL =================
+
+@app.get("/api/v1/set-risk-mode")
+async def set_risk_mode(mode: str):
+    if mode not in ["SAFE", "AGGRESSIVE"]:
+        raise HTTPException(status_code=400, detail="Invalid risk mode. Use SAFE or AGGRESSIVE.")
+    
+    from ai import strategy_decision_engine
+    strategy_decision_engine.RISK_MODE = mode
+    logger.info(f"Risk mode updated to: {mode}")
+    return {"status": "ok", "mode": mode}
+
+
+# ================= RISK CONTROL (LEGACY) =================
+
+@app.get("/set-risk-mode")
+async def set_risk_mode_legacy(mode: str):
+    if mode not in ["SAFE", "AGGRESSIVE"]:
+        return {"status": "error", "message": "Invalid mode"}
+    
+    from ai import strategy_decision_engine
+    strategy_decision_engine.RISK_MODE = mode
+    logger.info(f"Risk mode updated via legacy endpoint to: {mode}")
+    return {"status": "ok", "mode": mode}
 
 
 # ================= RUN =================

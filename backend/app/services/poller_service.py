@@ -24,6 +24,7 @@ class PollerService:
 
         self.base_url_v2 = "https://api.upstox.com/v2"
         self.base_url_v3 = "https://api.upstox.com/v3"
+        self.active_symbol = None
 
         self.symbol_map = {
             "NIFTY": "NSE_INDEX|Nifty 50",
@@ -76,10 +77,13 @@ class PollerService:
             
             symbol = feed.active_symbol
             if not symbol:
-                logger.warning("No active symbol in market feed")
-                return
+                print("[FIX] Default symbol set → NIFTY")
+                symbol = "NIFTY"
+                feed.active_symbol = symbol
+                self.active_symbol = symbol
             
             logger.info(f"POLLER → Polling active symbol: {symbol}")
+            print("[POLLER] Fetching market data for:", self.active_symbol or symbol)
             await self._fetch_option_chain(symbol)
 
         except Exception as e:
@@ -134,7 +138,10 @@ class PollerService:
                 data = response.json().get("data", [])
                 if not data:
                     logger.warning(f"Option chain REST returned empty data for {symbol}")
+                    print("[POLLER ERROR] No data received")
                     return
+
+                print("[POLLER SUCCESS] Data received")
 
                 # Extract spot price from first data item
                 spot_price = 0.0

@@ -177,6 +177,11 @@ class AISignalEngine:
                 logger.warning("No market snapshot available — skipping signal generation")
                 return 0
             
+            # CHECK DATA VALIDITY BEFORE PROCESSING
+            if hasattr(market_data, 'is_valid') and not market_data.is_valid:
+                logger.warning("Invalid market data — blocking signal generation")
+                return 0
+            
             # Phase 1: Snapshot Validation (Numerical)
             spot = float(market_data.get('spot_price', 0) or 0)
             expected_move = float(market_data.get('expected_move', 0) or 0)

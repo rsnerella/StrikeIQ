@@ -176,14 +176,7 @@ async def get_historical_candles(
             'FINNIFTY': 'NSE_INDEX|Nifty Fin Service',
         }.get(symbol.upper(), 'NSE_INDEX|Nifty 50')
 
-        logger.info(f"FETCHING CANDLES → symbol={symbol}, tf={tf}, interval={interval}, key={instrument_map}")
-        print("[CANDLE REQUEST]", {
-            'symbol': symbol,
-            'timeframe': tf,
-            'interval': interval,
-            'instrument_key': instrument_map,
-            'limit': limit
-        })
+        logger.info(f"Fetching candles for {symbol} ({tf})")
 
         # Get token
         token = os.getenv("UPSTOX_TOKEN")
@@ -214,13 +207,7 @@ async def get_historical_candles(
             
             # Sort descending (newest first)
             data = sorted(unique_candles.values(), key=lambda x: x[0], reverse=True)
-            logger.info(f"CANDLE LOADER → total={len(data)} (hist={len(historical_data)}, intra={len(intraday_data)})")
-            print("[CANDLE RESPONSE]", {
-                'intraday_count': len(intraday_data),
-                'historical_count': len(historical_data),
-                'unique_count': len(data),
-                'sample_candles': data[:3] if data else []
-            })
+            logger.info(f"Candles loaded: {len(data)} total")
 
             # 4. Failsafe fallback using live spot price
             if len(data) == 0:
@@ -248,12 +235,7 @@ async def get_historical_candles(
                     'volume': c[5] if len(c) > 5 else 0
                 })
             
-            print("[CANDLE FINAL]", {
-                'symbol': symbol,
-                'timeframe': tf,
-                'candles_returned': len(candles),
-                'has_data': len(candles) > 0
-            })
+            logger.info(f"Returning {len(candles)} candles for {symbol} ({tf})")
 
             return {
                 'symbol': symbol.upper(), 
@@ -263,9 +245,4 @@ async def get_historical_candles(
 
     except Exception as e:
         logger.error(f"Candles fetch error for {symbol} ({tf}): {e}")
-        print("[CANDLE ERROR]", {
-            'symbol': symbol,
-            'timeframe': tf,
-            'error': str(e)
-        })
         return {"symbol": symbol, "tf": tf, "candles": [], "error": str(e)}

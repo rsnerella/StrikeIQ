@@ -272,11 +272,7 @@ class BacktestEngine:
                 decision = self.strategy_engine.decide_strategy(None, features)
                 
                 # Debug output
-                print("[BACKTEST DEBUG]", {
-                    "features": list(features.keys()) if isinstance(features, dict) else "invalid",
-                    "decision": decision.strategy if hasattr(decision, 'strategy') else "invalid",
-                    "confidence": getattr(decision, 'bias_confidence', 0.0)
-                })
+                print(f"[BACKTEST DEBUG] Decision: {decision.strategy} | Confidence: {getattr(decision, 'bias_confidence', 0.0):.1f}")
                 
                 # Create trade if signal is valid
                 if decision.strategy != "NO_TRADE":

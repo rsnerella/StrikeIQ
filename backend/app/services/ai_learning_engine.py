@@ -22,15 +22,15 @@ class AILearningEngine:
                     SUM(CASE WHEN o.outcome = 'WIN' THEN 1 ELSE 0 END) as wins,
                     SUM(CASE WHEN o.outcome = 'LOSS' THEN 1 ELSE 0 END) as losses,
                     SUM(CASE WHEN o.outcome = 'HOLD' THEN 1 ELSE 0 END) as holds,
-                    AVG(o.confidence) as avg_confidence,
+                    AVG(p.confidence) as avg_confidence,
                     MAX(o.evaluation_time) as last_evaluation
                 FROM ai_signal_logs p
-                LEFT JOIN outcome_log o ON p.id = o.prediction_id
-                WHERE p.metadata->>'formula_id' = %s
-                AND p.timestamp >= NOW() - INTERVAL %s
+                LEFT JOIN outcome_log o ON p.id::text = o.prediction_id::text
+                WHERE p.formula_id = %s
+                AND p.timestamp >= NOW() - (%s)::interval
             """
             
-            params = (str(formula_id), f"{days} days")
+            params = (int(formula_id), f"{days} days")
             result = await self.db.fetch_one(query, params)
             
             if result:

@@ -67,7 +67,7 @@ class InstrumentRegistry:
             if self._ready_event.is_set():
                 return
 
-            print("🔥 Loading Instrument Registry from Upstox CDN...")
+            logger.info("[REGISTRY] Loading from Upstox CDN")
 
             async with self._local_lock:
 
@@ -114,8 +114,8 @@ class InstrumentRegistry:
                         self.futidx \
                             .setdefault(name, {})[expiry] = inst["instrument_key"]
 
-                print("🟢 Instrument Registry Loaded Successfully")
-                print(f"Available Symbols: {list(self.options.keys())}")
+                logger.info("[REGISTRY] Loaded successfully")
+                logger.debug(f"[REGISTRY] Available symbols: {list(self.options.keys())}")
 
                 self._build_reverse_maps()
 
@@ -188,7 +188,7 @@ class InstrumentRegistry:
         if not cache_file.exists():
             raise FileNotFoundError("Local cache file not found")
 
-        print(f"📦 Loading from local cache: {cache_file}")
+        logger.info(f"[CACHE] Loading from local cache: {cache_file}")
 
         with open(cache_file, "r", encoding="utf-8") as f:
             raw = json.load(f)
@@ -228,7 +228,7 @@ class InstrumentRegistry:
                 self.futidx \
                     .setdefault(name, {})[expiry] = inst["instrument_key"]
 
-        print("🟢 Instrument Registry Loaded from Local Cache")
+        logger.info("[REGISTRY] Loaded from local cache")
 
         self._build_reverse_maps()
 
