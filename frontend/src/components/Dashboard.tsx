@@ -189,6 +189,9 @@ const DASHBOARD_CSS = `
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 function DashboardComponent({ initialSymbol = 'NIFTY' }: DashboardProps) {
+  // Optional safety: ensure client-side only
+  if (typeof window === 'undefined') return null;
+  
   const setCurrentSymbol = useMarketContextStore(state => state.setSymbol);
   const currentSymbol = useMarketContextStore(state => state.symbol);
 
