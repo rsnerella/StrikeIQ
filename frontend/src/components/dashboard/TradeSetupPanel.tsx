@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { TrendingUp, TrendingDown, Target, Shield, Activity, Search } from 'lucide-react';
 import { CARD, CARD_HOVER_BORDER } from './DashboardTypes';
 import { SectionLabel } from './StatCards';
@@ -64,9 +64,9 @@ export function TradeSetupPanel() {
     }
     
     // STEP 2: READ CORRECT DATA
-    const strategy = analytics?.strategy
-    const confidence = analytics?.confidence
-    const execution = analytics?.execution || {}
+    const strategy = analytics?.strategy;
+    const confidence = analytics?.confidence;
+    const execution = analytics?.execution || {};
 
     const tradeScore =
       analytics?.metadata?.trade_score !== undefined
@@ -76,13 +76,16 @@ export function TradeSetupPanel() {
     // STEP 4: Only log on data changes
     const prevStrategyRef = useRef(strategy);
     const prevAnalyticsRef = useRef(analytics);
-    
-    if (prevStrategyRef.current !== strategy || prevAnalyticsRef.current !== analytics) {
-        console.log("[UI STRATEGY DATA]", strategy, confidence);
-        console.log("[UI DATA]", analytics);
-        prevStrategyRef.current = strategy;
-        prevAnalyticsRef.current = analytics;
-    }
+
+    useEffect(() => {
+        if (prevStrategyRef.current !== strategy || prevAnalyticsRef.current !== analytics) {
+            console.log("[UI STRATEGY DATA]", strategy, confidence);
+            console.log("[UI DATA]", analytics);
+
+            prevStrategyRef.current = strategy;
+            prevAnalyticsRef.current = analytics;
+        }
+    }, [strategy, analytics]);
     
     // STEP 6: CRITICAL CHECK - Debug full store if strategy undefined
     if (!strategy) {
@@ -99,7 +102,7 @@ export function TradeSetupPanel() {
         !strategy ||
         strategy === 'NO_TRADE' ||
         strategy === 'NEUTRAL' ||
-        confidence < 0.18 ||
+        (confidence ?? 0) < 0.18 ||
         !execution.strike
     )
     const isBullish = strategy === 'BUY' || (strategy?.includes('BUY'));
