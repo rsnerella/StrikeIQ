@@ -112,16 +112,16 @@ class AISignalEngine:
                 except:
                     pcr = 0.0
                         
-                if '>' in conditions and '1.2' in conditions and pcr > 1.2:
+                if '>' in conditions and pcr > 1.05:
                     matches = True
                     signal = "BUY"
                     confidence = min(0.9, pcr / 2.0)
-                    reason = f"Extreme PCR reversal ({pcr:.2f})"
-                elif '<' in conditions and '0.8' in conditions and pcr < 0.8:
+                    reason = f"Elevated PCR bullish reversal ({pcr:.2f})"
+                elif '<' in conditions and pcr < 0.95:
                     matches = True
                     signal = "SELL"
-                    confidence = min(0.9, (0.8 - pcr) / 0.8)
-                    reason = f"PCR weakness detected ({pcr:.2f})"
+                    confidence = min(0.9, (0.95 - pcr) / 0.95)
+                    reason = f"Low PCR bearish pressure ({pcr:.2f})"
             
             # OI-based signals
             if 'total_call_oi' in conditions and 'total_put_oi' in conditions:
@@ -202,10 +202,10 @@ class AISignalEngine:
             # Phase 2: Expected Move Safety (Clamp to min 20)
             expected_move = max(expected_move, 20.0)
             
-            # Phase 3: Signal Cooldown (5 minutes)
+            # Phase 3: Signal Cooldown (60 seconds to allow steady signal flow)
             now = time.time()
             if symbol in self.last_signal_times:
-                if now - self.last_signal_times[symbol] < 300:
+                if now - self.last_signal_times[symbol] < 60:
                     logger.debug(f"Signal cooldown active for {symbol}")
                     return 0
             

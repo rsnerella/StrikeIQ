@@ -1,0 +1,20 @@
+
+> strikeiq-frontend@1.0.0 build
+> next build
+
+Γû▓ Next.js 16.1.6 (Turbopack)
+- Environments: .env.local
+
+  Running TypeScript ...
+Failed to compile.
+
+./src/components/charts/StrikeIQPriceChart.tsx:2:141
+Type error: Cannot find module 'lightweight-charts' or its corresponding type declarations.
+
+  1 | import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+> 2 | import { createChart, ColorType, IChartApi, ISeriesApi, LineStyle, CrosshairMode, SeriesMarkerPosition, SeriesMarkerShape, LineWidth } from 'lightweight-charts';
+    |                                                                                                                                             ^
+  3 | import { useMarketContextStore } from '@/stores/marketContextStore';
+  4 | import { LiveMarketData } from '@/hooks/useLiveMarketData';
+  5 | import { useWSStore } from '@/core/ws/wsStore';
+Next.js build worker exited with code: 1 and signal: null

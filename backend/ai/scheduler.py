@@ -20,12 +20,12 @@ class AIScheduler:
         try:
             # Signal generation job → every 5 seconds
             self.scheduler.add_job(
-                func=self.signal_generation_job,
-                trigger=IntervalTrigger(seconds=5),
+                self.signal_generation_job,
+                'interval',
+                seconds=5,
                 id='signal_generation',
                 name='Generate AI signals',
-                replace_existing=True,
-                max_instances=1  # Prevent overlapping
+                replace_existing=True
             )
             
             # Paper trade monitor → every 10 seconds
@@ -34,8 +34,7 @@ class AIScheduler:
                 trigger=IntervalTrigger(seconds=10),
                 id='paper_trade_monitor',
                 name='Monitor paper trades',
-                replace_existing=True,
-                max_instances=1  # Prevent overlapping
+                replace_existing=True
             )
             
             # New prediction processing → every 15 seconds
@@ -44,21 +43,18 @@ class AIScheduler:
                 trigger=IntervalTrigger(seconds=15),
                 id='new_prediction_processing',
                 name='Process new predictions',
-                replace_existing=True,
-                max_instances=1  # Prevent overlapping
+                replace_existing=True
             )
             
             # Outcome checker → every 1 minute
             from app.services.ai_outcome_engine import AIOutcomeEngine
             engine = AIOutcomeEngine()
             self.scheduler.add_job(
-                engine.evaluate_pending_outcomes,
-                "interval",
-                minutes=1,
+                func=self.outcome_checker_job,
+                trigger=IntervalTrigger(minutes=1),
                 id='outcome_checker',
                 name='Evaluate prediction outcomes',
-                replace_existing=True,
-                max_instances=1
+                replace_existing=True
             )
             
             # Learning updater → every 1 minute
@@ -67,8 +63,7 @@ class AIScheduler:
                 trigger=IntervalTrigger(minutes=1),
                 id='learning_update',
                 name='Update AI learning',
-                replace_existing=True,
-                max_instances=1  # Prevent overlapping
+                replace_existing=True
             )
             
             # Market snapshot collector → every 1 minute
@@ -77,8 +72,7 @@ class AIScheduler:
                 trigger=IntervalTrigger(minutes=1),
                 id='market_snapshot',
                 name='Collect market snapshot',
-                replace_existing=True,
-                max_instances=1
+                replace_existing=True
             )
             
             # ML Model Training → everyday at 16:00 IST
@@ -87,8 +81,7 @@ class AIScheduler:
                 trigger=CronTrigger(hour=16, minute=0, timezone='Asia/Kolkata'),
                 id='ml_training',
                 name='ML Model Training',
-                replace_existing=True,
-                max_instances=1  # Prevent overlapping
+                replace_existing=True
             )
             
             # Adaptive learning update → every 30 minutes (Step 11)
@@ -97,8 +90,7 @@ class AIScheduler:
                 trigger=IntervalTrigger(minutes=30),
                 id='adaptive_learning',
                 name='Update strategy learning scores',
-                replace_existing=True,
-                max_instances=1
+                replace_existing=True
             )
             
             logger.info("AI scheduler jobs setup completed")

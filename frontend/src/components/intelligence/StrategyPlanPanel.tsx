@@ -1,6 +1,6 @@
 "use client";
 
-import React, { memo } from 'react';
+import React, { memo, useRef } from 'react';
 import { Target, Shield, DollarSign, Activity, Percent } from 'lucide-react';
 import { useWSStore } from '@/core/ws/wsStore';
 import { SectionLabel } from '../dashboard/StatCards';
@@ -19,8 +19,12 @@ const StrategyPlanPanel: React.FC = () => {
     
     const confidence = analytics?.confidence ?? biasStrength;
     
-    // DEBUG LOG
-    console.log("[UI DATA]", analytics)
+    // Only log on data changes
+    const prevAnalyticsRef = useRef(analytics);
+    if (prevAnalyticsRef.current !== analytics) {
+        console.log("[UI DATA]", analytics);
+        prevAnalyticsRef.current = analytics;
+    }
 
     const gamma = analytics?.gamma ?? null
     const oi = analytics?.oi ?? null

@@ -169,25 +169,20 @@ export const useWSStore = create<WSStore>((set, get) =>({
     if (!message) return
 
     // STEP 4: VERIFY STORE ENTRY
-    console.log("[STORE HANDLE ENTRY]", message.type)
-    console.log("[ZUSTAND SET]", message.analytics)
-
-    // STEP 5: RAW WS LOGGING
-    if (message.type !== 'pong' && message.type !== 'ping') {
-      console.log('RAW WS MESSAGE:', message.type, Object.keys(message));
+    if (process.env.NODE_ENV === 'development') {
+      console.log("[STORE HANDLE ENTRY]", message.type)
     }
-    
-    // 🔥 TEMP DEBUG LOG (REMOVE AFTER 2-3 MINS)
-    if (message.type === 'analytics_update' || message.type === 'market_update') {
-      console.log('[WS DATA]', message);
+
+    // STEP 5: RAW WS LOGGING (development only)
+    if (process.env.NODE_ENV === 'development' && message.type !== 'pong' && message.type !== 'ping') {
+      console.log('RAW WS MESSAGE:', message.type, Object.keys(message));
     }
 
     const marketContextStore = useMarketContextStore.getState();
     const selectedSymbol = marketContextStore?.symbol || 'NIFTY';
 
     switch (message.type) {
-      case 'market_update':
-      case 'analytics_update': {
+      case 'market_update': {
         const now = Date.now()
         if (now - get()._lastChainUpdate < get()._THROTTLE_MS) {
           return
@@ -199,8 +194,8 @@ export const useWSStore = create<WSStore>((set, get) =>({
         const spotRaw = p.spot ?? p.spotPrice ?? p.liveSpot ?? p.currentSpot ?? 0;
         const spot = typeof spotRaw === 'number' && spotRaw > 0 ? spotRaw : 0;
 
-        // Log every message so we can verify it's arriving
-        if (process.env.NODE_ENV === 'development') {
+        // Development logging (reduced frequency)
+        if (process.env.NODE_ENV === 'development' && now % 10000 < 100) { // Log every 10 seconds
           console.log(
             '[wsStore] market_update |',
             'spot=', spot,
@@ -301,17 +296,21 @@ export const useWSStore = create<WSStore>((set, get) =>({
         const a = message.analytics || {}
         const spot = a.spot || a.spotPrice || message.spot || 0
 
-        console.log("[WS FINAL ANALYTICS INCOMING]", a)
-
         set((prev) => {
-          console.log("[WS FINAL ANALYTICS AFTER MERGE]", {
-            incoming: a,
-            previous: prev.analytics,
-            merged: {
-              ...prev.analytics,
-              ...a
-            }
-          })
+          const mergedAnalytics = {
+            ...prev.analytics,
+            ...a
+          }
+          
+          // Only log on significant changes (development only)
+          if (process.env.NODE_ENV === 'development' && 
+              (prev.analytics?.strategy !== a.strategy || 
+               prev.analytics?.confidence !== a.confidence)) {
+            console.log("[WS ANALYTICS UPDATE]", {
+              strategy: a.strategy,
+              confidence: a.confidence
+            });
+          }
 
           return {
             spotPrice:    spot > 0 ? spot : prev.spotPrice,

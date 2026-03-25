@@ -73,9 +73,16 @@ export function TradeSetupPanel() {
         ? analytics.metadata.trade_score
         : null
 
-    // STEP 4: DEBUG UI DATA
-    console.log("[UI STRATEGY DATA]", strategy, confidence)
-    console.log("[UI DATA]", analytics)
+    // STEP 4: Only log on data changes
+    const prevStrategyRef = useRef(strategy);
+    const prevAnalyticsRef = useRef(analytics);
+    
+    if (prevStrategyRef.current !== strategy || prevAnalyticsRef.current !== analytics) {
+        console.log("[UI STRATEGY DATA]", strategy, confidence);
+        console.log("[UI DATA]", analytics);
+        prevStrategyRef.current = strategy;
+        prevAnalyticsRef.current = analytics;
+    }
     
     // STEP 6: CRITICAL CHECK - Debug full store if strategy undefined
     if (!strategy) {

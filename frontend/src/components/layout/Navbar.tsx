@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { Wifi, WifiOff, Heart, BarChart2, Link2, Activity, Bell, Home, TrendingUp, Brain, Settings } from "lucide-react";
-import { useMarketStore } from "@/stores/marketStore";
+import { useMarketStore, useConnectionStatus } from "@/stores/marketStore";
 import { useWSStore } from "@/core/ws/wsStore";
 import api from "@/api/client";
 
@@ -44,21 +44,22 @@ function scrollToSection(sectionId: string) {
 
 export default function Navbar() {
 
-  const connected = useMarketStore((s) => s.connected);
+  const { connected } = useConnectionStatus();
 
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
 
-  const marketStatus = useWSStore((s) => s.marketStatus);
+  const marketStatus: "OPEN" | "PREOPEN" | "CLOSED" | "UNKNOWN" = useWSStore((s) => s.marketStatus);
   const setMarketStatus = useWSStore((s) => s.setMarketStatus);
 
   useEffect(() => {
     const fetchMarketStatus = async () => {
       try {
-        const response = await api.get('/v1/market/status');
-        const data = response.data;
-
+        const data = await api.get('/v1/market/status').then(r => r.data);
         if (data && (data.market_status || data.status)) {
-          setMarketStatus(data.market_status || data.status || "UNKNOWN");
+          const newStatus = data.market_status || data.status || "UNKNOWN";
+          if (marketStatus !== newStatus) {
+            setMarketStatus(newStatus);
+          }
         }
       } catch (err) {
         console.warn("Failed to fetch market status", err);
@@ -69,7 +70,7 @@ export default function Navbar() {
     const interval = setInterval(fetchMarketStatus, 30000);
 
     return () => clearInterval(interval);
-  }, [setMarketStatus]);
+  }, []);
 
   return (
     <>

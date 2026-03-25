@@ -4,6 +4,7 @@ Weights signals across 1m, 5m, and 15m views
 """
 
 import logging
+import numpy as np
 from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger(__name__)

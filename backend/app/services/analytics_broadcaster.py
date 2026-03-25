@@ -183,23 +183,31 @@ class AnalyticsBroadcaster:
     async def _build_analytics_payload(self, symbol: str, snapshot) -> Dict[str, Any]:
         """Build separated analytics and execution payloads"""
         try:
-            # STEP 1: FIX SNAPSHOT STRUCTURE
-            # Wrap raw dict to ensure proper structure
+            # STEP 1: Extract raw chain and spot from snapshot object
             if hasattr(snapshot, 'strikes'):
                 raw_chain = snapshot.strikes
                 spot_price = snapshot.spot
             else:
-                # Handle dict format - extract strikes and spot properly
-                raw_chain = snapshot.get('strikes', snapshot)
-                spot_price = snapshot.get('spot')
-            
-            snapshot_obj = OptionChainSnapshot(raw_chain, spot_price)
-            
-            # STEP 2: VALIDATION LOG
-            logger.debug("[SNAPSHOT] Processing chain data")
-            
+                raw_chain = snapshot.get('strikes', {})
+                spot_price = snapshot.get('spot', 0)
+
+            # STEP 2: Convert dict-format strikes {N: {CE:{}, PE:{}}} to list-format
+            # the FeatureEngine sub-analyzers expect [{strike:N, CE:{}, PE:{}}]
+            if isinstance(raw_chain, dict):
+                raw_chain_list = [
+                    {"strike": float(k), **v}
+                    for k, v in raw_chain.items()
+                    if isinstance(v, dict)
+                ]
+            else:
+                raw_chain_list = raw_chain  # already a list
+
+            snapshot_obj = OptionChainSnapshot(raw_chain_list, spot_price)
+
+            logger.debug("[SNAPSHOT] Processing chain data — %d strikes", len(raw_chain_list))
+
             # Compute features with proper structure
-            features = self.feature_engine.compute_features(snapshot_obj, snapshot_obj.spot)
+            features = self.feature_engine.compute_features(snapshot_obj, spot_price)
             
             # Convert to dict for bias calculation
             features_dict = {
@@ -734,30 +742,61 @@ class AnalyticsBroadcaster:
                 "analytics": payload["market_analysis"]
             }
             
-            # STEP 3: INJECT STRATEGY ONLY HERE
-            strategy_decision = await self._build_analytics_payload(symbol, snap)
+            # STEP 3: INJECT STRATEGY, CONFIDENCE, AND EXECUTION INTO ANALYTICS
+            strategy_decision_payload = await self._build_analytics_payload(symbol, snap)
             
-            # STEP 1: LOG RAW strategy_decision
             logger.debug("[DEBUG] Strategy decision processed")
             
-            # STEP 2: REMOVE CONDITION (TEMP DEBUG MODE)
-            trade = strategy_decision.get("trade") if strategy_decision else None
-            logger.debug("[DEBUG] Trade object extracted")
-            
-            # STEP 3: FORCE INJECTION
+            # Guard against None if _build_analytics_payload failed
+            _sdp = strategy_decision_payload or {}
+            trade = _sdp.get("trade")
+            sd_analysis = _sdp.get("analysis")
+
             analytics = analytics_payload.get("analytics") or {}
-            analytics["strategy"] = trade.get("action") if trade else "NO_TRADE"
-            analytics["confidence"] = trade.get("confidence") if trade else 0
             
-            # SAFE FALLBACK (CRITICAL)
-            if analytics.get("confidence") == 0:
-                analytics["confidence"] = 0.35
-            if analytics.get("strategy") == "NO_TRADE":
-                analytics["strategy"] = "WEAK_SIGNAL"
+            # --- strategy & confidence ---
+            raw_strategy = (
+                _sdp.get("strategy")
+                or (sd_analysis or {}).get("strategy")
+                or (trade or {}).get("action")
+                or "NO_TRADE"
+            )
+            raw_confidence = (
+                _sdp.get("confidence")
+                or (sd_analysis or {}).get("confidence")
+                or (trade or {}).get("probability")
+                or 0
+            )
+
+            if not raw_strategy or raw_strategy == "NO_TRADE":
+                raw_strategy = "WEAK_SIGNAL"
+            if not raw_confidence or raw_confidence == 0:
+                raw_confidence = 0.35
+
+            analytics["strategy"] = raw_strategy
+            analytics["confidence"] = raw_confidence
+
+            # --- execution (THIS WAS THE MISSING PIECE) ---
+            if trade and trade.get("action") not in (None, "NO_TRADE"):
+                analytics["execution"] = {
+                    "strike":      trade.get("strike", 0),
+                    "option_type": trade.get("option_type", "CE"),
+                    "entry":       trade.get("entry", 0),
+                    "target":      trade.get("target", 0),
+                    "stop_loss":   trade.get("stop_loss", 0),
+                    "risk_reward": trade.get("risk_reward", 0),
+                }
+            elif not analytics.get("execution"):
+                analytics["execution"] = {}
+
+            # --- reasoning ---
+            if sd_analysis and sd_analysis.get("reasoning"):
+                analytics["reasoning"] = sd_analysis["reasoning"]
             
             analytics_payload["analytics"] = analytics
-            print("[BACKEND ANALYTICS]", analytics)
-            print("[BACKEND PAYLOAD]", analytics_payload)
+            logger.debug("[BACKEND ANALYTICS] strategy=%s conf=%.2f strike=%s",
+                         analytics.get("strategy"), analytics.get("confidence", 0),
+                         analytics.get("execution", {}).get("strike", "N/A"))
             
             # STEP 4: FINAL LOG
             now = time.time()

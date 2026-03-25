@@ -406,6 +406,7 @@ except Exception as e:
 origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "*"  # Allow all origins for production
 ]
 
 app.add_middleware(

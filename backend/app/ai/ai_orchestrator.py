@@ -111,29 +111,31 @@ class AIOrchestrator:
             analysis = market_analysis_engine.analyze(fv, snapshot)
             
             # 4.1 Institutional Gamma Analysis (Law 1 Alignment)
+            # snapshot is a dict here — use .get() safely
+            snap_spot = snapshot.get('spot', 0) if isinstance(snapshot, dict) else getattr(snapshot, 'spot', 0)
             gamma_metrics = {
                 "net_gamma": fv.net_gamma,
                 "gamma_flip_level": analysis.key_levels.get("gex_flip", 0),
-                "spot_price": snapshot.spot
+                "spot_price": snap_spot
             }
-            inst_gamma = self.dealer_gamma.analyze(gamma_metrics)
+            inst_gamma = self.dealer_gamma.analyze(gamma_metrics) if self.dealer_gamma else {"signal": "GAMMA_NEUTRAL", "direction": "NONE", "strength": 0, "reason": "Engine unavailable"}
             
             # 4.2 Squeeze & Liquidity Scanning
             inst_metrics = {
-                "spot": snapshot.spot,
+                "spot": snap_spot,
                 "net_gamma": fv.net_gamma,
                 "gamma_flip_level": analysis.key_levels.get("gex_flip", 0),
-                "distance_from_flip": abs(snapshot.spot - analysis.key_levels.get("gex_flip", 0)),
+                "distance_from_flip": abs(snap_spot - analysis.key_levels.get("gex_flip", 0)),
                 "flow_direction": "call" if fv.pcr_ratio < 0.8 else "put" if fv.pcr_ratio > 1.2 else "neutral",
                 "flow_imbalance": abs(1.0 - fv.pcr_ratio),
                 "oi_velocity": fv.oi_velocity if hasattr(fv, 'oi_velocity') else 0,
                 "volatility_regime": analysis.volatility_state.get("state", "normal"),
                 "support_level": analysis.key_levels.get("put_wall", 0),
                 "resistance_level": analysis.key_levels.get("call_wall", 0),
-                "expected_move": analysis.volatility_state.get("iv_atm", 0) * snapshot.spot * 0.02 # Proxy
+                "expected_move": analysis.volatility_state.get("iv_atm", 0) * snap_spot * 0.02
             }
-            squeeze_data = self.gamma_squeeze.analyze(inst_metrics)
-            liquidity_data = self.liquidity_engine.analyze(inst_metrics)
+            squeeze_data = self.gamma_squeeze.analyze(inst_metrics) if self.gamma_squeeze else {"signal": "NONE", "confidence": 0, "direction": "NEUTRAL", "reason": ""}
+            liquidity_data = self.liquidity_engine.analyze(inst_metrics) if self.liquidity_engine else {"signal": "NONE"}
 
             # 5. Early Warning Scan (Merge with institutional squeeze alerts)
             alerts = early_warning_engine.scan(fv, snapshot, analysis)
@@ -158,13 +160,18 @@ class AIOrchestrator:
             confidence = max(0.0, confidence * (1.0 - drift))
             
             # 8. Trade Planning (Execution strategy - Law 1 Alignment)
-            # Use institutional option trade engine for real strikes
-            opt_trade = generate_option_trade(snapshot, snapshot)
+            # generate_option_trade expects snapshot object, not a dict — skip if unavailable
+            opt_trade = None
+            if generate_option_trade and not isinstance(snapshot, dict):
+                try:
+                    opt_trade = generate_option_trade(snapshot, snapshot)
+                except Exception as _ot_err:
+                    logger.debug(f"generate_option_trade skipped: {_ot_err}")
             plan = trade_planner.plan(symbol, analysis, confidence)
             
             # Merge opt_trade into plan if available
             if opt_trade and plan:
-                plan_dict = plan.to_dict() if hasattr(plan, 'to_dict') else asdict(plan) if not isinstance(plan, dict) else plan
+                plan_dict = plan if isinstance(plan, dict) else (plan.to_dict() if hasattr(plan, 'to_dict') else vars(plan))
                 plan_dict.update({
                     "strike": opt_trade["strike"],
                     "direction": opt_trade["option_type"],
@@ -175,7 +182,7 @@ class AIOrchestrator:
                 })
                 plan = plan_dict
             elif plan:
-                plan = plan.to_dict() if hasattr(plan, 'to_dict') else asdict(plan) if not isinstance(plan, dict) else plan
+                plan = plan if isinstance(plan, dict) else (plan.to_dict() if hasattr(plan, 'to_dict') else vars(plan))
 
             # 9. News Event Engine (Institutional Sentiment Overlay)
             news_analysis = await news_event_engine.analyze(symbol)
@@ -233,10 +240,13 @@ class AIOrchestrator:
                 "ai_ready": True,
                 "cycle_time_ms": round(elapsed_ms, 2),
                 
-                # 🔥 ADD PERFORMANCE DATA
-                "performance": self.execution_engine.get_performance(),
-                "analytics_full": self.execution_engine.get_full_analytics(),
-                "strategy_weights": self.execution_engine.strategy_weights,
+                # Performance data — execution_engine not available in this orchestrator; use safe defaults
+                "performance": {
+                    "total_trades": 0, "wins": 0, "losses": 0,
+                    "win_rate": 0.0, "total_pnl": 0.0
+                },
+                "analytics_full": {},
+                "strategy_weights": {"TREND": 1.0, "REVERSAL": 1.0, "WEAK_TREND": 0.5},
                 
                 "market_analysis": {
                     "regime": analysis.regime,
@@ -260,8 +270,8 @@ class AIOrchestrator:
                 },
                 
                 "early_warnings": [a.to_dict() if hasattr(a, 'to_dict') else a for a in alerts],
-                "trade_plan": plan if isinstance(plan, dict) else plan.to_dict(),
-                "confidence_score": round(confidence, 3),
+                "trade_plan": plan if isinstance(plan, dict) else (plan.to_dict() if hasattr(plan, 'to_dict') else {}),
+                "confidence_score": round(confidence, 3) if confidence is not None and confidence == confidence else 0.0,  # NaN guard
                 "sentiment_overlay": sentiment_overlay,
                 "chart_intelligence": chart_intelligence
             }

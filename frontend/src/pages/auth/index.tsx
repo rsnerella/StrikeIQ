@@ -21,7 +21,7 @@ export default function AuthPage() {
     const defaultAuthData: AuthRequiredData = {
       session_type: "AUTH_REQUIRED",
       mode: "AUTH",
-      login_url: `https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id=${process.env.NEXT_PUBLIC_UPSTOX_CLIENT_ID || '53c878a9-3f5d-44f9-aa2d-2528d34a24cd'}&redirect_uri=http://${window.location.hostname}:8000/api/v1/auth/upstox/callback`,
+      login_url: `https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id=${process.env.NEXT_PUBLIC_UPSTOX_CLIENT_ID || '53c878a9-3f5d-44f9-aa2d-2528d34a24cd'}&redirect_uri=${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/auth/upstox/callback`,
       message: error || message,
       timestamp: new Date().toISOString(),
     };

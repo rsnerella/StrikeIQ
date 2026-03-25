@@ -15,15 +15,19 @@ const MarketStatusBanner: React.FC = () => {
   useEffect(() => {
     const fetchMarketStatus = async () => {
       try {
-        const response = await api.get('/api/v1/market/status');
-        if (response.data && response.data.status) {
-          setMarketStatus(response.data.status as 'OPEN' | 'PREOPEN' | 'CLOSED' | 'UNKNOWN');
-          setBackendConnected(true);
-        }
-      } catch (error) {
-        console.error('Error fetching market status:', error);
+        const data = await api.get('/v1/market/status').then(r => r.data);
+        setBackendConnected(true);
+        setMarketStatus(prev => {
+          const newStatus = data.market_status || data.status || 'UNKNOWN';
+          if (prev === newStatus) return prev;
+          return newStatus;
+        });
+      } catch (err) {
         setBackendConnected(false);
-        setMarketStatus('UNKNOWN');
+        setMarketStatus(prev => {
+          if (prev === 'UNKNOWN') return prev;
+          return 'UNKNOWN';
+        });
       } finally {
         setLoading(false);
       }

@@ -156,7 +156,10 @@ class StrategyDecisionEngine:
             
             logger.info(f"[PRICE SIGNAL] {price_signal}")
 
-            # Calculate adjusted score with increased signal strength
+            # BUILD raw_score from OI signal + wall signal (was missing — caused NameError crash)
+            raw_score = float(oi_signal) * 1.0 + float(wall_signal) * 0.8
+
+            # Add price momentum
             if RISK_MODE == "AGGRESSIVE":
                 raw_score += 1.2 * price_signal
             else:
