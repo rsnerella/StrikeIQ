@@ -1,5 +1,5 @@
 "use client";
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { TrendingUp, TrendingDown, Target, Shield, Activity, Search } from 'lucide-react';
 import { CARD, CARD_HOVER_BORDER } from './DashboardTypes';
 import { SectionLabel } from './StatCards';
