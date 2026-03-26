@@ -2,10 +2,16 @@ import axios from "axios";
 
 /**
  * Centralized API client for StrikeIQ.
- * Uses relative paths to support Next.js rewrites and LAN access.
+ * Uses environment variable for Railway backend in production.
  */
+
+// Safe fetch guard
+if (!process.env.NEXT_PUBLIC_API_URL) {
+    console.error("API URL missing - set NEXT_PUBLIC_API_URL in environment");
+}
+
 const client = axios.create({
-    baseURL: "/api",
+    baseURL: process.env.NEXT_PUBLIC_API_URL,
     timeout: 5000,
     headers: {
         "Content-Type": "application/json",
