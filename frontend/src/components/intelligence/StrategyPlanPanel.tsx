@@ -12,10 +12,14 @@ const SkeletonPulse = ({ className }: { className: string }) => (
 );
 
 const StrategyPlanPanel: React.FC = () => {
-    // Law 7: Separate Store Subscriptions to prevent infinite loops
-    const lastUpdate = useWSStore(s => s.lastUpdate);
-    const analytics = useWSStore(s => s.analytics);  // FIX: Read from analytics field
-    const biasStrength = useWSStore(s => s.biasStrength ?? 0);
+    // Law 7: Single store subscription to prevent infinite loops
+    const storeData = useWSStore(s => ({ 
+        lastUpdate: s.lastUpdate, 
+        analytics: s.analytics,
+        biasStrength: s.biasStrength ?? 0
+    }));
+    
+    const { lastUpdate, analytics, biasStrength } = storeData;
     
     const confidence = analytics?.confidence ?? biasStrength;
     

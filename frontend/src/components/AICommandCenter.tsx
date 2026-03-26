@@ -8,10 +8,15 @@ const SkeletonPulse = ({ className }: { className: string }) => (
 );
 
 export function AICommandCenter() {
-  const lastUpdate = useWSStore(s => s.lastUpdate);
-  const analysis   = useWSStore(s => s.chartAnalysis);
-  const spot       = useWSStore(s => s.spot ?? s.spotPrice ?? 0);
-  const hasData    = lastUpdate > 0 && !!analysis;
+  // Single store subscription to prevent infinite loops
+  const storeData = useWSStore(s => ({ 
+    lastUpdate: s.lastUpdate,
+    chartAnalysis: s.chartAnalysis,
+    spot: s.spot ?? s.spotPrice ?? 0
+  }));
+  
+  const { lastUpdate, chartAnalysis: analysis, spot } = storeData;
+  const hasData = lastUpdate > 0 && !!analysis;
 
   // v5.2 SUPRA-ORCHESTRATOR Mapping
   const regime       = analysis?.regime || 'NEUTRAL';

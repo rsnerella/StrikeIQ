@@ -105,22 +105,23 @@ const SkeletonPulse = ({ className }: { className: string }) => (
 
 // ── Main component ─────────────────────────────────────────────────────────────
 export function ChartIntelligencePanel() {
-    const lastUpdate = useWSStore(s => s.lastUpdate);
+    // Single store subscription to prevent infinite loops
+    const storeData = useWSStore(s => ({
+        lastUpdate: s.lastUpdate,
+        bias: s.bias ?? 'NEUTRAL',
+        biasStrength: s.biasStrength ?? 0,
+        gammaAnalysis: s.gammaAnalysis,
+        volState: s.volState,
+        technicals: s.technicals,
+        summary: s.summary ?? '',
+        keyLevels: s.keyLevels,
+        spotPrice: s.spotPrice ?? 0,
+        regime: s.regime ?? 'RANGING',
+        pcr: s.pcr ?? 0
+    }));
+    
+    const { lastUpdate, bias: signal, biasStrength: confidence, gammaAnalysis: gamma, volState: vol, technicals: tech, summary, keyLevels, spotPrice: spot, regime, pcr } = storeData;
     const hasData = lastUpdate > 0;
-    
-    // Direct selectors with fallbacks
-    const signal = useWSStore(s => s.bias ?? 'NEUTRAL');
-    const confidence = useWSStore(s => s.biasStrength ?? 0);
-    const gamma = useWSStore(s => s.gammaAnalysis);
-    const vol = useWSStore(s => s.volState);
-    const tech = useWSStore(s => s.technicals);
-    const summary = useWSStore(s => s.summary ?? '');
-    const keyLevels = useWSStore(s => s.keyLevels);
-    const spot = useWSStore(s => s.spotPrice ?? 0);
-    const regime = useWSStore(s => s.regime ?? 'RANGING');
-    const pcr = useWSStore(s => s.pcr ?? 0);
-    
-    const sigColor = signalColor(signal === 'BULLISH' ? 'BUY' : signal === 'BEARISH' ? 'SELL' : 'WAIT');
 
     if (!hasData) {
         return (
