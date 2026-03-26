@@ -24,7 +24,8 @@ const SafeModeGuard: React.FC<SafeModeGuardProps> = ({
 
     const wsSpot =
         store.spot ??
-        store.liveData?.spot_price ??
+        store.liveMarketData?.spot_price ??
+        store.liveMarketData?.spotPrice ??
         store.optionChainSnapshot?.spot ??
         store.optionChainSnapshot?.spot_price ??
         0;
@@ -85,8 +86,8 @@ export const useEffectiveSpot = (data: any, engineMode: string) => {
 
     const store = useWSStore.getState();
 
-    // STEP 2: Enable live mode - prioritize liveData over snapshot
-    const spot = store.spot ?? store.liveData?.spot_price ?? store.optionChainSnapshot?.spot ?? store.optionChainSnapshot?.spot_price ?? 0;
+    // STEP 2: Enable live mode - prioritize liveMarketData over snapshot
+    const spot = store.spot ?? store.liveMarketData?.spot_price ?? store.optionChainSnapshot?.spot ?? store.optionChainSnapshot?.spot_price ?? 0;
 
     const restSpotPrice =
         data?.spot_price ??
@@ -97,13 +98,13 @@ export const useEffectiveSpot = (data: any, engineMode: string) => {
     const effectiveSpot = spot ?? restSpotPrice ?? 0;
 
     let source = 'DEFAULT';
-    if (store.liveData?.spot_price) source = 'WS';
+    if (store.liveMarketData?.spot_price) source = 'WS';
     else if (store.optionChainSnapshot?.spot_price) source = 'SNAPSHOT';
     else if (restSpotPrice) source = 'REST';
 
     console.log(`🎯 Effective spot: ${effectiveSpot} (Mode: ${engineMode}, Source: ${source})`);
     console.log(`🔍 Snapshot Cache:`, {
-        liveData: store.liveData?.spot_price,
+        liveMarketData: store.liveMarketData?.spot_price,
         snapshot: store.optionChainSnapshot?.spot_price
     });
 
