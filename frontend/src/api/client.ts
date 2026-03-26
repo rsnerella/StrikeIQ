@@ -5,7 +5,7 @@ import axios from "axios";
  * Forces Railway backend URLs in production - no localhost fallbacks.
  */
 
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
+export const API_URL = typeof window !== 'undefined' ? "" : (process.env.NEXT_PUBLIC_API_URL || "https://strikeiq-production-e1cd.up.railway.app");
 
 if (API_URL === undefined) {
     console.error("❌ API URL missing");
