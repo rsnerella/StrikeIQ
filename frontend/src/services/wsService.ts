@@ -23,10 +23,11 @@ const getWsUrl = () => {
   if (envUrl && !envUrl.includes("localhost")) {
     return envUrl;
   }
-  if (typeof window !== "undefined") {
-    return `ws://${window.location.hostname}:8000/ws/market`;
-  }
-  return "ws://localhost:8000/ws/market";
+  
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const hostname = window.location.hostname;
+  
+  return `${protocol}//${hostname}:8000/ws/market`;
 };
 
 const WS_URL = getWsUrl();

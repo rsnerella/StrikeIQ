@@ -33,7 +33,7 @@ export const useExpirySelector = () => {
       setExpiryError(null);
 
       try {
-        const res = await fetch(`/api/v1/market/expiries?symbol=${currentSymbol}`);
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/market/expiries?symbol=${currentSymbol}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
         // Check if response is JSON before parsing

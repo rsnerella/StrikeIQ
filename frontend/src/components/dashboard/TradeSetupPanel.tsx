@@ -31,7 +31,7 @@ export function TradeSetupPanel() {
         setRiskMode(nextMode);
         try {
             // Call backend API (using both possible paths for reliability)
-            await fetch(`/api/v1/set-risk-mode?mode=${nextMode}`);
+            await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/set-risk-mode?mode=${nextMode}`);
         } catch (err) {
             console.error("Risk toggle failed:", err);
         }

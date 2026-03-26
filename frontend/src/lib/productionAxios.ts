@@ -11,9 +11,13 @@ const getBaseURL = () => {
   if (envUrl && !envUrl.includes("localhost")) {
     return envUrl;
   }
+  
   if (typeof window !== "undefined") {
-    return `http://${window.location.hostname}:8000`;
+    const protocol = window.location.protocol === "https:" ? "https:" : "http:";
+    const hostname = window.location.hostname;
+    return `${protocol}//${hostname}:8000`;
   }
+  
   return "http://localhost:8000";
 }
 

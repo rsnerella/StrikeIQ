@@ -43,8 +43,8 @@ export default function AuthScreen({ authData }: AuthScreenProps) {
   // Use login_url from authData if available
   const loginUrl = authData?.login_url ||
     (typeof window !== "undefined"
-      ? `https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id=53c878a9-3f5d-44f9-aa2d-2528d34a24cd&redirect_uri=${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/auth/upstox/callback`
-      : `https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id=53c878a9-3f5d-44f9-aa2d-2528d34a24cd&redirect_uri=${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/auth/upstox/callback`);
+      ? `https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id=53c878a9-3f5d-44f9-aa2d-2528d34a24cd&redirect_uri=${process.env.NEXT_PUBLIC_API_URL || 'https://strikeiq-production-e1cd.up.railway.app'}/api/v1/auth/upstox/callback`
+      : `https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id=53c878a9-3f5d-44f9-aa2d-2528d34a24cd&redirect_uri=${process.env.NEXT_PUBLIC_API_URL || 'https://strikeiq-production-e1cd.up.railway.app'}/api/v1/auth/upstox/callback`);
 
   const displayMessage = authData?.message || 'Please authenticate to access StrikeIQ market intelligence';
 

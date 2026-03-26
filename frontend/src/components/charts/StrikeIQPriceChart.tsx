@@ -216,7 +216,7 @@ export const StrikeIQPriceChart: React.FC<StrikeIQPriceChartProps> = ({ data }) 
                     timeframe: backendTimeframe
                 });
                 
-                const res = await fetch(`/api/v1/market/candles?symbol=${symbol}&tf=${backendTimeframe}&limit=400`);
+                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/market/candles?symbol=${symbol}&tf=${backendTimeframe}&limit=400`);
                 
                 // Check if response is JSON before parsing
                 const contentType = res.headers.get('content-type');
