@@ -45,7 +45,10 @@ export function useLiveMarketData(symbol: string, expiry?: string) {
   const throttledUpdate = useMemo(
     () =>
       throttle((updatedData: LiveMarketData) => {
-        setData(updatedData);
+        setData(prev => {
+          if (JSON.stringify(prev) === JSON.stringify(updatedData)) return prev;
+          return updatedData;
+        });
       }, 500),
     []
   );
@@ -55,7 +58,7 @@ export function useLiveMarketData(symbol: string, expiry?: string) {
     const transformed: LiveMarketData = {
       symbol,
       spot: marketData.spot || marketData.spotPrice || 0,
-      timestamp: new Date(marketData.lastUpdate || Date.now()).toISOString(),
+      timestamp: new Date(marketData.lastUpdate || 0).toISOString(),
       intelligence: marketData.aiIntelligence,
       dataQuality: marketData.dataQuality,
       aiReady: marketData.aiReady,

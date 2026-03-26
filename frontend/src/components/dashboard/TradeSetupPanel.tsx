@@ -50,19 +50,6 @@ export function TradeSetupPanel() {
     
     const hasData      = lastUpdate > 0
     
-    // 🔥 STEP 4: UI GUARD (IMPORTANT) - Prevent blank UI
-    if (!performance && !strategyWeights && !hasData) {
-        return (
-            <div className="trading-panel h-full flex items-center justify-center">
-                <div className="text-center">
-                    <div className="text-gray-400 text-sm mb-2">🔄</div>
-                    <div className="text-gray-400 text-sm">Waiting for AI data...</div>
-                    <div className="text-gray-500 text-xs mt-1">Performance metrics loading...</div>
-                </div>
-            </div>
-        );
-    }
-    
     // STEP 2: READ CORRECT DATA
     const strategy = analytics?.strategy;
     const confidence = analytics?.confidence;
@@ -73,7 +60,7 @@ export function TradeSetupPanel() {
         ? analytics.metadata.trade_score
         : null
 
-    // STEP 4: Only log on data changes
+    // STEP 4: Only log on data changes (Moved to top to avoid hook violation)
     const prevStrategyRef = useRef(strategy);
     const prevAnalyticsRef = useRef(analytics);
 
@@ -86,6 +73,19 @@ export function TradeSetupPanel() {
             prevAnalyticsRef.current = analytics;
         }
     }, [strategy, analytics]);
+
+    // 🔥 STEP 4: UI GUARD (IMPORTANT) - Prevent blank UI
+    if (!performance && !strategyWeights && !hasData) {
+        return (
+            <div className="trading-panel h-full flex items-center justify-center">
+                <div className="text-center">
+                    <div className="text-gray-400 text-sm mb-2">🔄</div>
+                    <div className="text-gray-400 text-sm">Waiting for AI data...</div>
+                    <div className="text-gray-500 text-xs mt-1">Performance metrics loading...</div>
+                </div>
+            </div>
+        );
+    }
     
     // STEP 6: CRITICAL CHECK - Debug full store if strategy undefined
     if (!strategy) {

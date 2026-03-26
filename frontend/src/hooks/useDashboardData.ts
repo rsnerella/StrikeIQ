@@ -46,7 +46,7 @@ export function useDashboardData() {
       change: strike.PE.change || 0
     }))
 
-  return {
+  return React.useMemo(() => ({
     spot: spotPrice,
     pcr,
     totalCallOI,
@@ -61,5 +61,10 @@ export function useDashboardData() {
     aiSignals,
     connected,
     liveMarketData
-  }
+  }), [
+    spotPrice, pcr, totalCallOI, totalPutOI, strikes, calls, puts, 
+    snapshot, analytics, optionChain, candles, aiSignals, connected, liveMarketData
+  ]);
 }
+
+import React from 'react';

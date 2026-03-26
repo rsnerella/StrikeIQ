@@ -22,11 +22,13 @@ export function connectMarketWS() {
   // Ensure client-side only
   if (typeof window === "undefined") return;
   
-  if (socket &&
-    (socket.readyState === WebSocket.OPEN ||
-      socket.readyState === WebSocket.CONNECTING)) {
-    console.log("🔒 WebSocket already connecting")
-    return
+  // STEP 4: ADD CONNECTION LOCK
+  if (socket && socket.readyState === WebSocket.OPEN) return socket;
+  if (socket && socket.readyState === WebSocket.CONNECTING) return null;
+  
+  if (isConnecting) {
+    console.log("🔒 WebSocket already connecting (flag)")
+    return null
   }
 
   console.log("WS CONNECTING")
@@ -193,15 +195,6 @@ export function connectMarketWS() {
       
       const data = JSON.parse(raw)
       
-      // STEP 1: VERIFY WS RAW MESSAGE
-      console.log("[WS RAW MESSAGE FULL]", data)
-      
-      // STEP 2: VERIFY MESSAGE TYPE
-      console.log("[WS MESSAGE TYPE]", data.type)
-      
-      // PERFORMANCE: Count message rate to detect performance issues
-      console.count("WS_MESSAGE")
-      
       // PERFORMANCE: Calculate average rate per second
       if (typeof window !== "undefined" && !window.__wsRateTracker) {
         window.__wsRateTracker = { count: 0, startTime: Date.now() }
@@ -222,13 +215,8 @@ export function connectMarketWS() {
       // Route analytics to handleAnalytics
       if (data.type === "analytics" || data.type === "analytics_update") {
         if (process.env.NODE_ENV === "development") {
-          console.log("📊 ANALYTICS RECEIVED:", data)
+          console.log("📊 ANALYTICS RECEIVED:", { type: data.type, symbol: data.symbol })
         }
-        
-        // STEP 1: VERIFY WS PAYLOAD STRUCTURE
-        console.log("[WS RAW ANALYTICS]", data.analytics)
-        console.log("[WS RECEIVED]", data.analytics)
-        console.log("[WS FINAL ANALYTICS]", data.analytics)
         
         const wsStore = useWSStore.getState()
         if (wsStore.handleAnalytics) {
@@ -238,12 +226,6 @@ export function connectMarketWS() {
       }
 
       // Route ALL other message types through handleMessage
-      // This covers: index_tick, option_chain_update, heatmap_update,
-      // market_tick, market_data, chain_update
-      
-      // STEP 3: VERIFY HANDLE FORWARDING
-      console.log("[WS → STORE FORWARD]", data.type)
-      
       const wsStore = useWSStore.getState()
       if (wsStore.handleMessage) {
         wsStore.handleMessage(data)

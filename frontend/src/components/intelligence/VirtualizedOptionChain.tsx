@@ -2,6 +2,7 @@ import React, { memo, useMemo, useCallback, useState } from 'react';
 import { FixedSizeList } from 'react-window';
 import { OptionChainData } from '@/types/dashboard';
 import { useWSStore } from '@/core/ws/wsStore';
+import { useShallow } from 'zustand/react/shallow';
 
 interface VirtualizedOptionChainProps {
   optionChainData: OptionChainData;
@@ -40,8 +41,12 @@ const VirtualizedOptionChain: React.FC<VirtualizedOptionChainProps> = memo(({ op
   const [selectedType, setSelectedType] = useState<'calls' | 'puts' | 'both'>('both');
 
   // ✅ REACTIVE WS STORE SUBSCRIPTION (CRITICAL FIX)
-  const wsLiveData = useWSStore(state => state.liveData);
-  const wsSnapshot = useWSStore(state => state.optionChainSnapshot);
+  const { wsLiveData, wsSnapshot } = useWSStore(
+    useShallow(state => ({
+      wsLiveData: state.liveMarketData,
+      wsSnapshot: state.optionChainSnapshot
+    }))
+  );
 
   // ✅ PATCH: Validate REST data structure before using it (empty arrays are truthy)
   const hasValidRest =

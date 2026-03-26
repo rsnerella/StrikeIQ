@@ -11,7 +11,7 @@ const SpotPriceWidget: React.FC<SpotPriceWidgetProps> = memo(({ symbol }) => {
   // PERFORMANCE: Render profiling moved to useEffect
   useEffect(() => {
     console.count("SpotPriceWidget render")
-  })
+  }, [])
 
   return (
     <div className="bg-gray-900 text-white p-4 rounded-lg">

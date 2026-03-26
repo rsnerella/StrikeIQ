@@ -25,8 +25,6 @@ interface WSStore {
   lastUpdate: number
   marketData: any
   optionChainSnapshot: any
-  liveData: any
-  wsLiveData: any
   analytics: any
   liveMarketData: any
   aiIntelligence: any
@@ -90,9 +88,31 @@ interface WSStore {
   setError: (error: string | null) => void
   
   // NEW: Methods for separated fields
-  setAIAnalysis: (analysis: any) => void
   setTradeSetup: (trade: any) => void
 }
+
+// Helper to only call set if data actually changed
+const selectiveUpdate = (set: any, get: any, updates: any) => {
+  const state = get();
+  const toUpdate: any = {};
+
+  Object.entries(updates).forEach(([key, newVal]) => {
+    if (key === 'lastUpdate') return; // Handle lastUpdate separately
+    const oldVal = (state as any)[key];
+    if (JSON.stringify(newVal) !== JSON.stringify(oldVal)) {
+      toUpdate[key] = newVal;
+    }
+  });
+
+  if (Object.keys(toUpdate).length > 0) {
+    if (updates.lastUpdate) {
+      toUpdate.lastUpdate = updates.lastUpdate;
+    }
+    set(toUpdate);
+  } else if (updates.lastUpdate && (updates as any)._force) {
+     set({ lastUpdate: updates.lastUpdate });
+  }
+};
 
 export const useWSStore = create<WSStore>((set, get) =>({
 
@@ -109,8 +129,6 @@ export const useWSStore = create<WSStore>((set, get) =>({
   atm: 0,
   marketData: null,
   optionChainSnapshot: null,
-  liveData: null,
-  wsLiveData: null,
   analytics: {},
   liveMarketData: null,
   aiIntelligence: null,
@@ -205,81 +223,88 @@ export const useWSStore = create<WSStore>((set, get) =>({
           );
         }
 
-        set((prev) => ({
+        // Fix: Pre-calculate potentially new objects to allow selectiveUpdate to compare them
+        const currentCalls = get().calls || {};
+        const incomingCalls = p.option_chain?.calls || {};
+        const newCalls = Object.keys(incomingCalls).length > 0 
+          ? { ...currentCalls, ...incomingCalls }
+          : currentCalls;
+
+        const currentPuts = get().puts || {};
+        const incomingPuts = p.option_chain?.puts || {};
+        const newPuts = Object.keys(incomingPuts).length > 0
+          ? { ...currentPuts, ...incomingPuts }
+          : currentPuts;
+
+        selectiveUpdate(set, get, {
           // SPOT — all aliases
-          spot: spot > 0 ? spot : prev.spot,
-          spotPrice:    spot > 0 ? spot : prev.spotPrice,
-          liveSpot:     spot > 0 ? spot : prev.liveSpot,
-          currentSpot:  spot > 0 ? spot : prev.currentSpot,
+          spot: spot > 0 ? spot : get().spot,
+          spotPrice:    spot > 0 ? spot : get().spotPrice,
+          liveSpot:     spot > 0 ? spot : get().liveSpot,
+          currentSpot:  spot > 0 ? spot : get().currentSpot,
 
           // Core
-          atm:          p.atm       ?? prev.atm,
-          symbol:       p.symbol    ?? prev.symbol,
-          lastUpdate:   p.timestamp ?? Date.now(),
-          aiReady:      p.ai_ready  ?? p.aiReady ?? prev.aiReady,
+          atm:          p.atm       ?? get().atm,
+          symbol:       p.symbol    ?? get().symbol,
+          lastUpdate:   p.timestamp ?? now, // Use same 'now' for consistency
+          aiReady:      p.ai_ready  ?? p.aiReady ?? get().aiReady,
 
           // Option chain fields
-          pcr:          p.option_chain?.pcr           ?? prev.pcr,
-          callWall:     p.option_chain?.call_wall      ?? prev.callWall,
-          putWall:      p.option_chain?.put_wall       ?? prev.putWall,
-          maxPain:      p.option_chain?.max_pain       ?? prev.maxPain,
-          gexFlip:      p.option_chain?.gex_flip       ?? prev.gexFlip,
-          netGex:       p.option_chain?.net_gex        ?? prev.netGex,
-          ivAtm:        p.option_chain?.iv_atm         ?? prev.ivAtm,
-          ivPercentile: p.option_chain?.iv_percentile  ?? prev.ivPercentile,
-          calls: {
-            ...(prev.calls || {}),
-            ...(p.option_chain?.calls || {})
-          },
-
-          puts: {
-            ...(prev.puts || {}),
-            ...(p.option_chain?.puts || {})
-          },
-          optionChain:  p.option_chain                 ?? prev.optionChain,
+          pcr:          p.option_chain?.pcr           ?? get().pcr,
+          callWall:     p.option_chain?.call_wall      ?? get().callWall,
+          putWall:      p.option_chain?.put_wall       ?? get().putWall,
+          maxPain:      p.option_chain?.max_pain       ?? get().maxPain,
+          gexFlip:      p.option_chain?.gex_flip       ?? get().gexFlip,
+          netGex:       p.option_chain?.net_gex        ?? get().netGex,
+          ivAtm:        p.option_chain?.iv_atm         ?? get().ivAtm,
+          ivPercentile: p.option_chain?.iv_percentile  ?? get().ivPercentile,
+          
+          calls: newCalls,
+          puts: newPuts,
+          optionChain:  p.option_chain                 ?? get().optionChain,
 
           // AI analysis — accept both key names
-          regime:        (p.market_analysis ?? p.aiIntelligence)?.regime          ?? prev.regime,
-          bias:          (p.market_analysis ?? p.aiIntelligence)?.bias            ?? prev.bias,
-          biasStrength:  (p.market_analysis ?? p.aiIntelligence)?.bias_strength   ?? prev.biasStrength,
-          keyLevels:     (p.market_analysis ?? p.aiIntelligence)?.key_levels      ?? prev.keyLevels,
-          gammaAnalysis: (p.market_analysis ?? p.aiIntelligence)?.gamma_analysis  ?? prev.gammaAnalysis,
-          volState:      (p.market_analysis ?? p.aiIntelligence)?.volatility_state ?? prev.volState,
-          technicals:    (p.market_analysis ?? p.aiIntelligence)?.technical_state  ?? prev.technicals,
-          summary:       (p.market_analysis ?? p.aiIntelligence)?.summary          ?? prev.summary,
+          regime:        (p.market_analysis ?? p.aiIntelligence)?.regime          ?? get().regime,
+          bias:          (p.market_analysis ?? p.aiIntelligence)?.bias            ?? get().bias,
+          biasStrength:  (p.market_analysis ?? p.aiIntelligence)?.bias_strength   ?? get().biasStrength,
+          keyLevels:     (p.market_analysis ?? p.aiIntelligence)?.key_levels      ?? get().keyLevels,
+          gammaAnalysis: (p.market_analysis ?? p.aiIntelligence)?.gamma_analysis  ?? get().gammaAnalysis,
+          volState:      (p.market_analysis ?? p.aiIntelligence)?.volatility_state ?? get().volState,
+          technicals:    (p.market_analysis ?? p.aiIntelligence)?.technical_state  ?? get().technicals,
+          summary:       (p.market_analysis ?? p.aiIntelligence)?.summary          ?? get().summary,
 
           // Plans and alerts
-          tradePlan:     p.trade_plan     ?? prev.tradePlan,
-          earlyWarnings: Array.isArray(p.early_warnings) ? p.early_warnings : prev.earlyWarnings ?? [],
-          newsAlerts:    Array.isArray(p.news_alerts)    ? p.news_alerts    : prev.newsAlerts    ?? [],
-          paperTrading:  p.paper_trading  ?? prev.paperTrading,
+          tradePlan:     p.trade_plan     ?? get().tradePlan,
+          earlyWarnings: Array.isArray(p.early_warnings) ? p.early_warnings : get().earlyWarnings ?? [],
+          newsAlerts:    Array.isArray(p.news_alerts)    ? p.news_alerts    : get().newsAlerts    ?? [],
+          paperTrading:  p.paper_trading  ?? get().paperTrading,
 
-          // Data quality
+          // Data quality — Remove constant Date.now() to prevent loops
           dataQuality: {
             hasSpot:    spot > 0,
             hasOi:      (p.option_chain?.call_wall ?? 0) > 0,
             hasGreeks:  (p.option_chain?.iv_atm    ?? 0) > 0,
             aiReady:    p.ai_ready ?? false,
-            lastUpdate: Date.now(),
+            // lastUpdate: now, // REMOVED: frequent timestamp updates defeat optimization
             source:     spot > 0 ? 'live' : 'rest_poller',
           },
           
           // 🔥 ADD PERFORMANCE DATA
-          performance: p.performance ?? prev.performance ?? {
+          performance: p.performance ?? get().performance ?? {
             total_trades: 0,
             wins: 0,
             losses: 0,
             win_rate: 0,
             total_pnl: 0
           },
-          analytics_full: p.analytics_full ?? prev.analytics_full ?? {
+          analytics_full: p.analytics_full ?? get().analytics_full ?? {
             equity_curve: [],
             max_drawdown: 0,
             strategy_stats: {},
             current_equity: 0,
             peak_equity: 0
           },
-          strategy_weights: p.strategy_weights ?? prev.strategy_weights ?? {
+          strategy_weights: p.strategy_weights ?? get().strategy_weights ?? {
             "TREND": 1.0,
             "REVERSAL": 1.0,
             "WEAK_TREND": 0.5,
@@ -288,7 +313,7 @@ export const useWSStore = create<WSStore>((set, get) =>({
           },
           
           _lastChainUpdate: now
-        }));
+        });
         break;
       }
 
@@ -296,69 +321,63 @@ export const useWSStore = create<WSStore>((set, get) =>({
         const a = message.analytics || {}
         const spot = a.spot || a.spotPrice || message.spot || 0
 
-        set((prev) => {
-          const mergedAnalytics = {
-            ...prev.analytics,
-            ...a
-          }
-          
-          // Only log on significant changes (development only)
-          if (process.env.NODE_ENV === 'development' && 
-              (prev.analytics?.strategy !== a.strategy || 
-               prev.analytics?.confidence !== a.confidence)) {
-            console.log("[WS ANALYTICS UPDATE]", {
-              strategy: a.strategy,
-              confidence: a.confidence
-            });
-          }
+        // Only log on significant changes (development only)
+        if (process.env.NODE_ENV === 'development') {
+           const prev = get().analytics;
+           if (prev?.strategy !== a.strategy || prev?.confidence !== a.confidence) {
+              console.log("[WS ANALYTICS UPDATE]", {
+                strategy: a.strategy,
+                confidence: a.confidence
+              });
+           }
+        }
 
-          return {
-            spotPrice:    spot > 0 ? spot : prev.spotPrice,
-            liveSpot:     spot > 0 ? spot : prev.liveSpot,
-            currentSpot:  spot > 0 ? spot : prev.currentSpot,
+        selectiveUpdate(set, get, {
+            spotPrice:    spot > 0 ? spot : get().spotPrice,
+            liveSpot:     spot > 0 ? spot : get().liveSpot,
+            currentSpot:  spot > 0 ? spot : get().currentSpot,
             lastUpdate:   message.timestamp || Date.now(),
             aiReady:      true,
 
             analytics: {
-              ...prev.analytics,
+              ...get().analytics,
               ...a,
 
               strategy:
                 a.strategy !== undefined
                   ? a.strategy
-                  : prev.analytics?.strategy ?? 'NO_TRADE',
+                  : get().analytics?.strategy ?? 'NO_TRADE',
 
               confidence:
                 a.confidence !== undefined
                   ? a.confidence
-                  : prev.analytics?.confidence ?? null,
+                  : get().analytics?.confidence ?? null,
 
               execution:
                 a.execution !== undefined
                   ? a.execution
-                  : prev.analytics?.execution ?? {},
+                  : get().analytics?.execution ?? {},
 
               metadata: a.metadata
                 ? {
-                    ...prev.analytics?.metadata,
+                    ...get().analytics?.metadata,
                     ...a.metadata
                   }
-                : prev.analytics?.metadata ?? {}
+                : get().analytics?.metadata ?? {}
             },
 
             // Map from analytics object
-            regime:        a.regime         || a.market_regime   || prev.regime        || 'RANGING',
-            bias:          a.bias           || a.market_bias     || prev.bias          || 'NEUTRAL',
-            biasStrength:  a.bias_strength  || a.confidence      || prev.biasStrength  || 0,
-            keyLevels:     a.key_levels     || a.levels          || prev.keyLevels     || {},
-            volState:      a.volatility_state || a.volatility    || prev.volState      || {},
-            technicals:    a.technical_state  || a.technicals    || prev.technicals    || {},
-            summary:       a.summary        || prev.summary      || '',
-            tradePlan:     a.trade_plan     || a.signal          || prev.tradePlan     || null,
+            regime:        a.regime         || a.market_regime   || get().regime        || 'RANGING',
+            bias:          a.bias           || a.market_bias     || get().bias          || 'NEUTRAL',
+            biasStrength:  a.bias_strength  || a.confidence      || get().biasStrength  || 0,
+            keyLevels:     a.key_levels     || a.levels          || get().keyLevels     || {},
+            volState:      a.volatility_state || a.volatility    || get().volState      || {},
+            technicals:    a.technical_state  || a.technicals    || get().technicals    || {},
+            summary:       a.summary        || get().summary      || '',
+            tradePlan:     a.trade_plan     || a.signal          || get().tradePlan     || null,
             earlyWarnings: Array.isArray(a.early_warnings) ? a.early_warnings :
                            Array.isArray(a.warnings)       ? a.warnings       :
-                           prev.earlyWarnings || [],
-          }
+                           get().earlyWarnings || [],
         });
         break;
       }
@@ -446,14 +465,13 @@ export const useWSStore = create<WSStore>((set, get) =>({
       case 'index_tick': {
         const tick = message.data;
         if (message.symbol === selectedSymbol && tick) {
-          set({
-            spot: tick.ltp ?? 0,
-            spotPrice: tick.ltp ?? 0,
-            liveSpot: tick.ltp ?? 0,
-            currentSpot: tick.ltp ?? 0,
+          const ltp = tick.ltp ?? 0;
+          selectiveUpdate(set, get, {
+            spot: ltp > 0 ? ltp : get().spot,
+            spotPrice: ltp > 0 ? ltp : get().spotPrice,
+            liveSpot: ltp > 0 ? ltp : get().liveSpot,
+            currentSpot: ltp > 0 ? ltp : get().currentSpot,
             lastUpdate: Date.now(),
-            liveData: { ...tick, symbol: message.symbol, spot_price: tick.ltp },
-            wsLiveData: { ...tick, symbol: message.symbol, spot_price: tick.ltp },
             error: null
           });
         }
@@ -679,12 +697,17 @@ export const useWSStore = create<WSStore>((set, get) =>({
     const prev = get().analytics
     if (prev?.timestamp && prev.timestamp === payload.timestamp) return
 
+    // Throttle total store updates for analytics to 200ms
+    const now = Date.now();
+    const lastUpdate = get().lastUpdate;
+    if (now - lastUpdate < 200) return;
+
     // STEP 2: FIX ZUSTAND STORE MAPPING - analytics update
     const renderableData = payload.analytics 
       ? { ...payload.analytics, symbol: payload.symbol, _timestamp: payload.timestamp } 
       : { ...payload };
     
-    set({
+    selectiveUpdate(set, get, {
       analytics: renderableData,
       // FIX 7: Update liveMarketData with complete structure
       liveMarketData: {
@@ -698,7 +721,7 @@ export const useWSStore = create<WSStore>((set, get) =>({
       // Phase 8: Extract spot and chain from bundle for full sync - FIX CIRCULAR DEPENDENCY
       spot: renderableData.snapshot?.spot ?? 0,
       optionChainSnapshot: renderableData.option_chain,
-      lastUpdate: Date.now(),
+      lastUpdate: now,
       connected: true,
       error: null
     })

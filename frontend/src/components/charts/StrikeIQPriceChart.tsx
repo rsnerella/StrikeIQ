@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { createChart, ColorType, IChartApi, ISeriesApi, LineStyle, CrosshairMode, SeriesMarkerPosition, SeriesMarkerShape, LineWidth } from 'lightweight-charts';
 import { useMarketContextStore } from '@/stores/marketContextStore';
+import { API_URL } from '@/api/client';
 import { LiveMarketData } from '@/hooks/useLiveMarketData';
 import { useWSStore } from '@/core/ws/wsStore';
+import api from '@/api/client';
 import { useShallow } from 'zustand/shallow';
 
 interface ChartIntelligenceOverlay {
@@ -211,26 +213,11 @@ export const StrikeIQPriceChart: React.FC<StrikeIQPriceChartProps> = ({ data }) 
 
                 const backendTimeframe = timeframeMap[timeframe as keyof typeof timeframeMap] || '1m';
                 
-                console.log("STRIKEIQ CHART FETCHING →", {
-                    symbol,
-                    timeframe: backendTimeframe
-                });
-                
-                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/market/candles?symbol=${symbol}&tf=${backendTimeframe}&limit=400`);
-                
-                // Check if response is JSON before parsing
-                const contentType = res.headers.get('content-type');
-                if (!contentType || !contentType.includes('application/json')) {
-                    console.warn('STRIKEIQ CHART → Backend not available - non-JSON response');
-                    setChartMessage('Backend offline - chart data unavailable');
-                    setLoading(false);
-                    return;
-                }
-                
-                const responseData = await res.json();
+                const response = await api.get(`/api/v1/market/candles?symbol=${symbol}&tf=${backendTimeframe}&limit=400`);
+                const responseData = response.data;
                 console.log("STRIKEIQ CHART RESPONSE →", responseData);
                 
-                if (res.ok) {
+                if (responseData) {
                     const candles = responseData.candles || [];
                     
                     // Show message if no candles
@@ -326,8 +313,7 @@ export const StrikeIQPriceChart: React.FC<StrikeIQPriceChartProps> = ({ data }) 
                             setChartMessage(null);
                         }
                     }
-                } else {
-                    console.log("STRIKEIQ CHART API ERROR →", res.status, res.statusText);
+                    console.log("STRIKEIQ CHART API ERROR →", response?.status, response?.statusText);
                 }
             } catch (err: any) {
                 console.error("STRIKEIQ CHART → Failed to load historical candles", err);

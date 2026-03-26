@@ -134,7 +134,10 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
   // Process live data from WebSocket
   useEffect(() => {
     if (actualLiveData && actualLiveData.callsData && Array.isArray(actualLiveData.callsData)) {
-      setSpotPrice(actualLiveData.spot_price);
+      setSpotPrice(prev => {
+        if (prev === actualLiveData.spot_price) return prev;
+        return actualLiveData.spot_price;
+      });
 
       const strikeMap: { [key: number]: any } = {};
 
@@ -192,15 +195,18 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
       transformedData.sort((a, b) => a.strike - b.strike);
 
       // Show roughly 50 strikes centered around ATM
-      const atm = actualLiveData.atm_strike || spotPrice || 0;
+      const atm = actualLiveData.atm_strike || actualLiveData.spot_price || 0;
       const filteredData = transformedData.filter(row => {
         const diff = Math.abs(row.strike - atm);
         return diff <= 1250; // Wider range if needed, user mentioned 50+
       });
 
-      setOiData(filteredData);
+      setOiData(prev => {
+        if (JSON.stringify(prev) === JSON.stringify(filteredData)) return prev;
+        return filteredData;
+      });
     }
-  }, [actualLiveData, spotPrice]);
+  }, [actualLiveData]); // spotPrice removed to break loop
 
   const maxCallOI = Math.max(...(oiData || []).map(r => r.oi), 1);
   const maxPutOI = Math.max(...(oiData || []).map(r => r.put_oi), 1);

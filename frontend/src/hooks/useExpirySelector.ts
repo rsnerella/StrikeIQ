@@ -9,6 +9,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useMarketContextStore } from '@/stores/marketContextStore';
 import { useOptionChainStore } from '@/core/ws/optionChainStore';
 import { resubscribeMarketWS } from '@/services/wsService';
+import api from '@/api/client';
+import { API_URL } from '@/api/client';
 
 export const useExpirySelector = () => {
   const [expiryList, setExpiryList] = useState<string[]>([]);
@@ -33,18 +35,13 @@ export const useExpirySelector = () => {
       setExpiryError(null);
 
       try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/market/expiries?symbol=${currentSymbol}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-        // Check if response is JSON before parsing
-        const contentType = res.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-          console.warn('Backend not available - non-JSON response');
+        const response = await api.get(`/api/v1/market/expiries?symbol=${currentSymbol}`);
+        const raw = response.data;
+        if (!raw) {
+          console.warn('Backend not available - no data received');
           setExpiryError('Backend offline - expiry data unavailable');
           return;
         }
-
-        const raw = await res.json();
 
         // Normalize: handle { expiries: [] }, { data: [] }, or flat []
         let list: string[] = [];
@@ -56,21 +53,34 @@ export const useExpirySelector = () => {
           list = raw.data;
         }
 
-        setExpiryList(list);
+        setExpiryList(prev => {
+          if (JSON.stringify(prev) === JSON.stringify(list)) return prev;
+          return list;
+        });
 
         // Auto-select nearest future expiry
         if (list.length > 0) {
+          const stored = localStorage.getItem('selectedExpiry');
           const today = new Date();
           today.setHours(0, 0, 0, 0);
-          const nearest = list
-            .map(e => ({ str: e, date: new Date(e) }))
-            .filter(({ date }) => date >= today)
-            .sort((a, b) => a.date.getTime() - b.date.getTime())[0];
 
-          const newExpiry = nearest?.str || list[0];
-          setExpiry(newExpiry);
-          localStorage.setItem('selectedExpiry', newExpiry);
-          resubscribeMarketWS(currentSymbol, newExpiry);
+          let newExpiry = list[0];
+          
+          if (stored && list.includes(stored)) {
+            newExpiry = stored;
+          } else {
+            const nearest = list
+              .map(e => ({ str: e, date: new Date(e) }))
+              .filter(({ date }) => date >= today)
+              .sort((a, b) => a.date.getTime() - b.date.getTime())[0];
+            newExpiry = nearest?.str || list[0];
+          }
+
+          if (selectedExpiry !== newExpiry) {
+            setExpiry(newExpiry);
+            localStorage.setItem('selectedExpiry', newExpiry);
+            resubscribeMarketWS(currentSymbol, newExpiry);
+          }
         }
 
         lastFetchedSymbolRef.current = currentSymbol;

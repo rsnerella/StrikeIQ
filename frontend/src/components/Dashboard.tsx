@@ -221,9 +221,6 @@ function DashboardComponent({ initialSymbol = 'NIFTY' }: DashboardProps) {
       );
     }
 
-    console.log("DATA:", liveMarketData);
-    console.log("ANALYTICS:", liveMarketData?.data?.analytics);
-
     return (
     <div className="min-h-screen bg-[#020408] text-slate-200 font-sans selection:bg-sky-500/30 overflow-x-hidden mesh-background">
       <style>{DASHBOARD_CSS}</style>

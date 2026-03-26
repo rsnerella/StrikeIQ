@@ -294,10 +294,7 @@ export const useIndexData = () => useMarketStore((state) => state.index);
 export const useOptionChain = () => useMarketStore((state) => state.optionChain);
 export const useHeatmap = () => useMarketStore((state) => state.heatmap);
 export const useAnalytics = () => useMarketStore((state) => state.analytics);
-export const useConnectionStatus = () => useMarketStore((state) => ({
-  connected: state.connected,
-  lastUpdate: state.lastUpdate
-}));
+export const useConnectionStatus = () => useMarketStore((state) => state.connected);
 
 export const useDataQuality = () => useMarketStore((state) => state.dataQuality);
 
@@ -306,11 +303,11 @@ export const useMarketStatus = () => useMarketStore((state) => {
   const index = state.index;
   const marketOpen = state.marketOpen;
   
-  return {
-    marketOpen: marketOpen !== null ? marketOpen : false,
-    symbol: index?.symbol || state.currentSymbol
-  };
+  // Use a stable object if possible or primitives
+  return (marketOpen !== null ? marketOpen : false) ? 'OPEN' : 'CLOSED';
 });
+
+export const useMarketSymbol = () => useMarketStore((state) => state.index?.symbol || state.currentSymbol);
 
 export const useATMStrike = () => useMarketStore((state) => {
   const optionChain = state.optionChain;

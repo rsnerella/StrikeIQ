@@ -2,8 +2,9 @@
 
 import React, { useState, useEffect } from "react";
 import { Wifi, WifiOff, Heart, BarChart2, Link2, Activity, Bell, Home, TrendingUp, Brain, Settings } from "lucide-react";
-import { useMarketStore, useConnectionStatus } from "@/stores/marketStore";
+import { useConnectionStatus } from "@/stores/marketStore";
 import { useWSStore } from "@/core/ws/wsStore";
+import { useShallow } from 'zustand/shallow';
 import api from "@/api/client";
 
 const HEARTBEAT_CSS = `
@@ -44,17 +45,21 @@ function scrollToSection(sectionId: string) {
 
 export default function Navbar() {
 
-  const { connected } = useConnectionStatus();
+  const connected = useConnectionStatus();
 
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
 
-  const marketStatus: "OPEN" | "PREOPEN" | "CLOSED" | "UNKNOWN" = useWSStore((s) => s.marketStatus);
-  const setMarketStatus = useWSStore((s) => s.setMarketStatus);
+  const { marketStatus, setMarketStatus } = useWSStore(
+    useShallow((s) => ({
+      marketStatus: s.marketStatus,
+      setMarketStatus: s.setMarketStatus
+    }))
+  );
 
   useEffect(() => {
     const fetchMarketStatus = async () => {
       try {
-        const data = await api.get(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/market/status`).then(r => r.data);
+        const data = await api.get("/api/v1/market/status").then(r => r.data);
         if (data && (data.market_status || data.status)) {
           const newStatus = data.market_status || data.status || "UNKNOWN";
           if (marketStatus !== newStatus) {
