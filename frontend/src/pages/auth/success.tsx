@@ -30,7 +30,7 @@ export default function AuthSuccess() {
       
       // Redirect to / immediately when authenticated
       console.log("🔄 AUTH SUCCESS PAGE - Redirecting to dashboard")
-      router.replace("/")
+      router.replace(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/upstox`);
     } else {
       console.log("❌ AUTH SUCCESS PAGE - User not authenticated")
     }
@@ -87,7 +87,7 @@ export default function AuthSuccess() {
               </div>
               
               <button
-                onClick={() => router.replace('/api/v1/auth/upstox')}
+                onClick={() => router.replace(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/upstox`)}
                 className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg transition-colors"
               >
                 Try Authentication Again

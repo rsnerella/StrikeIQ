@@ -52,7 +52,7 @@ export const useAuthStore = create<AuthStore>()(
         set({ loading: true, error: null });
 
         try {
-          const response = await api.get('/api/v1/auth/status', { 
+          const response = await api.get(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/status`, { 
             timeout: 5000,
             validateStatus: (status) => status < 500 // Treat 4xx as valid responses
           });

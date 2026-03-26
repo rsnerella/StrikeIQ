@@ -136,7 +136,7 @@ class SessionGuard {
 
   private async performAuthCheck(): Promise<boolean> {
     try {
-      const response = await axios.get('/api/v1/auth/status', {
+      const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/status`, {
         timeout: 5000,
       });
 
@@ -241,7 +241,7 @@ class SessionGuard {
     try {
       this.callbacks.onTokenRefresh?.();
       
-      const response = await axios.post('/api/v1/auth/refresh', {}, {
+      const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/refresh`, {}, {
         timeout: 10000,
       });
 
@@ -322,7 +322,7 @@ class SessionGuard {
    */
   async checkBackendStatus(): Promise<boolean> {
     try {
-      await axios.get('/api/v1/auth/status', { timeout: 3000 });
+      await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/status`, { timeout: 3000 });
       this.state.backendStatus = 'online';
       this.callbacks.onBackendOnline?.();
       return true;

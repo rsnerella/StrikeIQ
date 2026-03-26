@@ -34,7 +34,7 @@ export const useAuthStore = create<AuthStore>()(
         set({ status: 'loading', error: null })
 
         try {
-          const response = await api.get('/api/v1/auth/status', {
+          const response = await api.get(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/status`, {
             timeout: 10000
           })
 

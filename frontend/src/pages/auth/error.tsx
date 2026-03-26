@@ -16,7 +16,7 @@ export default function AuthError() {
   const handleRetryAuth = () => {
     setIsRedirecting(true);
     // Redirect to auth initiation using router.replace
-    router.replace('/api/v1/auth/upstox');
+    router.replace(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/upstox`);
   };
 
   const getErrorMessage = (msg: string) => {
