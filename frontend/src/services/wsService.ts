@@ -18,23 +18,6 @@ declare global {
     __wsRateTracker?: { count: number; startTime: number };
   }
 }
-const getWsUrl = () => {
-  const envUrl = process.env.NEXT_PUBLIC_WS_URL;
-  if (envUrl && !envUrl.includes("localhost")) {
-    return envUrl;
-  }
-  
-  let protocol = "ws:";
-  let hostname = "localhost";
-  
-  if (typeof window !== "undefined") {
-    protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    hostname = window.location.hostname;
-  }
-  
-  return `${protocol}//${hostname}:8000/ws/market`;
-};
-
 export function connectMarketWS() {
   // Ensure client-side only
   if (typeof window === "undefined") return;
@@ -52,10 +35,10 @@ export function connectMarketWS() {
     time: Date.now()
   })
 
-  const WS_URL = process.env.NEXT_PUBLIC_WS_URL;
+  const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "wss://strikeiq-production-e1cd.up.railway.app/ws/market";
 
-  if (!WS_URL) {
-    throw new Error("NEXT_PUBLIC_WS_URL missing");
+  if (!process.env.NEXT_PUBLIC_WS_URL) {
+    console.error("❌ WS URL missing, using fallback");
   }
 
   wsLog("WS CONNECTING", { url: WS_URL, reconnectAttempts })

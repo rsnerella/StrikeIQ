@@ -13,5 +13,17 @@ const Dashboard = dynamic(() => import('@/components/Dashboard'), {
 });
 
 export default function DashboardPage() {
-  return <Dashboard initialSymbol="NIFTY" />
+  // Safe fallback UI for missing environment variables
+  if (!process.env.NEXT_PUBLIC_API_URL) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="text-red-500 text-xl font-bold mb-4">Configuration Error</div>
+          <div className="text-gray-300">API URL missing</div>
+        </div>
+      </div>
+    );
+  }
+
+  return <Dashboard initialSymbol="NIFTY" />;
 }
