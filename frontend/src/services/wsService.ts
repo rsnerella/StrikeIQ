@@ -35,7 +35,7 @@ export function connectMarketWS() {
     time: Date.now()
   })
 
-  const WS_URL = process.env.NEXT_PUBLIC_WS_URL;
+  const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "wss://strikeiq-production-e1cd.up.railway.app/ws/market";
 
   if (!WS_URL) {
     console.error("❌ WS URL missing");

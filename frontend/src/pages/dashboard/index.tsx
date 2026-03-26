@@ -25,5 +25,16 @@ export default function DashboardPage() {
     );
   }
 
-  return <Dashboard initialSymbol="NIFTY" />;
+  try {
+    return <Dashboard initialSymbol="NIFTY" />;
+  } catch (error) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="text-red-500 text-xl font-bold mb-4">Something went wrong</div>
+          <div className="text-gray-300">App crashed. Check console.</div>
+        </div>
+      </div>
+    );
+  }
 }
