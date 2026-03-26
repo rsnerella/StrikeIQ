@@ -24,15 +24,21 @@ const getWsUrl = () => {
     return envUrl;
   }
   
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const hostname = window.location.hostname;
+  let protocol = "ws:";
+  let hostname = "localhost";
+  
+  if (typeof window !== "undefined") {
+    protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    hostname = window.location.hostname;
+  }
   
   return `${protocol}//${hostname}:8000/ws/market`;
 };
 
-const WS_URL = getWsUrl();
-
 export function connectMarketWS() {
+  // Ensure client-side only
+  if (typeof window === "undefined") return;
+  
   if (socket &&
     (socket.readyState === WebSocket.OPEN ||
       socket.readyState === WebSocket.CONNECTING)) {
@@ -46,7 +52,8 @@ export function connectMarketWS() {
     time: Date.now()
   })
 
-  wsLog("WS CONNECTING", { url: WS_URL, reconnectAttempts })
+  const wsUrl = getWsUrl();
+  wsLog("WS CONNECTING", { url: wsUrl, reconnectAttempts })
 
   if (reconnectAttempts > MAX_RECONNECTS) {
     wsError("WS RECONNECT LIMIT REACHED", { reconnectAttempts, maxReconnects: MAX_RECONNECTS })
@@ -95,7 +102,7 @@ export function connectMarketWS() {
     stack: new Error().stack || "No stack trace available"
   })
 
-  socket = new WebSocket(WS_URL)
+  socket = new WebSocket(wsUrl)
 
     ; (window as any).__strikeiq_ws = socket
 
@@ -106,7 +113,9 @@ export function connectMarketWS() {
       time: new Date().toISOString()
     })
 
-    window.__WS_CONNECTED__ = true
+    if (typeof window !== "undefined") {
+      window.__WS_CONNECTED__ = true
+    }
     reconnectAttempts = 0  // P6: reset counter on successful connect
 
     if (typeof window !== "undefined") {
@@ -145,7 +154,7 @@ export function connectMarketWS() {
 
     console.log("📤 INITIAL SUBSCRIBE SENT", { symbol: stateSymbol, expiry: stateExpiry })
 
-    if (!visibilityListenerAdded) {
+    if (!visibilityListenerAdded && typeof window !== "undefined" && typeof document !== "undefined") {
 
       visibilityListenerAdded = true
 
@@ -205,15 +214,17 @@ export function connectMarketWS() {
       console.count("WS_MESSAGE")
       
       // PERFORMANCE: Calculate average rate per second
-      if (!window.__wsRateTracker) {
+      if (typeof window !== "undefined" && !window.__wsRateTracker) {
         window.__wsRateTracker = { count: 0, startTime: Date.now() }
       }
-      window.__wsRateTracker.count++
-      const elapsed = (Date.now() - window.__wsRateTracker.startTime) / 1000
-      if (elapsed >= 5) {
-        const rate = Math.round(window.__wsRateTracker.count / elapsed)
-        console.log(`WS MESSAGE RATE: ${rate}/sec (average over ${elapsed.toFixed(1)}s)`)
-        window.__wsRateTracker = { count: 0, startTime: Date.now() }
+      if (typeof window !== "undefined") {
+        window.__wsRateTracker.count++
+        const elapsed = (Date.now() - window.__wsRateTracker.startTime) / 1000
+        if (elapsed >= 5) {
+          const rate = Math.round(window.__wsRateTracker.count / elapsed)
+          console.log(`WS MESSAGE RATE: ${rate}/sec (average over ${elapsed.toFixed(1)}s)`)
+          window.__wsRateTracker = { count: 0, startTime: Date.now() }
+        }
       }
       
       // STEP 3: Add WS message debug
@@ -258,7 +269,9 @@ export function connectMarketWS() {
   socket.onclose = (event) => {
     console.log("WS CLOSED", { code: event.code, wasClean: event.wasClean })
 
-    window.__WS_CONNECTED__ = false
+    if (typeof window !== "undefined") {
+      window.__WS_CONNECTED__ = false
+    }
     isConnecting = false
 
     if (typeof window !== "undefined") {
@@ -279,10 +292,11 @@ export function connectMarketWS() {
     console.error("🔥 WS ERROR", err)
     console.log("WS TRACE → SOCKET ERROR", err)
 
+    const wsUrl = getWsUrl();
     wsError("WS ERROR", {
       error: err,
       readyState: socket?.readyState,
-      url: WS_URL
+      url: wsUrl
     })
 
     console.error("WebSocket error", err)
@@ -352,16 +366,26 @@ export function disconnectMarketWS() {
 }
 
 export function getWSConnectionStatus() {
+  if (typeof window === "undefined") {
+    return {
+      connected: false,
+      connecting: false,
+      reconnectAttempts: 0,
+      url: "client-side-only"
+    };
+  }
+  
+  const wsUrl = getWsUrl();
   return {
     connected: socket?.readyState === WebSocket.OPEN,
     connecting: isConnecting,
     reconnectAttempts,
-    url: WS_URL
-  }
+    url: wsUrl
+  };
 }
 
 export function resubscribeMarketWS(symbol: string, expiry: string | null) {
-  if (!symbol) return;
+  if (!symbol || typeof window === "undefined") return;
   
   const oldSymbol = (window as any).__last_ws_symbol;
   const oldExpiry = (window as any).__last_ws_expiry;
