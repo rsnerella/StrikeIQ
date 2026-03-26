@@ -24,6 +24,10 @@ function MyApp({ Component, pageProps }: AppProps) {
   useEffect(() => {
     document.documentElement.classList.add('dark')
     
+    // DEBUG: Log environment variables
+    console.log('🌐 API URL:', process.env.NEXT_PUBLIC_API_URL);
+    console.log('🌐 WS URL:', process.env.NEXT_PUBLIC_WS_URL);
+    
     // DEBUG: Log any router changes
     console.log('🌐 _app.tsx - Current pathname:', router.pathname)
   }, [router.pathname])

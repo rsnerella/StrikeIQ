@@ -52,8 +52,13 @@ export function connectMarketWS() {
     time: Date.now()
   })
 
-  const wsUrl = getWsUrl();
-  wsLog("WS CONNECTING", { url: wsUrl, reconnectAttempts })
+  const WS_URL = process.env.NEXT_PUBLIC_WS_URL;
+
+  if (!WS_URL) {
+    throw new Error("NEXT_PUBLIC_WS_URL missing");
+  }
+
+  wsLog("WS CONNECTING", { url: WS_URL, reconnectAttempts })
 
   if (reconnectAttempts > MAX_RECONNECTS) {
     wsError("WS RECONNECT LIMIT REACHED", { reconnectAttempts, maxReconnects: MAX_RECONNECTS })
@@ -102,7 +107,7 @@ export function connectMarketWS() {
     stack: new Error().stack || "No stack trace available"
   })
 
-  socket = new WebSocket(wsUrl)
+  socket = new WebSocket(WS_URL)
 
     ; (window as any).__strikeiq_ws = socket
 
@@ -292,7 +297,7 @@ export function connectMarketWS() {
     console.error("🔥 WS ERROR", err)
     console.log("WS TRACE → SOCKET ERROR", err)
 
-    const wsUrl = getWsUrl();
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL;
     wsError("WS ERROR", {
       error: err,
       readyState: socket?.readyState,
@@ -375,7 +380,7 @@ export function getWSConnectionStatus() {
     };
   }
   
-  const wsUrl = getWsUrl();
+  const wsUrl = process.env.NEXT_PUBLIC_WS_URL;
   return {
     connected: socket?.readyState === WebSocket.OPEN,
     connecting: isConnecting,
