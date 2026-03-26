@@ -220,7 +220,7 @@ export function SignalMatrixPanel() {
             <div className="mt-auto space-y-2 pt-4 border-t border-white/5">
                 <div className="text-[9px] font-bold font-mono text-slate-600 uppercase tracking-[0.2em] mb-3">Order Flow Anchors</div>
                 <div className="space-y-1.5">
-                    {anchorData.map((k, i) => (
+                    {(anchorData || []).map((k, i) => (
                         <div key={i} className="flex justify-between items-center px-2 py-1.5 rounded bg-white/5 border border-white/5">
                             <span className="text-[9px] font-mono text-slate-400">{k.label}</span>
                             <span className="text-[10px] font-black font-mono tabular-nums" style={{ color: k.value > 0 ? k.color : '#374151' }}>

@@ -304,7 +304,7 @@ export const StrikeIQPriceChart: React.FC<StrikeIQPriceChartProps> = ({ data }) 
                         
                         console.log("STRIKEIQ CHART FILTERED →", filteredCandles.length, "candles");
                         
-                        const formattedCandles = filteredCandles.map((c: any) => ({
+                        const formattedCandles = (filteredCandles || []).map((c: any) => ({
                             time: Math.floor(Number(c.time)),
                             open: c.open,
                             high: c.high,
@@ -476,11 +476,11 @@ export const StrikeIQPriceChart: React.FC<StrikeIQPriceChartProps> = ({ data }) 
         clearChartIntelligenceOverlays();
         
         const markers: any[] = [];
-        const candles = seriesRef.current.data();
-        if (candles.length === 0) return;
+        const candles = seriesRef.current.data() || [];
+        if (!candles || candles.length === 0) return;
         
-        const firstTime = Number(candles[0].time);
-        const lastTime = Number(candles[candles.length - 1].time);
+        const firstTime = Number(candles[0]?.time);
+        const lastTime = Number(candles[candles.length - 1]?.time);
         
         overlays.forEach((overlay, index) => {
             const overlayId = `overlay-${index}-${overlay.type}`;

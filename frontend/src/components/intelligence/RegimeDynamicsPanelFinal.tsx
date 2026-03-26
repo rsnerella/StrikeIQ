@@ -115,7 +115,7 @@ const RegimeDynamicsPanel: React.FC<RegimeDynamicsPanelProps> = ({ dynamics }) =
             
             {/* Mini Sparkline */}
             <div className="flex items-end space-x-0.5 h-8">
-              {sparklineData.map((value, index) => (
+              {(sparklineData || []).map((value, index) => (
                 <div
                   key={index}
                   className="w-1 bg-blue-400/30"

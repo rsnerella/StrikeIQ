@@ -202,10 +202,10 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
     }
   }, [actualLiveData, spotPrice]);
 
-  const maxCallOI = Math.max(...oiData.map(r => r.oi), 1);
-  const maxPutOI = Math.max(...oiData.map(r => r.put_oi), 1);
+  const maxCallOI = Math.max(...(oiData || []).map(r => r.oi), 1);
+  const maxPutOI = Math.max(...(oiData || []).map(r => r.put_oi), 1);
   
-  const strikeList = useMemo(() => oiData.map(d => d.strike), [oiData]);
+  const strikeList = useMemo(() => (oiData || []).map(d => d.strike), [oiData]);
 
   return (
     <div ref={componentRef} className="w-full relative">
@@ -284,7 +284,7 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
                 />
             )}
 
-            {oiData.map((row, index) => {
+            {(oiData || []).map((row, index) => {
               const checkSpot = actualLiveData?.atm_strike || spotPrice || 0;
               const isATM = Math.abs(row.strike - checkSpot) <= 1;
               const callIntensity = row.oi / maxCallOI;

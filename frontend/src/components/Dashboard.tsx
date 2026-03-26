@@ -192,23 +192,39 @@ function DashboardComponent({ initialSymbol = 'NIFTY' }: DashboardProps) {
   // Optional safety: ensure client-side only
   if (typeof window === 'undefined') return null;
   
-  const setCurrentSymbol = useMarketContextStore(state => state.setSymbol);
-  const currentSymbol = useMarketContextStore(state => state.symbol);
+  try {
+    const setCurrentSymbol = useMarketContextStore(state => state.setSymbol);
+    const currentSymbol = useMarketContextStore(state => state.symbol);
 
-  useEffect(() => {
-    if (currentSymbol === 'NIFTY' && initialSymbol !== 'NIFTY') {
-      setCurrentSymbol(initialSymbol);
+    useEffect(() => {
+      if (currentSymbol === 'NIFTY' && initialSymbol !== 'NIFTY') {
+        setCurrentSymbol(initialSymbol);
+      }
+    }, [initialSymbol, setCurrentSymbol, currentSymbol]);
+
+    const {
+      selectedExpiry,
+    } = useExpirySelector();
+
+    // Unified Store Hook - Law 7
+    const liveMarketData = useLiveMarketData(currentSymbol, selectedExpiry);
+
+    // Full component guard for analytics data
+    if (!liveMarketData) {
+      return (
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4"></div>
+            <div className="text-gray-400">Loading...</div>
+          </div>
+        </div>
+      );
     }
-  }, [initialSymbol, setCurrentSymbol, currentSymbol]);
 
-  const {
-    selectedExpiry,
-  } = useExpirySelector();
+    console.log("DATA:", liveMarketData);
+    console.log("ANALYTICS:", liveMarketData?.data?.analytics);
 
-  // Unified Store Hook - Law 7
-  const liveMarketData = useLiveMarketData(currentSymbol, selectedExpiry);
-
-  return (
+    return (
     <div className="min-h-screen bg-[#020408] text-slate-200 font-sans selection:bg-sky-500/30 overflow-x-hidden mesh-background">
       <style>{DASHBOARD_CSS}</style>
 
@@ -339,7 +355,18 @@ function DashboardComponent({ initialSymbol = 'NIFTY' }: DashboardProps) {
         </div>
       </div>
     </div>
-  );
+    );
+  } catch (err) {
+    console.error("Dashboard crash:", err);
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="text-red-500 text-xl font-bold mb-4">Dashboard crashed</div>
+          <div className="text-gray-300">Check console for details</div>
+        </div>
+      </div>
+    );
+  }
 }
 
 const Dashboard = memo(DashboardComponent);

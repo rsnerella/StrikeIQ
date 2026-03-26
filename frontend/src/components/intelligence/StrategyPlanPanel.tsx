@@ -81,7 +81,7 @@ const StrategyPlanPanel: React.FC = () => {
                         <SectionLabel>{headerTitle}</SectionLabel>
                         <div className="flex items-center gap-3">
                             <span className="text-[12px] font-black font-mono tracking-[0.1em] uppercase" style={{ color: accentColor }}>
-                                {statusLabel}: {analytics.strategy || 'ANALYZING'}
+                                {statusLabel}: {analytics?.strategy || 'ANALYZING'}
                             </span>
                         </div>
                     </div>
@@ -90,14 +90,14 @@ const StrategyPlanPanel: React.FC = () => {
                         <div className="flex flex-col items-end">
                             <span className="text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest opacity-60">Bias</span>
                             <span className={`text-lg font-black font-mono tabular-nums ${isLowConviction ? 'text-slate-400' : 'text-white'}`}>
-                                {analytics.bias}
+                                {analytics?.bias || 'N/A'}
                             </span>
                         </div>
                         <div className="h-8 w-[1px] bg-white/10" />
                         <div className="flex flex-col items-end">
                             <span className="text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest opacity-60">Confidence</span>
                             <span className={`text-lg font-black font-mono tabular-nums ${isLowConviction ? 'text-slate-400' : 'text-white'}`}>
-                                {(analytics.confidence * 100).toFixed(1)}%
+                                {((analytics?.confidence || 0) * 100).toFixed(1)}%
                             </span>
                         </div>
                     </div>
@@ -122,7 +122,7 @@ const StrategyPlanPanel: React.FC = () => {
                 <div className="p-4 rounded-xl border border-slate-500/10 bg-slate-500/[0.03] space-y-2">
                     <span className="text-[9px] font-bold font-mono text-slate-500 uppercase tracking-widest">Analysis</span>
                     <div className="text-[8px] font-mono text-slate-300 leading-relaxed">
-                        {analytics.reasoning?.map((reason, index) => (
+                        {(analytics?.reasoning || []).map((reason, index) => (
                             <div key={index} className="flex items-start gap-2 mb-1">
                                 <span className="text-slate-500 mt-0.5">•</span>
                                 <span>{reason}</span>
@@ -135,7 +135,7 @@ const StrategyPlanPanel: React.FC = () => {
                 <div className="p-4 rounded-xl border border-cyan-500/10 bg-cyan-500/[0.03]">
                     <span className="text-[9px] font-bold font-mono text-cyan-500/70 uppercase mb-2">Market Regime</span>
                     <div className="text-[14px] font-bold font-mono text-cyan-400 uppercase">
-                        {analytics.regime || 'UNKNOWN'}
+                        {analytics?.regime || 'UNKNOWN'}
                     </div>
                 </div>
 
