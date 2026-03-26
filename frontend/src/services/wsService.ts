@@ -35,10 +35,11 @@ export function connectMarketWS() {
     time: Date.now()
   })
 
-  const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "wss://strikeiq-production-e1cd.up.railway.app/ws/market";
+  const WS_URL = process.env.NEXT_PUBLIC_WS_URL;
 
-  if (!process.env.NEXT_PUBLIC_WS_URL) {
-    console.error("❌ WS URL missing, using fallback");
+  if (!WS_URL) {
+    console.error("❌ WS URL missing");
+    return;
   }
 
   wsLog("WS CONNECTING", { url: WS_URL, reconnectAttempts })
