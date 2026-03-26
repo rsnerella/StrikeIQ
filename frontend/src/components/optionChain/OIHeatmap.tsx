@@ -124,7 +124,7 @@ const OIHeatmap: React.FC<OIHeatmapProps> = ({ symbol }) => {
         centerATM('auto');
         hasScrolledRef.current = true;
     }
-  }, [oiData, centerATM]);
+  }, [oiData]);
 
   // Reset scroll lock on symbol change
   useEffect(() => {

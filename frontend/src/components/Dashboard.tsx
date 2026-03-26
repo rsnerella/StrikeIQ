@@ -200,7 +200,7 @@ function DashboardComponent({ initialSymbol = 'NIFTY' }: DashboardProps) {
       if (currentSymbol === 'NIFTY' && initialSymbol !== 'NIFTY') {
         setCurrentSymbol(initialSymbol);
       }
-    }, [initialSymbol, setCurrentSymbol, currentSymbol]);
+    }, [initialSymbol, currentSymbol]);
 
     const {
       selectedExpiry,

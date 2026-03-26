@@ -34,8 +34,7 @@ const MarketStatusBanner: React.FC = () => {
     };
 
     fetchMarketStatus();
-    const interval = setInterval(fetchMarketStatus, 10000); // Update every 10 seconds
-    return () => clearInterval(interval);
+    // Removed polling interval to prevent infinite loop
   }, []);
 
   if (loading) {
