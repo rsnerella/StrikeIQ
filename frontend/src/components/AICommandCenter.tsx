@@ -1,6 +1,7 @@
 "use client";
 import React from 'react';
-import { Activity } from 'lucide-react';
+import { Activity, Brain } from 'lucide-react';
+import { useWSStore } from '@/core/ws/wsStore';
 
 export default function AICommandCenter() {
     // Law 7: Granular Store Subscriptions
@@ -45,4 +46,3 @@ export default function AICommandCenter() {
     );
 }
 
-import { Brain } from 'lucide-react';
