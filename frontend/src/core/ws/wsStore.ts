@@ -695,9 +695,9 @@ export const useWSStore = create<WSStore>((set, get) =>({
         ai_signals: renderableData.ai_signals,
         timestamp: payload.timestamp
       },
-      // Phase 8: Extract spot and chain from bundle for full sync
-      spot: renderableData.snapshot?.spot || get().spot,
-      optionChainSnapshot: renderableData.option_chain || get().optionChainSnapshot,
+      // Phase 8: Extract spot and chain from bundle for full sync - FIX CIRCULAR DEPENDENCY
+      spot: renderableData.snapshot?.spot ?? 0,
+      optionChainSnapshot: renderableData.option_chain,
       lastUpdate: Date.now(),
       connected: true,
       error: null
