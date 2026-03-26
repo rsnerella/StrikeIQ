@@ -108,7 +108,7 @@ api.interceptors.response.use(
 
 export async function getValidExpiries(symbol: string): Promise<string[]> {
   try {
-    const response = await api.get(`/api/v1/market/expiries?symbol=${symbol}`)
+    const response = await api.get(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/market/expiries?symbol=${symbol}`)
     return response.data?.data || []
   } catch (error) {
     console.error("Failed to fetch expiries:", error)

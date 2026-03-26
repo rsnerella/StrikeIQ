@@ -15,7 +15,7 @@ const MarketStatusBanner: React.FC = () => {
   useEffect(() => {
     const fetchMarketStatus = async () => {
       try {
-        const data = await api.get('/v1/market/status').then(r => r.data);
+        const data = await api.get(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/market/status`).then(r => r.data);
         setBackendConnected(true);
         setMarketStatus(prev => {
           const newStatus = data.market_status || data.status || 'UNKNOWN';

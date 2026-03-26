@@ -13,7 +13,7 @@ export const fetchAvailableExpiries = async (symbol: string): Promise<string[]> 
   }
 
   try {
-    const res = await api.get(`/v1/market/expiries?symbol=${symbol}`)
+    const res = await api.get(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/market/expiries?symbol=${symbol}`)
     return res.data.expiries ?? []
   } catch {
     return []

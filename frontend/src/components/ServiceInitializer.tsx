@@ -27,7 +27,7 @@ export default function ServiceInitializer({ children }: Props) {
     
     initializedRef.current = true
     uiLog("SERVICE INITIALIZATION COMPLETE", { pathname })
-  }, [pathname])
+  }, []) // Remove pathname dependency to prevent reconnects on route changes
 
   return <>{children}</>
 }
