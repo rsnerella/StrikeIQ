@@ -531,10 +531,10 @@ export const useWSStore = create<WSStore>((set, get) =>({
       case 'intelligence_update':
         if (message.intelligence) {
           set({
-            analytics: { ...get().analytics, intelligence: message.intelligence },
+            analytics: message.intelligence,
             lastUpdate: Date.now(),
             error: null
-          });
+          })
         }
         break;
 
