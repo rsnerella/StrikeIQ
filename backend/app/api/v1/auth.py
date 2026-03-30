@@ -3,6 +3,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 import logging
 import asyncio
+import os
 
 from app.services.upstox_auth_service import get_upstox_auth_service
 from app.services.token_manager import token_manager
@@ -121,9 +122,10 @@ async def callback(code: str = Query(None), request: Request = None):
 
         clear_trace()
 
-        # STRICT redirect (user never sees callback URL)
+        # Redirect to frontend (env-aware, not hardcoded to localhost)
+        frontend_url = os.getenv("FRONTEND_URL", "https://strikeiq-production-e1cd.up.railway.app")
         return RedirectResponse(
-            url="http://localhost:3000?upstox=success",
+            url=f"{frontend_url}?upstox=success",
             status_code=302
         )
 
@@ -133,8 +135,9 @@ async def callback(code: str = Query(None), request: Request = None):
 
         clear_trace()
 
+        frontend_url = os.getenv("FRONTEND_URL", "https://strikeiq-production-e1cd.up.railway.app")
         return RedirectResponse(
-            url="http://localhost:3000?upstox=failed",
+            url=f"{frontend_url}?upstox=failed",
             status_code=302
         )
 
