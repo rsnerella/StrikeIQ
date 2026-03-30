@@ -1,15 +1,8 @@
 "use client";
 import React from 'react';
 import { AlertTriangle } from 'lucide-react';
-import { CARD, CARD_HOVER_BORDER } from './DashboardTypes';
+import { CARD_HOVER_BORDER } from './DashboardTypes';
 import { SectionLabel } from './StatCards';
-import type { LiveMarketData } from '../../hooks/useLiveMarketData';
-
-interface BiasAndMoveProps {
-    data: LiveMarketData | null;
-    isSnapshotMode: boolean;
-}
-
 import { useWSStore } from '../../core/ws/wsStore';
 
 // Skeleton Pulse for professional loading states
@@ -17,12 +10,12 @@ const SkeletonPulse = ({ className }: { className: string }) => (
     <div className={`animate-pulse bg-white/5 rounded-md ${className}`} />
 );
 
-export function BiasPanel() {
+export const BiasPanel = React.memo(function BiasPanel() {
     // Law 7: Granular Store Subscriptions
     const aiReady = useWSStore(s => s.aiReady);
     const analysis = useWSStore(s => s.chartAnalysis);
-    const lastUpdate = useWSStore(s => s.lastUpdate);
-    const hasData = lastUpdate > 0;
+    // Remove lastUpdate to prevent 11Hz re-renders where possible
+    const hasData = useWSStore(s => s.spot > 0);
     
     // v5.0 Bias state
     const biasLabel = analysis?.bias || 'NEUTRAL';
@@ -95,26 +88,30 @@ export function BiasPanel() {
             </div>
         </div>
     );
-}
+});
 
-export function ExpectedMovePanel() {
+export const ExpectedMovePanel = React.memo(function ExpectedMovePanel() {
     const aiReady = useWSStore(s => s.aiReady);
-    const lastUpdate = useWSStore(s => s.lastUpdate);
-    const hasData = lastUpdate > 0;
     const spot = useWSStore(s => s.spot);
     const analysis = useWSStore(s => s.chartAnalysis);
+    const hasData = spot > 0;
     
     const vol = analysis?.volatility_state;
     const expectedMove = vol?.expected_move || 0;
     const breachProb = vol?.breach_probability || 0;
 
-    if (!hasData || spot === 0) {
+    if (!hasData || spot === 0 || expectedMove <= 0) {
         return (
             <div className="trading-panel h-full flex flex-col p-6 opacity-40">
                  <SectionLabel>Expected Move (1σ)</SectionLabel>
                  <div className="mt-8 space-y-6">
                     <SkeletonPulse className="w-full h-12" />
                     <SkeletonPulse className="w-full h-16" />
+                    {expectedMove === 0 && hasData && (
+                        <div className="text-[10px] font-mono text-slate-600 uppercase text-center">
+                            Calibrating Volatility Engine...
+                        </div>
+                    )}
                  </div>
             </div>
         );
@@ -178,7 +175,4 @@ export function ExpectedMovePanel() {
             </div>
         </div>
     );
-}
-
-// Separate components exported individually for maximum layout flexibility
-
+});

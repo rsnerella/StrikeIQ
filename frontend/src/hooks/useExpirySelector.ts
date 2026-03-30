@@ -66,7 +66,10 @@ export const useExpirySelector = () => {
 
           let newExpiry = list[0];
           
-          if (stored && list.includes(stored)) {
+          // Only use stored if it's in the list AND it's not today or future
+          const isStoredValid = stored && list.includes(stored) && new Date(stored) >= today;
+
+          if (isStoredValid && stored) {
             newExpiry = stored;
           } else {
             const nearest = list

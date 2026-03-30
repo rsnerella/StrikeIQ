@@ -148,7 +148,7 @@ export const useWSStore = create<WSStore>((set, get) =>({
   lastUpdate: 0,
   _lastChainUpdate: 0,
   _lastHeatmapUpdate: 0,
-  _THROTTLE_MS: 50,
+  _THROTTLE_MS: 250,
 
   // NEW: Separated AI analysis and trade setup fields
   aiAnalysis: null,

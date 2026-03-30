@@ -1,14 +1,8 @@
 "use client";
 import React from 'react';
-import { AlertTriangle, TrendingDown, TrendingUp, Users } from 'lucide-react';
-import { CARD, CARD_HOVER_BORDER } from './DashboardTypes';
+import { AlertTriangle, Users } from 'lucide-react';
+import { CARD_HOVER_BORDER } from './DashboardTypes';
 import { SectionLabel } from './StatCards';
-import type { LiveMarketData } from '../../hooks/useLiveMarketData';
-
-interface TrapDetectionPanelProps {
-    data: LiveMarketData | null;
-}
-
 import { useWSStore } from '../../core/ws/wsStore';
 
 // Skeleton Pulse for professional loading states
@@ -16,32 +10,28 @@ const SkeletonPulse = ({ className }: { className: string }) => (
     <div className={`animate-pulse bg-white/5 rounded-md ${className}`} />
 );
 
-export function TrapDetectionPanel() {
-    // Law 7: Granular Store Subscriptions with null-safe pattern
-    const lastUpdate   = useWSStore(s => s.lastUpdate)
-    const analysis     = useWSStore(s => s.chartAnalysis)
-    const spotPrice    = useWSStore(s => s.spot ?? s.spotPrice ?? 0)
-    const hasData      = lastUpdate > 0 && !!analysis
+export const TrapDetectionPanel = React.memo(function TrapDetectionPanel() {
+    // Law 7: Granular Store Subscriptions
+    const spotPrice    = useWSStore(s => s.spot ?? s.spotPrice ?? 0);
+    const analysis     = useWSStore(s => s.chartAnalysis);
+    const hasData      = spotPrice > 0 && !!analysis;
 
     // Extract trap-related data from chartAnalysis
-    const keyLevels    = analysis?.key_levels
-    const technicals   = analysis?.technical_state
-    const callWall     = keyLevels?.call_wall  ?? 0
-    const putWall      = keyLevels?.put_wall   ?? 0
-    const rsi          = technicals?.rsi        ?? 0
-    const momentum     = technicals?.momentum_15m ?? 0
+    const keyLevels    = analysis?.key_levels;
+    const callWall     = keyLevels?.call_wall  ?? 0;
+    const putWall      = keyLevels?.put_wall   ?? 0;
 
     // Trap probability: how close spot is to a wall
     const callTrapPct = callWall > 0 && spotPrice > 0
-      ? Math.max(0, 1 - Math.abs(spotPrice - callWall) / spotPrice) * 100
-      : 0
+      ? Math.max(0, 1 - Math.abs(spotPrice - callWall) / (spotPrice * 0.02)) * 100
+      : 0;
 
     const putTrapPct = putWall > 0 && spotPrice > 0
-      ? Math.max(0, 1 - Math.abs(spotPrice - putWall) / spotPrice) * 100
-      : 0
+      ? Math.max(0, 1 - Math.abs(spotPrice - putWall) / (spotPrice * 0.02)) * 100
+      : 0;
 
-    const overallTrapPct = Math.max(callTrapPct, putTrapPct)
-    const trapDirection = callTrapPct > putTrapPct ? 'CALL_WALL' : putTrapPct > 0 ? 'PUT_WALL' : 'NEUTRAL'
+    const overallTrapPct = Math.min(100, Math.max(callTrapPct, putTrapPct));
+    const trapDirection = callTrapPct > putTrapPct ? 'CALL_WALL' : putTrapPct > 0 ? 'PUT_WALL' : 'NEUTRAL';
     const riskLevel = overallTrapPct > 75 ? 'CRITICAL' : overallTrapPct > 50 ? 'HIGH' : overallTrapPct > 25 ? 'MODERATE' : 'STABLE';
 
     if (!hasData) {
@@ -62,13 +52,7 @@ export function TrapDetectionPanel() {
         );
     }
 
-    const getTrapColor = (dir: string) => {
-        if (dir === 'CALL_WALL') return '#f87171'; // Call Wall trap
-        if (dir === 'PUT_WALL') return '#4ade80'; // Put Wall trap
-        return '#94a3b8';
-    };
-
-    const trapColor = getTrapColor(trapDirection);
+    const trapColor = trapDirection === 'CALL_WALL' ? '#f87171' : trapDirection === 'PUT_WALL' ? '#4ade80' : '#94a3b8';
 
     return (
         <div
@@ -142,6 +126,6 @@ export function TrapDetectionPanel() {
             </div>
         </div>
     );
-}
+});
 
-export default React.memo(TrapDetectionPanel);
+export default TrapDetectionPanel;

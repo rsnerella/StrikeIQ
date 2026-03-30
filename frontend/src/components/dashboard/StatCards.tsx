@@ -73,7 +73,7 @@ const SkeletonPulse = ({ className }: { className: string }) => (
 );
 
 // ── Row 2: four stat cards ───────────────────────────────────────────────────
-export function StatCardsRow() {
+export const StatCardsRow = React.memo(function StatCardsRow() {
     // Law 7: Granular Subscriptions - Use direct selectors
     const regime       = useWSStore(s => s.regime        ?? 'RANGING')
     const bias         = useWSStore(s => s.bias          ?? 'NEUTRAL')
@@ -82,7 +82,7 @@ export function StatCardsRow() {
     const vol          = useWSStore(s => s.volState)
     const gamma        = useWSStore(s => s.gammaAnalysis)
     const lastUpdate   = useWSStore(s => s.lastUpdate)
-    const hasData      = lastUpdate > 0
+    const hasData      = useWSStore(s => s.spot > 0)
 
     // Loading State
     if (!hasData) {
@@ -129,5 +129,5 @@ export function StatCardsRow() {
             />
         </div>
     );
-}
+});
 
